@@ -1,0 +1,310 @@
+import { pool } from "../config/db.js";
+
+export const OrderRepository = {
+  async createOrder(
+    {
+      customerId = null,
+      createdBy = null,
+      comment = null,
+      totalAmount = 0,
+    },
+    db = pool
+  ) {
+    const sql = `
+      INSERT INTO orders (
+        customer_id,
+        status,
+        total_amount,
+        comment,
+        created_by
+      )
+      VALUES ($1, 'NEW', $2, $3, $4)
+      RETURNING *;
+    `;
+
+    const result = await db.query(sql, [
+      customerId,
+      totalAmount,
+      comment,
+      createdBy,
+    ]);
+
+    return result.rows[0];
+  },
+
+  async addOrderItem(
+    {
+      orderId,
+      productId,
+      productOfferId,
+      quantity,
+      priceAtPurchase,
+    },
+    db = pool
+  ) {
+    const sql = `
+      INSERT INTO order_items (
+        order_id,
+        product_id,
+        product_offer_id,
+        quantity,
+        price_at_purchase
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *;
+    `;
+
+    const result = await db.query(sql, [
+      orderId,
+      productId,
+      productOfferId,
+      quantity,
+      priceAtPurchase,
+    ]);
+
+    return result.rows[0];
+  },
+
+  async addStatusHistory(
+    {
+      orderId,
+      oldStatus = null,
+      newStatus,
+      changedBy = null,
+      comment = null,
+    },
+    db = pool
+  ) {
+    const sql = `
+      INSERT INTO order_status_history (
+        order_id,
+        old_status,
+        new_status,
+        changed_by,
+        comment
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *;
+    `;
+
+    const result = await db.query(sql, [
+      orderId,
+      oldStatus,
+      newStatus,
+      changedBy,
+      comment,
+    ]);
+
+    return result.rows[0];
+  },
+  async findAllForManager(
+  {
+    status = null,
+    limit = 50,
+    offset = 0,
+  } = {},
+  db = pool
+) {
+  const sql = `
+    SELECT
+      o.id,
+      o.customer_id,
+      o.status,
+      o.total_amount,
+      o.comment,
+      o.created_by,
+      o.created_at,
+      o.updated_at,
+
+      c.company_name,
+      c.customer_type,
+
+      COUNT(oi.id)::integer AS items_count,
+      COALESCE(SUM(oi.quantity), 0) AS total_quantity
+
+    FROM orders o
+
+    LEFT JOIN customers c
+      ON c.id = o.customer_id
+
+    LEFT JOIN order_items oi
+      ON oi.order_id = o.id
+
+    WHERE ($1::varchar IS NULL OR o.status = $1)
+
+    GROUP BY
+      o.id,
+      c.company_name,
+      c.customer_type
+
+    ORDER BY
+      CASE WHEN o.status = 'NEW' THEN 0 ELSE 1 END,
+      o.created_at DESC
+
+    LIMIT $2
+    OFFSET $3;
+  `;
+
+  const result = await db.query(sql, [
+    status,
+    limit,
+    offset,
+  ]);
+
+  return result.rows;
+},
+
+async findByIdForManager(orderId, db = pool) {
+  const sql = `
+    SELECT
+      o.id,
+      o.customer_id,
+      o.status,
+      o.total_amount,
+      o.comment,
+      o.created_by,
+      o.created_at,
+      o.updated_at,
+
+      c.company_name,
+      c.customer_type,
+      c.credit_limit,
+      c.payment_delay_days
+
+    FROM orders o
+
+    LEFT JOIN customers c
+      ON c.id = o.customer_id
+
+    WHERE o.id = $1
+
+    LIMIT 1;
+  `;
+
+  const result = await db.query(sql, [orderId]);
+
+  return result.rows[0] ?? null;
+},
+
+async findItemsByOrderId(orderId, db = pool) {
+  const sql = `
+    SELECT
+      oi.id,
+      oi.order_id,
+      oi.product_id,
+      oi.product_offer_id,
+      oi.original_product_offer_id,
+      oi.quantity,
+      oi.price_at_purchase,
+      oi.purchase_price_at_confirmation,
+      oi.created_at,
+
+      p.article,
+      p.name,
+
+      po.quantity AS offer_quantity,
+      po.purchase_price,
+      po.retail_price AS current_retail_price,
+      po.delivery_days,
+      po.source_type,
+      po.is_available,
+
+      w.id AS warehouse_id,
+      w.name AS warehouse_name,
+      w.city AS warehouse_city,
+
+      s.id AS supplier_id,
+      s.name AS supplier_name,
+
+      sr.id AS reservation_id,
+      sr.status AS reservation_status,
+      sr.quantity AS reserved_quantity,
+      sr.reserved_until
+
+    FROM order_items oi
+
+    JOIN products p
+      ON p.id = oi.product_id
+
+    LEFT JOIN product_offers po
+      ON po.id = oi.product_offer_id
+
+    LEFT JOIN warehouses w
+      ON w.id = po.warehouse_id
+
+    LEFT JOIN suppliers s
+      ON s.id = po.supplier_id
+
+    LEFT JOIN stock_reservations sr
+      ON sr.order_id = oi.order_id
+     AND sr.product_offer_id = oi.product_offer_id
+     AND sr.status IN ('ACTIVE', 'ORDER_PENDING')
+
+    WHERE oi.order_id = $1
+
+    ORDER BY oi.id;
+  `;
+
+  const result = await db.query(sql, [orderId]);
+
+  return result.rows;
+},
+
+async findStatusHistory(orderId, db = pool) {
+  const sql = `
+    SELECT
+      osh.id,
+      osh.old_status,
+      osh.new_status,
+      osh.changed_by,
+      osh.comment,
+      osh.created_at,
+
+      u.email AS changed_by_email
+
+    FROM order_status_history osh
+
+    LEFT JOIN users u
+      ON u.id = osh.changed_by
+
+    WHERE osh.order_id = $1
+
+    ORDER BY osh.created_at;
+  `;
+
+  const result = await db.query(sql, [orderId]);
+
+  return result.rows;
+},
+
+async findItemHistory(orderId, db = pool) {
+  const sql = `
+    SELECT
+      oih.id,
+      oih.order_item_id,
+      oih.action,
+      oih.old_product_offer_id,
+      oih.new_product_offer_id,
+      oih.old_price,
+      oih.new_price,
+      oih.old_quantity,
+      oih.new_quantity,
+      oih.changed_by,
+      oih.reason,
+      oih.created_at
+
+    FROM order_item_history oih
+
+    JOIN order_items oi
+      ON oi.id = oih.order_item_id
+
+    WHERE oi.order_id = $1
+
+    ORDER BY oih.created_at;
+  `;
+
+  const result = await db.query(sql, [orderId]);
+
+  return result.rows;
+},
+};
