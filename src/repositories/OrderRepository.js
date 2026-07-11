@@ -471,4 +471,117 @@ async removeItem(
 
   return result.rows[0] ?? null;
 },
+async restoreItem(
+  orderItemId,
+  db = pool
+) {
+  const sql = `
+    UPDATE order_items
+    SET status = 'ACTIVE'
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+async addManagerOrderItem(
+  {
+    orderId,
+    productId,
+    productOfferId,
+    quantity,
+    priceAtPurchase,
+  },
+  db = pool
+) {
+  const sql = `
+    INSERT INTO order_items (
+      order_id,
+      product_id,
+      product_offer_id,
+      quantity,
+      price_at_purchase,
+      status
+    )
+    VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+    productId,
+    productOfferId,
+    quantity,
+    priceAtPurchase,
+  ]);
+
+  return result.rows[0];
+},
+async findActiveItemByOffer(
+  orderId,
+  productOfferId,
+  db = pool
+) {
+  const sql = `
+    SELECT *
+    FROM order_items
+    WHERE order_id = $1
+      AND product_offer_id = $2
+      AND status = 'ACTIVE'
+    LIMIT 1;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+    productOfferId,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+async updateStatus(
+  orderId,
+  status,
+  db = pool
+) {
+  const sql = `
+    UPDATE orders
+    SET
+      status = $2,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+    status,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+async confirmPurchasePrices(
+  orderId,
+  db = pool
+) {
+  const sql = `
+    UPDATE order_items oi
+    SET purchase_price_at_confirmation =
+      po.purchase_price
+    FROM product_offers po
+    WHERE oi.order_id = $1
+      AND oi.status = 'ACTIVE'
+      AND po.id = oi.product_offer_id
+    RETURNING oi.*;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+  ]);
+
+  return result.rows;
+},
 };

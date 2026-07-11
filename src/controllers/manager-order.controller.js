@@ -1,6 +1,8 @@
 import { GetManagerOrders } from "../use-cases/manager/GetManagerOrders.js";
 import { GetManagerOrder } from "../use-cases/manager/GetManagerOrder.js";
 import { OrderEditingService } from "../services/OrderEditingService.js";
+import { OrderConfirmationService } from "../services/OrderConfirmationService.js";
+import { OrderCancellationService } from "../services/OrderCancellationService.js";
 
 export async function getManagerOrders(req, res) {
   try {
@@ -143,6 +145,142 @@ export async function removeManagerOrderItem(req, res) {
       "Ошибка удаления позиции:",
       error
     );
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+export async function restoreManagerOrderItem(req, res) {
+  try {
+    const {
+      changedBy = null,
+      reason = null,
+    } = req.body;
+
+    const result =
+      await OrderEditingService.restoreItem({
+        orderId: req.params.orderId,
+        orderItemId: req.params.itemId,
+        changedBy,
+        reason,
+      });
+
+    return res.json({
+      success: true,
+      message: "Позиция восстановлена",
+      order: result.order,
+      item: result.item,
+      history: result.history,
+    });
+
+  } catch (error) {
+    console.error(
+      "Ошибка восстановления позиции:",
+      error
+    );
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+export async function addManagerOrderItem(req, res) {
+  try {
+    const {
+      productId,
+      productOfferId,
+      quantity,
+      priceAtPurchase,
+      changedBy = null,
+      reason = null,
+    } = req.body;
+
+    const result =
+      await OrderEditingService.addItem({
+        orderId: req.params.orderId,
+        productId,
+        productOfferId,
+        quantity,
+        priceAtPurchase,
+        changedBy,
+        reason,
+      });
+
+    return res.status(201).json({
+      success: true,
+      message: "Позиция добавлена в заказ",
+      order: result.order,
+      item: result.item,
+      history: result.history,
+    });
+  } catch (error) {
+    console.error("Ошибка добавления позиции:", error);
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+export async function confirmManagerOrder(req, res) {
+  try {
+    const {
+      changedBy = null,
+      comment = null,
+    } = req.body;
+
+    const result =
+      await OrderConfirmationService.confirmOrder({
+        orderId: req.params.orderId,
+        changedBy,
+        comment,
+      });
+
+    return res.json({
+      success: true,
+      message: "Заказ подтверждён менеджером",
+      order: result.order,
+      items: result.items,
+      reservations: result.reservations,
+      history: result.history,
+    });
+  } catch (error) {
+    console.error("Ошибка подтверждения заказа:", error);
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+export async function cancelManagerOrder(req, res) {
+  try {
+    const {
+      changedBy = null,
+      comment = null,
+    } = req.body;
+
+    const result =
+      await OrderCancellationService.cancelOrder({
+        orderId: req.params.orderId,
+        changedBy,
+        comment,
+      });
+
+    return res.json({
+      success: true,
+      message: "Заказ отменён менеджером",
+      order: result.order,
+      reservations: result.reservations,
+      history: result.history,
+    });
+  } catch (error) {
+    console.error("Ошибка отмены заказа:", error);
 
     return res.status(400).json({
       success: false,

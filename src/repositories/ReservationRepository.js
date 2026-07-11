@@ -10,8 +10,7 @@ export const ReservationRepository = {
       SELECT COALESCE(SUM(quantity), 0) AS reserved_quantity
       FROM stock_reservations
       WHERE product_offer_id = $1
-        AND status = 'ACTIVE'
-        AND (
+AND status IN ('ACTIVE', 'ORDER_PENDING')        AND (
           reserved_until IS NULL
           OR reserved_until > CURRENT_TIMESTAMP
         )
@@ -198,6 +197,148 @@ const sql = `
 
   const result = await db.query(sql, [
     orderItemId,
+  ]);
+
+  return result.rows;
+},
+async restoreByOrderItem(
+  orderItemId,
+  db = pool
+) {
+  const sql = `
+    UPDATE stock_reservations
+    SET status = 'ORDER_PENDING'
+    WHERE order_id = (
+      SELECT order_id
+      FROM order_items
+      WHERE id = $1
+    )
+    AND product_offer_id = (
+      SELECT product_offer_id
+      FROM order_items
+      WHERE id = $1
+    )
+    AND status = 'CANCELLED'
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+async createOrderReservation(
+  {
+    orderId,
+    productId,
+    productOfferId,
+    quantity,
+  },
+  db = pool
+) {
+
+  // Ищем существующий резерв
+  const findSql = `
+    SELECT *
+    FROM stock_reservations
+    WHERE order_id = $1
+      AND product_offer_id = $2
+      AND status = 'ORDER_PENDING'
+    FOR UPDATE;
+  `;
+
+  const existingResult = await db.query(findSql, [
+    orderId,
+    productOfferId,
+  ]);
+
+
+  if (existingResult.rows.length > 0) {
+
+    const existing = existingResult.rows[0];
+
+    const updateSql = `
+      UPDATE stock_reservations
+      SET quantity = quantity + $2
+      WHERE id = $1
+      RETURNING *;
+    `;
+
+    const updateResult = await db.query(updateSql, [
+      existing.id,
+      quantity,
+    ]);
+
+    return updateResult.rows[0];
+
+  }
+
+
+  // Если резерва нет — создаём новый
+  const insertSql = `
+    INSERT INTO stock_reservations (
+      order_id,
+      product_id,
+      product_offer_id,
+      quantity,
+      status,
+      reserved_until
+    )
+    VALUES (
+      $1,
+      $2,
+      $3,
+      $4,
+      'ORDER_PENDING',
+      NULL
+    )
+    RETURNING *;
+  `;
+
+
+  const insertResult = await db.query(insertSql, [
+    orderId,
+    productId,
+    productOfferId,
+    quantity,
+  ]);
+
+
+  return insertResult.rows[0];
+},
+async activateByOrder(
+  orderId,
+  db = pool
+) {
+  const sql = `
+    UPDATE stock_reservations
+    SET status = 'ACTIVE'
+    WHERE order_id = $1
+      AND status = 'ORDER_PENDING'
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+  ]);
+
+  return result.rows;
+},
+async cancelByOrder(
+  orderId,
+  db = pool
+) {
+  const sql = `
+    UPDATE stock_reservations
+    SET status = 'CANCELLED'
+    WHERE order_id = $1
+      AND status IN ('ORDER_PENDING', 'ACTIVE')
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
   ]);
 
   return result.rows;

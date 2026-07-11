@@ -346,4 +346,298 @@ async removeItem({
 
   });
 },
+async restoreItem({
+  orderId,
+  orderItemId,
+  changedBy = null,
+  reason = null,
+}) {
+  return transaction(async (db) => {
+
+    const order =
+      await OrderRepository.findByIdForUpdate(
+        orderId,
+        db
+      );
+
+    if (!order) {
+      throw new Error("Заказ не найден");
+    }
+
+    if (!EDITABLE_ORDER_STATUSES.has(order.status)) {
+      throw new Error(
+        `Заказ ${order.status} нельзя редактировать`
+      );
+    }
+
+
+    const item =
+      await OrderRepository.findItemByIdForUpdate(
+        orderId,
+        orderItemId,
+        db
+      );
+
+
+    if (!item) {
+      throw new Error(
+        "Позиция заказа не найдена"
+      );
+    }
+
+
+    if (item.status !== "REMOVED") {
+      throw new Error(
+        "Позиция не удалена"
+      );
+    }
+
+
+    const updatedItem =
+      await OrderRepository.restoreItem(
+        orderItemId,
+        db
+      );
+
+
+    await ReservationRepository.restoreByOrderItem(
+      orderItemId,
+      db
+    );
+
+
+    const updatedOrder =
+      await OrderRepository.recalculateTotal(
+        orderId,
+        db
+      );
+
+
+    const history =
+      await OrderRepository.addItemHistory(
+        {
+          orderItemId,
+          action: "RESTORED",
+          oldQuantity: item.quantity,
+          oldPrice: item.price_at_purchase,
+          changedBy,
+          reason,
+        },
+        db
+      );
+
+
+    return {
+      order: updatedOrder,
+      item: updatedItem,
+      history,
+    };
+
+  });
+},
+async addItem({
+  orderId,
+  productId,
+  productOfferId,
+  quantity,
+  priceAtPurchase,
+  changedBy = null,
+  reason = null,
+}) {
+  const numericOrderId = Number(orderId);
+  const numericProductId = Number(productId);
+  const numericOfferId = Number(productOfferId);
+  const newQuantity = validateQuantity(quantity);
+  const newPrice = Number(priceAtPurchase);
+
+  if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+    throw new Error("Некорректный номер заказа");
+  }
+
+  if (!Number.isInteger(numericProductId) || numericProductId <= 0) {
+    throw new Error("Некорректный товар");
+  }
+
+  if (!Number.isInteger(numericOfferId) || numericOfferId <= 0) {
+    throw new Error("Некорректное предложение товара");
+  }
+
+  if (!Number.isFinite(newPrice) || newPrice <= 0) {
+    throw new Error("Цена должна быть больше нуля");
+  }
+
+
+  return transaction(async (db) => {
+
+    const order =
+      await OrderRepository.findByIdForUpdate(
+        numericOrderId,
+        db
+      );
+
+
+    if (!order) {
+      throw new Error("Заказ не найден");
+    }
+
+
+    if (!EDITABLE_ORDER_STATUSES.has(order.status)) {
+      throw new Error(
+        `Заказ со статусом ${order.status} редактировать нельзя`
+      );
+    }
+
+
+    const offer =
+      await ProductRepository.findOfferByIdForUpdate(
+        numericOfferId,
+        db
+      );
+
+
+    if (!offer || !offer.isAvailable) {
+      throw new Error(
+        "Предложение товара недоступно"
+      );
+    }
+
+
+    const reservedByOthers =
+      await ReservationRepository.getReservedQuantity(
+        numericOfferId,
+        null,
+        db
+      );
+
+
+    const freeQuantity =
+      offer.quantity - reservedByOthers;
+
+
+    if (newQuantity > freeQuantity) {
+      throw new Error(
+        `Недостаточно товара. Доступно: ${freeQuantity}`
+      );
+    }
+
+
+    const existingItem =
+  await OrderRepository.findActiveItemByOffer(
+    numericOrderId,
+    numericOfferId,
+    db
+  );
+ 
+
+let item;
+let history;
+
+
+if (existingItem) {
+
+  const oldQuantity = Number(
+    existingItem.quantity
+  );
+
+  const totalQuantity =
+    oldQuantity + newQuantity;
+
+
+  item =
+    await OrderRepository.updateItemQuantity(
+      existingItem.id,
+      totalQuantity,
+      db
+    );
+
+
+  const reservation =
+    await ReservationRepository.findByOrderAndOfferForUpdate(
+      numericOrderId,
+      numericOfferId,
+      db
+    );
+
+
+  if (reservation) {
+    await ReservationRepository.updateQuantity(
+      reservation.id,
+      totalQuantity,
+      db
+    );
+  }
+
+
+  history =
+    await OrderRepository.addItemHistory(
+      {
+        orderItemId: existingItem.id,
+        action: "QUANTITY_CHANGED",
+        oldQuantity,
+        newQuantity: totalQuantity,
+        changedBy,
+        reason:
+          reason ??
+          "Менеджер увеличил количество",
+      },
+      db
+    );
+
+
+} else {
+
+  item =
+    await OrderRepository.addManagerOrderItem(
+      {
+        orderId: numericOrderId,
+        productId: numericProductId,
+        productOfferId: numericOfferId,
+        quantity: newQuantity,
+        priceAtPurchase: newPrice,
+      },
+      db
+    );
+
+
+  await ReservationRepository.createOrderReservation(
+    {
+      orderId: numericOrderId,
+      productId: numericProductId,
+      productOfferId: numericOfferId,
+      quantity: newQuantity,
+    },
+    db
+  );
+
+
+  history =
+    await OrderRepository.addItemHistory(
+      {
+        orderItemId: item.id,
+        action: "ADDED",
+        newQuantity,
+        newPrice,
+        changedBy,
+        reason,
+      },
+      db
+    );
+}
+
+
+    const updatedOrder =
+      await OrderRepository.recalculateTotal(
+        numericOrderId,
+        db
+      );
+
+
+    return {
+      order: updatedOrder,
+      item,
+      history,
+    };
+
+  });
+},
 };
