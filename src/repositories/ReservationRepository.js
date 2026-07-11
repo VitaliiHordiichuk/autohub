@@ -133,4 +133,73 @@ async attachToOrder(
 
   return result.rows;
 },
+async findByOrderAndOfferForUpdate(
+  orderId,
+  productOfferId,
+  db = pool
+) {
+  const sql = `
+    SELECT *
+    FROM stock_reservations
+    WHERE order_id = $1
+      AND product_offer_id = $2
+      AND status = 'ORDER_PENDING'
+    LIMIT 1
+    FOR UPDATE;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+    productOfferId,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+
+async updateQuantity(
+  reservationId,
+  quantity,
+  db = pool
+) {
+  const sql = `
+    UPDATE stock_reservations
+    SET quantity = $2
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    reservationId,
+    quantity,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+async cancelByOrderItem(
+  orderItemId,
+  db = pool
+) {
+const sql = `
+  UPDATE stock_reservations
+  SET status = 'CANCELLED'
+  WHERE order_id = (
+    SELECT order_id
+    FROM order_items
+    WHERE id = $1
+  )
+  AND product_offer_id = (
+    SELECT product_offer_id
+    FROM order_items
+    WHERE id = $1
+  )
+  AND status = 'ORDER_PENDING'
+  RETURNING *;
+`;
+
+  const result = await db.query(sql, [
+    orderItemId,
+  ]);
+
+  return result.rows;
+},
 };

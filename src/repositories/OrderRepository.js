@@ -219,7 +219,8 @@ async findItemsByOrderId(orderId, db = pool) {
       sr.id AS reservation_id,
       sr.status AS reservation_status,
       sr.quantity AS reserved_quantity,
-      sr.reserved_until
+sr.reserved_until,
+oi.status
 
     FROM order_items oi
 
@@ -240,8 +241,8 @@ async findItemsByOrderId(orderId, db = pool) {
      AND sr.product_offer_id = oi.product_offer_id
      AND sr.status IN ('ACTIVE', 'ORDER_PENDING')
 
-    WHERE oi.order_id = $1
-
+WHERE oi.order_id = $1
+AND oi.status = 'ACTIVE'
     ORDER BY oi.id;
   `;
 
@@ -306,5 +307,168 @@ async findItemHistory(orderId, db = pool) {
   const result = await db.query(sql, [orderId]);
 
   return result.rows;
+},
+async findByIdForUpdate(orderId, db = pool) {
+  const sql = `
+    SELECT *
+    FROM orders
+    WHERE id = $1
+    FOR UPDATE;
+  `;
+
+  const result = await db.query(sql, [orderId]);
+
+  return result.rows[0] ?? null;
+},
+
+async findItemByIdForUpdate(
+  orderId,
+  orderItemId,
+  db = pool
+) {
+  const sql = `
+    SELECT *
+    FROM order_items
+    WHERE id = $1
+      AND order_id = $2
+    FOR UPDATE;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+    orderId,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+
+async updateItemQuantity(
+  orderItemId,
+  quantity,
+  db = pool
+) {
+  const sql = `
+    UPDATE order_items
+    SET quantity = $2
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+    quantity,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+
+async recalculateTotal(orderId, db = pool) {
+  const sql = `
+    UPDATE orders
+    SET
+      total_amount = (
+        SELECT COALESCE(
+          SUM(quantity * price_at_purchase),
+          0
+        )
+        FROM order_items
+WHERE order_id = $1
+AND status = 'ACTIVE'
+      ),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [orderId]);
+
+  return result.rows[0] ?? null;
+},
+
+async addItemHistory(
+  {
+    orderItemId,
+    action,
+    oldQuantity = null,
+    newQuantity = null,
+    oldPrice = null,
+    newPrice = null,
+    oldProductOfferId = null,
+    newProductOfferId = null,
+    changedBy = null,
+    reason = null,
+  },
+  db = pool
+) {
+  const sql = `
+    INSERT INTO order_item_history (
+      order_item_id,
+      action,
+      old_quantity,
+      new_quantity,
+      old_price,
+      new_price,
+      old_product_offer_id,
+      new_product_offer_id,
+      changed_by,
+      reason
+    )
+    VALUES (
+      $1, $2, $3, $4, $5,
+      $6, $7, $8, $9, $10
+    )
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+    action,
+    oldQuantity,
+    newQuantity,
+    oldPrice,
+    newPrice,
+    oldProductOfferId,
+    newProductOfferId,
+    changedBy,
+    reason,
+  ]);
+
+  return result.rows[0];
+},
+async updateItemPrice(
+  orderItemId,
+  priceAtPurchase,
+  db = pool
+) {
+  const sql = `
+    UPDATE order_items
+    SET price_at_purchase = $2
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+    priceAtPurchase,
+  ]);
+
+  return result.rows[0] ?? null;
+},
+async removeItem(
+  orderItemId,
+  db = pool
+) {
+  const sql = `
+    UPDATE order_items
+    SET status = 'REMOVED'
+    WHERE id = $1
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderItemId,
+  ]);
+
+  return result.rows[0] ?? null;
 },
 };
