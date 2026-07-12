@@ -5,6 +5,8 @@ import {
     cancelManagerOrder,
     changeManagerOrderItemPrice,
   changeManagerOrderItemQuantity,
+  changeManagerOrderStatus,
+  completeManagerOrder,
   confirmManagerOrder,
   removeManagerOrderItem,
   restoreManagerOrderItem,
@@ -42,6 +44,15 @@ managerOrderRouter.patch(
 managerOrderRouter.patch(
   "/:orderId/confirm",
   confirmManagerOrder
+);
+managerOrderRouter.patch(
+  "/:orderId/status",
+  changeManagerOrderStatus
+);
+
+managerOrderRouter.patch(
+  "/:orderId/complete",
+  completeManagerOrder
 );
 managerOrderRouter.get("/:orderId", getManagerOrder);
 

@@ -3,6 +3,8 @@ import { GetManagerOrder } from "../use-cases/manager/GetManagerOrder.js";
 import { OrderEditingService } from "../services/OrderEditingService.js";
 import { OrderConfirmationService } from "../services/OrderConfirmationService.js";
 import { OrderCancellationService } from "../services/OrderCancellationService.js";
+import { OrderWorkflowService } from "../services/OrderWorkflowService.js";
+import { OrderCompletionService } from "../services/OrderCompletionService.js";
 
 export async function getManagerOrders(req, res) {
   try {
@@ -281,6 +283,75 @@ export async function cancelManagerOrder(req, res) {
     });
   } catch (error) {
     console.error("Ошибка отмены заказа:", error);
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+export async function changeManagerOrderStatus(req, res) {
+  try {
+    const {
+      newStatus,
+      changedBy = null,
+      comment = null,
+    } = req.body;
+
+    const result =
+      await OrderWorkflowService.changeStatus({
+        orderId: req.params.orderId,
+        newStatus,
+        changedBy,
+        comment,
+      });
+
+    return res.json({
+      success: true,
+      message: "Статус заказа изменён",
+      order: result.order,
+      history: result.history,
+    });
+  } catch (error) {
+    console.error(
+      "Ошибка изменения статуса заказа:",
+      error
+    );
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+export async function completeManagerOrder(req, res) {
+  try {
+    const {
+      changedBy = null,
+      comment = null,
+    } = req.body;
+
+    const result =
+      await OrderCompletionService.completeOrder({
+        orderId: req.params.orderId,
+        changedBy,
+        comment,
+      });
+
+    return res.json({
+      success: true,
+      message: "Заказ завершён",
+      order: result.order,
+      items: result.items,
+      movements: result.movements,
+      reservations: result.reservations,
+      history: result.history,
+    });
+  } catch (error) {
+    console.error(
+      "Ошибка завершения заказа:",
+      error
+    );
 
     return res.status(400).json({
       success: false,

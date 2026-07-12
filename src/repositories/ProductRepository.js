@@ -218,5 +218,46 @@ async findOfferByIdForUpdate(id, db = pool) {
       Number(offer.quantity) > 0,
   };
 },
+async decreaseQuantityForSale(
+  productOfferId,
+  quantity,
+  db = pool
+) {
+  const sql = `
+    WITH locked_offer AS (
+      SELECT
+        id,
+        quantity AS old_quantity
+      FROM product_offers
+      WHERE id = $1
+      FOR UPDATE
+    ),
 
+    updated_offer AS (
+      UPDATE product_offers po
+      SET
+  quantity = po.quantity - $2,
+  is_available = (po.quantity - $2) > 0,
+  updated_at = CURRENT_TIMESTAMP
+      FROM locked_offer lo
+      WHERE po.id = lo.id
+        AND lo.old_quantity >= $2
+      RETURNING
+        po.*,
+        lo.old_quantity
+    )
+
+    SELECT
+      *,
+      quantity AS new_quantity
+    FROM updated_offer;
+  `;
+
+  const result = await db.query(sql, [
+    productOfferId,
+    quantity,
+  ]);
+
+  return result.rows[0] ?? null;
+},
 };

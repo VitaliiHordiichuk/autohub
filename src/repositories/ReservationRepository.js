@@ -343,4 +343,22 @@ async cancelByOrder(
 
   return result.rows;
 },
+async consumeByOrder(
+  orderId,
+  db = pool
+) {
+  const sql = `
+    UPDATE stock_reservations
+    SET status = 'CONSUMED'
+    WHERE order_id = $1
+      AND status = 'ACTIVE'
+    RETURNING *;
+  `;
+
+  const result = await db.query(sql, [
+    orderId,
+  ]);
+
+  return result.rows;
+},
 };
