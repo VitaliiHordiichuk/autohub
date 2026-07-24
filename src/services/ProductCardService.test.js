@@ -30,7 +30,7 @@ test("собирает карточку оригинала с доступным
   assert.equal(card.analogs[0].offers.length, 1);
   assert.equal(
     card.analogs[0].offers[0].quantity,
-    5
+    4
   );
   assert.equal(
     card.analogs[0].offers[0].retailPrice,

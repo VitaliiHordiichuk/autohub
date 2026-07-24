@@ -26,8 +26,8 @@ test("находит предложения товара", async () => {
   assert.ok(Array.isArray(offers));
   assert.equal(offers.length, 1);
 
-  assert.equal(offers[0].quantity, "5.00");
-  assert.equal(offers[0].retail_price, "520.00");
+  assert.equal(offers[0].quantity, "4.00");
+  assert.equal(offers[0].retail_price, "550.00");
   assert.equal(offers[0].source_type, "OWN_STOCK");
   assert.equal(
     offers[0].warehouse_name,

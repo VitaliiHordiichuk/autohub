@@ -10,10 +10,16 @@ export const ProductRepository = {
           p.name,
 
           vb.name AS vehicle_brand,
-          pm.name AS manufacturer,
+          COALESCE(
+            b.name,
+            pm.name
+          ) AS manufacturer,
           pt.name AS product_type
 
       FROM products p
+
+      LEFT JOIN brands b
+             ON b.id = p.brand_id
 
       LEFT JOIN vehicle_brands vb
              ON vb.id = p.vehicle_brand_id
@@ -33,46 +39,116 @@ export const ProductRepository = {
 
     return result.rows[0] ?? null;
   },
+  
   async findOffersByProductId(productId) {
-  const sql = `
-    SELECT
-      po.id,
-      po.product_id,
-      po.quantity,
-      po.purchase_price,
-      po.retail_price,
-      po.delivery_days,
-      po.source_type,
-      po.is_available,
+    const sql = `
+      SELECT
+        po.id,
+        po.product_id,
+        po.warehouse_id,
+        po.supplier_id,
 
-      w.name AS warehouse_name,
-      w.city AS warehouse_city,
+        COALESCE(
+          po.supplier_id,
+          w.supplier_id
+        ) AS effective_supplier_id,
 
-      s.name AS supplier_name
+        po.quantity,
+        po.purchase_price,
 
-    FROM product_offers po
+        po.retail_price
+          AS automatic_retail_price,
 
-    LEFT JOIN warehouses w
-      ON w.id = po.warehouse_id
+        po.manual_retail_price,
+        po.price_mode,
 
-    LEFT JOIN suppliers s
-      ON s.id = po.supplier_id
+        CASE
+          WHEN
+            po.price_mode = 'MANUAL'
+            AND po.manual_retail_price
+              IS NOT NULL
+          THEN po.manual_retail_price
 
-    WHERE po.product_id = $1
-      AND po.is_available = TRUE
+          ELSE po.retail_price
+        END AS retail_price,
 
-    ORDER BY
-      CASE
-        WHEN po.source_type = 'OWN_STOCK' THEN 1
-        ELSE 2
-      END,
-      po.retail_price ASC;
-  `;
+        po.delivery_days,
+        po.source_type,
+        po.is_available,
+        po.is_hidden,
 
-  const result = await pool.query(sql, [productId]);
+        w.name AS warehouse_name,
+        w.city AS warehouse_city,
+        w.priority AS warehouse_priority,
+        w.is_active AS warehouse_active,
 
-  return result.rows;
-},
+        s.name AS supplier_name,
+        s.type AS supplier_type,
+        s.warehouse_priority_enabled
+
+      FROM product_offers po
+
+      LEFT JOIN warehouses w
+        ON w.id = po.warehouse_id
+
+      LEFT JOIN suppliers s
+        ON s.id = COALESCE(
+          po.supplier_id,
+          w.supplier_id
+        )
+
+      WHERE po.product_id = $1
+        AND po.is_available = TRUE
+        AND po.is_hidden = FALSE
+        AND po.quantity > 0
+
+        AND (
+          w.id IS NULL
+          OR w.is_active = TRUE
+        )
+
+        AND (
+          s.id IS NULL
+          OR s.is_active = TRUE
+        )
+
+      ORDER BY
+        CASE
+          WHEN s.type = 'OWN'
+            OR (
+              s.id IS NULL
+              AND po.source_type =
+                'OWN_STOCK'
+            )
+          THEN 1
+          ELSE 2
+        END,
+
+        s.name NULLS FIRST,
+        w.priority ASC NULLS LAST,
+
+        CASE
+          WHEN
+            po.price_mode = 'MANUAL'
+            AND po.manual_retail_price
+              IS NOT NULL
+          THEN po.manual_retail_price
+
+          ELSE po.retail_price
+        END ASC NULLS LAST,
+
+        po.id;
+    `;
+
+    const result =
+      await pool.query(
+        sql,
+        [productId]
+      );
+
+    return result.rows;
+  },
+
 async findMercedesFamilyByBase(articleBase) {
   const sql = `
     SELECT
@@ -85,10 +161,16 @@ async findMercedesFamilyByBase(articleBase) {
       p.variant_type,
       p.name,
 
-      pm.name AS manufacturer,
+      COALESCE(
+        b.name,
+        pm.name
+      ) AS manufacturer,
       pt.name AS product_type
 
     FROM products p
+
+    LEFT JOIN brands b
+      ON b.id = p.brand_id
 
     LEFT JOIN part_manufacturers pm
       ON pm.id = p.manufacturer_id
@@ -120,7 +202,10 @@ async findRelatedProducts(productId, relationType) {
       p.article,
       p.article_normalized,
       p.name,
-      pm.name AS manufacturer,
+      COALESCE(
+        b.name,
+        pm.name
+      ) AS manufacturer,
       pt.name AS product_type,
       pr.relation_type
 
@@ -128,6 +213,9 @@ async findRelatedProducts(productId, relationType) {
 
     JOIN products p
       ON p.id = pr.related_product_id
+
+    LEFT JOIN brands b
+      ON b.id = p.brand_id
 
     LEFT JOIN part_manufacturers pm
       ON pm.id = p.manufacturer_id
@@ -139,7 +227,12 @@ async findRelatedProducts(productId, relationType) {
       AND pr.relation_type = $2
       AND p.is_active = TRUE
 
-    ORDER BY pm.name, p.article;
+    ORDER BY
+      COALESCE(
+        b.name,
+        pm.name
+      ),
+      p.article;
   `;
 
   const result = await pool.query(sql, [productId, relationType]);
@@ -257,6 +350,274 @@ async decreaseQuantityForSale(
     productOfferId,
     quantity,
   ]);
+
+  return result.rows[0] ?? null;
+},
+async findByBrandAndArticle(
+  brandId,
+  articleNormalized,
+  db = pool
+) {
+
+  const sql = `
+    SELECT *
+    FROM products
+    WHERE brand_id = $1
+      AND article_normalized = $2
+    LIMIT 1;
+  `;
+
+
+  const result = await db.query(
+    sql,
+    [
+      brandId,
+      articleNormalized
+    ]
+  );
+
+
+  return result.rows[0] ?? null;
+},
+async createProduct(
+  {
+    brandId,
+    article,
+    articleNormalized,
+    name,
+  },
+  db = pool
+) {
+
+  const sql = `
+    INSERT INTO products
+    (
+      brand_id,
+      article,
+      article_normalized,
+      name
+    )
+
+    VALUES
+    (
+      $1,
+      $2,
+      $3,
+      $4
+    )
+
+    RETURNING *;
+  `;
+
+
+  const result = await db.query(
+    sql,
+    [
+      brandId,
+      article,
+      articleNormalized,
+      name
+    ]
+  );
+
+
+  return result.rows[0];
+},
+
+async createOffer(
+  {
+    productId,
+    warehouseId,
+    supplierId = null,
+    quantity,
+    purchasePrice,
+    sourceType = "OWN_STOCK",
+  },
+  db = pool
+) {
+
+  const sql = `
+    INSERT INTO product_offers
+    (
+      product_id,
+      warehouse_id,
+      supplier_id,
+      quantity,
+      purchase_price,
+      source_type,
+      is_available,
+      updated_at
+    )
+
+    VALUES
+    (
+      $1,
+      $2,
+      $3,
+      $4::numeric,
+      $5::numeric,
+      $6,
+      ($4::numeric > 0),
+      CURRENT_TIMESTAMP
+    )
+
+    RETURNING *;
+  `;
+
+
+  const result = await db.query(
+    sql,
+    [
+      productId,
+      warehouseId,
+      supplierId,
+      quantity,
+      purchasePrice,
+      sourceType
+    ]
+  );
+
+
+  return result.rows[0];
+},
+async updateOfferStock(
+  offerId,
+  {
+    quantity,
+    purchasePrice,
+  },
+  db = pool
+) {
+
+  // 1. Получаем старую цену
+  const oldResult = await db.query(
+    `
+    SELECT
+      id,
+      product_id,
+      purchase_price
+    FROM product_offers
+    WHERE id = $1
+    FOR UPDATE;
+    `,
+    [
+      offerId
+    ]
+  );
+
+
+  if (!oldResult.rows.length) {
+    return null;
+  }
+
+
+  const oldOffer = oldResult.rows[0];
+
+  const oldPrice =
+    oldOffer.purchase_price === null
+      ? null
+      : Number(oldOffer.purchase_price);
+
+
+
+  // 2. Обновляем предложение
+  const updateResult = await db.query(
+    `
+    UPDATE product_offers
+    SET
+      quantity = $2::numeric,
+      purchase_price = $3::numeric,
+      is_available = ($2::numeric > 0),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1
+    RETURNING *;
+    `,
+    [
+      offerId,
+      quantity,
+      purchasePrice
+    ]
+  );
+
+
+  const updatedOffer =
+    updateResult.rows[0];
+
+
+  if (!updatedOffer) {
+    return null;
+  }
+
+
+
+  // 3. Записываем изменение цены
+  if (
+    oldPrice !== null &&
+    Number(oldPrice) !== Number(purchasePrice)
+  ) {
+
+    const changePercent =
+      ((Number(purchasePrice) - oldPrice) / oldPrice) * 100;
+
+
+    await db.query(
+      `
+      INSERT INTO price_history
+      (
+        product_id,
+        product_offer_id,
+        old_price,
+        new_price,
+        change_percent
+      )
+
+      VALUES
+      (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5
+      );
+      `,
+      [
+        oldOffer.product_id,
+        offerId,
+        oldPrice,
+        purchasePrice,
+        changePercent.toFixed(2)
+      ]
+    );
+
+  }
+
+
+  return updatedOffer;
+},
+
+async findOfferByProductAndWarehouse(
+  productId,
+  warehouseId,
+  db = pool
+) {
+
+
+  const sql = `
+    SELECT *
+    FROM product_offers
+    WHERE product_id = $1
+      AND warehouse_id = $2;
+  `;
+
+
+  const result = await db.query(
+    sql,
+    [
+      productId,
+      warehouseId
+    ]
+  );
+
 
   return result.rows[0] ?? null;
 },

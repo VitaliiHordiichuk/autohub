@@ -19,11 +19,15 @@ export async function getManagerOrders(req, res) {
       orders,
     });
   } catch (error) {
-    console.error("Ошибка получения заказов:", error);
+    console.error(
+      "Ошибка получения заказов:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      error: "Не удалось получить список заказов",
+      error:
+        "Не удалось получить список заказов",
     });
   }
 }
@@ -31,7 +35,9 @@ export async function getManagerOrders(req, res) {
 export async function getManagerOrder(req, res) {
   try {
     const order =
-      await GetManagerOrder.execute(req.params.orderId);
+      await GetManagerOrder.execute(
+        req.params.orderId
+      );
 
     if (!order) {
       return res.status(404).json({
@@ -52,11 +58,13 @@ export async function getManagerOrder(req, res) {
   }
 }
 
-export async function changeManagerOrderItemQuantity(req, res) {
+export async function changeManagerOrderItemQuantity(
+  req,
+  res
+) {
   try {
     const {
       quantity,
-      changedBy = null,
       reason = null,
     } = req.body;
 
@@ -65,19 +73,23 @@ export async function changeManagerOrderItemQuantity(req, res) {
         orderId: req.params.orderId,
         orderItemId: req.params.itemId,
         quantity,
-        changedBy,
+        changedBy: req.auth.userId,
         reason,
       });
 
     return res.json({
       success: true,
-      message: "Количество позиции изменено",
+      message:
+        "Количество позиции изменено",
       order: result.order,
       item: result.item,
       history: result.history,
     });
   } catch (error) {
-    console.error("Ошибка изменения количества:", error);
+    console.error(
+      "Ошибка изменения количества:",
+      error
+    );
 
     return res.status(400).json({
       success: false,
@@ -85,11 +97,14 @@ export async function changeManagerOrderItemQuantity(req, res) {
     });
   }
 }
-export async function changeManagerOrderItemPrice(req, res) {
+
+export async function changeManagerOrderItemPrice(
+  req,
+  res
+) {
   try {
     const {
       price,
-      changedBy = null,
       reason = null,
     } = req.body;
 
@@ -98,19 +113,23 @@ export async function changeManagerOrderItemPrice(req, res) {
         orderId: req.params.orderId,
         orderItemId: req.params.itemId,
         price,
-        changedBy,
+        changedBy: req.auth.userId,
         reason,
       });
 
     return res.json({
       success: true,
-      message: "Цена позиции изменена",
+      message:
+        "Цена позиции изменена",
       order: result.order,
       item: result.item,
       history: result.history,
     });
   } catch (error) {
-    console.error("Ошибка изменения цены:", error);
+    console.error(
+      "Ошибка изменения цены:",
+      error
+    );
 
     return res.status(400).json({
       success: false,
@@ -119,10 +138,12 @@ export async function changeManagerOrderItemPrice(req, res) {
   }
 }
 
-export async function removeManagerOrderItem(req, res) {
+export async function removeManagerOrderItem(
+  req,
+  res
+) {
   try {
     const {
-      changedBy = null,
       reason = null,
     } = req.body;
 
@@ -130,18 +151,18 @@ export async function removeManagerOrderItem(req, res) {
       await OrderEditingService.removeItem({
         orderId: req.params.orderId,
         orderItemId: req.params.itemId,
-        changedBy,
+        changedBy: req.auth.userId,
         reason,
       });
 
     return res.json({
       success: true,
-      message: "Позиция удалена из заказа",
+      message:
+        "Позиция удалена из заказа",
       order: result.order,
       item: result.item,
       history: result.history,
     });
-
   } catch (error) {
     console.error(
       "Ошибка удаления позиции:",
@@ -155,10 +176,12 @@ export async function removeManagerOrderItem(req, res) {
   }
 }
 
-export async function restoreManagerOrderItem(req, res) {
+export async function restoreManagerOrderItem(
+  req,
+  res
+) {
   try {
     const {
-      changedBy = null,
       reason = null,
     } = req.body;
 
@@ -166,18 +189,18 @@ export async function restoreManagerOrderItem(req, res) {
       await OrderEditingService.restoreItem({
         orderId: req.params.orderId,
         orderItemId: req.params.itemId,
-        changedBy,
+        changedBy: req.auth.userId,
         reason,
       });
 
     return res.json({
       success: true,
-      message: "Позиция восстановлена",
+      message:
+        "Позиция восстановлена",
       order: result.order,
       item: result.item,
       history: result.history,
     });
-
   } catch (error) {
     console.error(
       "Ошибка восстановления позиции:",
@@ -191,14 +214,16 @@ export async function restoreManagerOrderItem(req, res) {
   }
 }
 
-export async function addManagerOrderItem(req, res) {
+export async function addManagerOrderItem(
+  req,
+  res
+) {
   try {
     const {
       productId,
       productOfferId,
       quantity,
       priceAtPurchase,
-      changedBy = null,
       reason = null,
     } = req.body;
 
@@ -209,19 +234,23 @@ export async function addManagerOrderItem(req, res) {
         productOfferId,
         quantity,
         priceAtPurchase,
-        changedBy,
+        changedBy: req.auth.userId,
         reason,
       });
 
     return res.status(201).json({
       success: true,
-      message: "Позиция добавлена в заказ",
+      message:
+        "Позиция добавлена в заказ",
       order: result.order,
       item: result.item,
       history: result.history,
     });
   } catch (error) {
-    console.error("Ошибка добавления позиции:", error);
+    console.error(
+      "Ошибка добавления позиции:",
+      error
+    );
 
     return res.status(400).json({
       success: false,
@@ -229,30 +258,39 @@ export async function addManagerOrderItem(req, res) {
     });
   }
 }
-export async function confirmManagerOrder(req, res) {
+
+export async function confirmManagerOrder(
+  req,
+  res
+) {
   try {
     const {
-      changedBy = null,
       comment = null,
     } = req.body;
 
     const result =
-      await OrderConfirmationService.confirmOrder({
-        orderId: req.params.orderId,
-        changedBy,
-        comment,
-      });
+      await OrderConfirmationService
+        .confirmOrder({
+          orderId: req.params.orderId,
+          changedBy: req.auth.userId,
+          comment,
+        });
 
     return res.json({
       success: true,
-      message: "Заказ подтверждён менеджером",
+      message:
+        "Заказ подтверждён менеджером",
       order: result.order,
       items: result.items,
-      reservations: result.reservations,
+      reservations:
+        result.reservations,
       history: result.history,
     });
   } catch (error) {
-    console.error("Ошибка подтверждения заказа:", error);
+    console.error(
+      "Ошибка подтверждения заказа:",
+      error
+    );
 
     return res.status(400).json({
       success: false,
@@ -260,29 +298,38 @@ export async function confirmManagerOrder(req, res) {
     });
   }
 }
-export async function cancelManagerOrder(req, res) {
+
+export async function cancelManagerOrder(
+  req,
+  res
+) {
   try {
     const {
-      changedBy = null,
       comment = null,
     } = req.body;
 
     const result =
-      await OrderCancellationService.cancelOrder({
-        orderId: req.params.orderId,
-        changedBy,
-        comment,
-      });
+      await OrderCancellationService
+        .cancelOrder({
+          orderId: req.params.orderId,
+          changedBy: req.auth.userId,
+          comment,
+        });
 
     return res.json({
       success: true,
-      message: "Заказ отменён менеджером",
+      message:
+        "Заказ отменён менеджером",
       order: result.order,
-      reservations: result.reservations,
+      reservations:
+        result.reservations,
       history: result.history,
     });
   } catch (error) {
-    console.error("Ошибка отмены заказа:", error);
+    console.error(
+      "Ошибка отмены заказа:",
+      error
+    );
 
     return res.status(400).json({
       success: false,
@@ -290,25 +337,30 @@ export async function cancelManagerOrder(req, res) {
     });
   }
 }
-export async function changeManagerOrderStatus(req, res) {
+
+export async function changeManagerOrderStatus(
+  req,
+  res
+) {
   try {
     const {
       newStatus,
-      changedBy = null,
       comment = null,
     } = req.body;
 
     const result =
-      await OrderWorkflowService.changeStatus({
-        orderId: req.params.orderId,
-        newStatus,
-        changedBy,
-        comment,
-      });
+      await OrderWorkflowService
+        .changeStatus({
+          orderId: req.params.orderId,
+          newStatus,
+          changedBy: req.auth.userId,
+          comment,
+        });
 
     return res.json({
       success: true,
-      message: "Статус заказа изменён",
+      message:
+        "Статус заказа изменён",
       order: result.order,
       history: result.history,
     });
@@ -324,19 +376,23 @@ export async function changeManagerOrderStatus(req, res) {
     });
   }
 }
-export async function completeManagerOrder(req, res) {
+
+export async function completeManagerOrder(
+  req,
+  res
+) {
   try {
     const {
-      changedBy = null,
       comment = null,
     } = req.body;
 
     const result =
-      await OrderCompletionService.completeOrder({
-        orderId: req.params.orderId,
-        changedBy,
-        comment,
-      });
+      await OrderCompletionService
+        .completeOrder({
+          orderId: req.params.orderId,
+          changedBy: req.auth.userId,
+          comment,
+        });
 
     return res.json({
       success: true,
@@ -344,7 +400,8 @@ export async function completeManagerOrder(req, res) {
       order: result.order,
       items: result.items,
       movements: result.movements,
-      reservations: result.reservations,
+      reservations:
+        result.reservations,
       history: result.history,
     });
   } catch (error) {

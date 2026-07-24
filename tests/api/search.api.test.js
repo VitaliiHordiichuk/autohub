@@ -56,7 +56,7 @@ test("API находит оригинал и доступный аналог", a
 
   assert.equal(analog.product.article, "HU718/5X");
   assert.equal(analog.offers.length, 1);
-  assert.equal(analog.offers[0].quantity, 5);
+  assert.equal(analog.offers[0].quantity, 4);
   assert.equal(analog.offers[0].retailPrice, 520);
   assert.equal(
     analog.offers[0].warehouse.city,

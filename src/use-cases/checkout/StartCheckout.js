@@ -4,15 +4,18 @@ export const StartCheckout = {
   async execute({
     cartId,
     userId = null,
+    guestToken = null,
   }) {
     if (!cartId) {
       throw new Error("cartId обязателен");
     }
 
-    const result = await CheckoutService.start({
-      cartId,
-      userId,
-    });
+    const result =
+      await CheckoutService.start({
+        cartId,
+        userId,
+        guestToken,
+      });
 
     const expiresAt = new Date(
       result.checkoutSession.expires_at
@@ -21,18 +24,24 @@ export const StartCheckout = {
     const secondsLeft = Math.max(
       0,
       Math.floor(
-        (expiresAt.getTime() - Date.now()) / 1000
+        (expiresAt.getTime() - Date.now()) /
+          1000
       )
     );
 
     return {
-      checkoutId: result.checkoutSession.id,
-      cartId: result.checkoutSession.cart_id,
-      status: result.checkoutSession.status,
-      expiresAt: result.checkoutSession.expires_at,
+      checkoutId:
+        result.checkoutSession.id,
+      cartId:
+        result.checkoutSession.cart_id,
+      status:
+        result.checkoutSession.status,
+      expiresAt:
+        result.checkoutSession.expires_at,
       secondsLeft,
       reused: result.reused,
-      reservations: result.reservations ?? [],
+      reservations:
+        result.reservations ?? [],
     };
   },
 };

@@ -1,19 +1,26 @@
 import { pool } from "../config/db.js";
 
 export const CartRepository = {
-  async createCart(userId = null, db = pool) {
+  async createCart(
+    userId = null,
+    db = pool
+  ) {
     const sql = `
       INSERT INTO carts (user_id)
       VALUES ($1)
       RETURNING *;
     `;
 
-    const result = await db.query(sql, [userId]);
+    const result =
+      await db.query(sql, [userId]);
 
     return result.rows[0];
   },
 
-  async findActiveCartByUserId(userId, db = pool) {
+  async findActiveCartByUserId(
+    userId,
+    db = pool
+  ) {
     const sql = `
       SELECT *
       FROM carts
@@ -23,12 +30,16 @@ export const CartRepository = {
       LIMIT 1;
     `;
 
-    const result = await db.query(sql, [userId]);
+    const result =
+      await db.query(sql, [userId]);
 
     return result.rows[0] ?? null;
   },
 
-  async findActiveCartById(cartId, db = pool) {
+  async findActiveCartById(
+    cartId,
+    db = pool
+  ) {
     const sql = `
       SELECT *
       FROM carts
@@ -37,7 +48,8 @@ export const CartRepository = {
       LIMIT 1;
     `;
 
-    const result = await db.query(sql, [cartId]);
+    const result =
+      await db.query(sql, [cartId]);
 
     return result.rows[0] ?? null;
   },
@@ -56,24 +68,37 @@ export const CartRepository = {
       )
       VALUES ($1, $2, $3)
 
-      ON CONFLICT (cart_id, product_offer_id)
+      ON CONFLICT (
+        cart_id,
+        product_offer_id
+      )
       DO UPDATE SET
-        quantity = cart_items.quantity + EXCLUDED.quantity,
-        updated_at = CURRENT_TIMESTAMP
+        quantity =
+          cart_items.quantity +
+          EXCLUDED.quantity,
+        updated_at =
+          CURRENT_TIMESTAMP
 
       RETURNING *;
     `;
 
-    const result = await db.query(sql, [
-      cartId,
-      productOfferId,
-      quantity,
-    ]);
+    const result = await db.query(
+      sql,
+      [
+        cartId,
+        productOfferId,
+        quantity,
+      ]
+    );
 
     return result.rows[0];
   },
 
-  async findItem(cartId, productOfferId, db = pool) {
+  async findItem(
+    cartId,
+    productOfferId,
+    db = pool
+  ) {
     const sql = `
       SELECT *
       FROM cart_items
@@ -82,15 +107,91 @@ export const CartRepository = {
       LIMIT 1;
     `;
 
-    const result = await db.query(sql, [
-      cartId,
-      productOfferId,
-    ]);
+    const result = await db.query(
+      sql,
+      [
+        cartId,
+        productOfferId,
+      ]
+    );
 
     return result.rows[0] ?? null;
   },
 
-  async getItems(cartId, db = pool) {
+  async findItemById(
+    cartId,
+    itemId,
+    db = pool
+  ) {
+    const sql = `
+      SELECT *
+      FROM cart_items
+      WHERE cart_id = $1
+        AND id = $2
+      LIMIT 1;
+    `;
+
+    const result = await db.query(
+      sql,
+      [cartId, itemId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async setItemQuantity(
+    cartId,
+    itemId,
+    quantity,
+    db = pool
+  ) {
+    const sql = `
+      UPDATE cart_items
+      SET
+        quantity = $3,
+        updated_at =
+          CURRENT_TIMESTAMP
+      WHERE cart_id = $1
+        AND id = $2
+      RETURNING *;
+    `;
+
+    const result = await db.query(
+      sql,
+      [
+        cartId,
+        itemId,
+        quantity,
+      ]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async deleteItem(
+    cartId,
+    itemId,
+    db = pool
+  ) {
+    const sql = `
+      DELETE FROM cart_items
+      WHERE cart_id = $1
+        AND id = $2
+      RETURNING *;
+    `;
+
+    const result = await db.query(
+      sql,
+      [cartId, itemId]
+    );
+
+    return result.rows[0] ?? null;
+  },
+
+  async getItems(
+    cartId,
+    db = pool
+  ) {
     const sql = `
       SELECT
         ci.id,
@@ -104,15 +205,24 @@ export const CartRepository = {
         p.article,
         p.name,
 
-        po.retail_price,
-        po.quantity AS available_quantity,
+        CASE
+          WHEN po.price_mode = 'MANUAL'
+            AND po.manual_retail_price
+              IS NOT NULL
+          THEN po.manual_retail_price
+          ELSE po.retail_price
+        END AS retail_price,
+
+        po.quantity
+          AS available_quantity,
         po.source_type,
         po.is_available
 
       FROM cart_items ci
 
       JOIN product_offers po
-        ON po.id = ci.product_offer_id
+        ON po.id =
+          ci.product_offer_id
 
       JOIN products p
         ON p.id = po.product_id
@@ -122,23 +232,30 @@ export const CartRepository = {
       ORDER BY ci.created_at;
     `;
 
-    const result = await db.query(sql, [cartId]);
+    const result =
+      await db.query(sql, [cartId]);
 
     return result.rows;
   },
-  async closeCart(cartId, db = pool) {
-  const sql = `
-    UPDATE carts
-    SET
-      status = 'CHECKED_OUT',
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = $1
-      AND status = 'ACTIVE'
-    RETURNING *;
-  `;
 
-  const result = await db.query(sql, [cartId]);
+  async closeCart(
+    cartId,
+    db = pool
+  ) {
+    const sql = `
+      UPDATE carts
+      SET
+        status = 'CHECKED_OUT',
+        updated_at =
+          CURRENT_TIMESTAMP
+      WHERE id = $1
+        AND status = 'ACTIVE'
+      RETURNING *;
+    `;
 
-  return result.rows[0] ?? null;
-},
+    const result =
+      await db.query(sql, [cartId]);
+
+    return result.rows[0] ?? null;
+  },
 };

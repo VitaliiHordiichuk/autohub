@@ -4,6 +4,9 @@ import { CartRepository } from "../repositories/CartRepository.js";
 import { CheckoutRepository } from "../repositories/CheckoutRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
+import {
+  CartAccessService,
+} from "./CartAccessService.js";
 
 const CHECKOUT_RESERVATION_MINUTES = 5;
 
@@ -11,7 +14,8 @@ function createExpirationDate() {
   const expiresAt = new Date();
 
   expiresAt.setMinutes(
-    expiresAt.getMinutes() + CHECKOUT_RESERVATION_MINUTES
+    expiresAt.getMinutes() +
+      CHECKOUT_RESERVATION_MINUTES
   );
 
   return expiresAt;
@@ -19,7 +23,9 @@ function createExpirationDate() {
 
 function validateCart(cart, items) {
   if (!cart) {
-    throw new Error("Активная корзина не найдена");
+    throw new Error(
+      "Активная корзина не найдена"
+    );
   }
 
   if (!items.length) {
@@ -27,19 +33,25 @@ function validateCart(cart, items) {
   }
 }
 
-async function lockAndValidateItems(items, db) {
+async function lockAndValidateItems(
+  items,
+  db
+) {
   const sortedItems = [...items].sort(
-    (a, b) => a.product_offer_id - b.product_offer_id
+    (a, b) =>
+      a.product_offer_id -
+      b.product_offer_id
   );
 
   const validatedItems = [];
 
   for (const item of sortedItems) {
     const offer =
-      await ProductRepository.findOfferByIdForUpdate(
-        item.product_offer_id,
-        db
-      );
+      await ProductRepository
+        .findOfferByIdForUpdate(
+          item.product_offer_id,
+          db
+        );
 
     if (!offer || !offer.isAvailable) {
       throw new Error(
@@ -48,18 +60,22 @@ async function lockAndValidateItems(items, db) {
     }
 
     const reservedByOthers =
-      await ReservationRepository.getReservedQuantity(
-        item.product_offer_id,
-        item.id,
-        db
-      );
+      await ReservationRepository
+        .getReservedQuantity(
+          item.product_offer_id,
+          item.id,
+          db
+        );
 
     const freeQuantity =
       offer.quantity - reservedByOthers;
 
-    const requestedQuantity = Number(item.quantity);
+    const requestedQuantity =
+      Number(item.quantity);
 
-    if (requestedQuantity > freeQuantity) {
+    if (
+      requestedQuantity > freeQuantity
+    ) {
       throw new Error(
         `Недостаточно товара ${item.article}. ` +
         `Доступно: ${freeQuantity}`
@@ -81,6 +97,7 @@ export const CheckoutService = {
   async start({
     cartId,
     userId = null,
+    guestToken = null,
   }) {
     if (!cartId) {
       throw new Error("cartId обязателен");
@@ -88,68 +105,90 @@ export const CheckoutService = {
 
     return transaction(async (db) => {
       const cart =
-        await CartRepository.findActiveCartById(
+        await CartAccessService.assertAccess({
           cartId,
-          db
-        );
+          userId,
+          guestToken,
+          db,
+        });
 
-      const items = cart
-        ? await CartRepository.getItems(cart.id, db)
-        : [];
-
-      validateCart(cart, items);
-
-      await CheckoutRepository.expireActiveSessionsForCart(
-        cart.id,
-        db
-      );
-
-      const existingSession =
-        await CheckoutRepository.findActiveByCartId(
+      const items =
+        await CartRepository.getItems(
           cart.id,
           db
         );
 
+      validateCart(cart, items);
+
+      await CheckoutRepository
+        .expireActiveSessionsForCart(
+          cart.id,
+          db
+        );
+
+      const existingSession =
+        await CheckoutRepository
+          .findActiveByCartId(
+            cart.id,
+            db
+          );
+
       if (existingSession) {
         return {
-          checkoutSession: existingSession,
+          checkoutSession:
+            existingSession,
           reused: true,
         };
       }
 
       const validatedItems =
-        await lockAndValidateItems(items, db);
-
-      const expiresAt = createExpirationDate();
-
-      const checkoutSession =
-        await CheckoutRepository.createSession(
-          {
-            cartId: cart.id,
-            userId,
-            expiresAt,
-          },
+        await lockAndValidateItems(
+          items,
           db
         );
 
-      const reservations = [];
+      const expiresAt =
+        createExpirationDate();
 
-      for (const item of validatedItems) {
-        const reservation =
-          await ReservationRepository.upsertCartReservation(
+      const checkoutSession =
+        await CheckoutRepository
+          .createSession(
             {
               cartId: cart.id,
-              cartItemId: item.cartItem.id,
-              checkoutSessionId: checkoutSession.id,
-              productOfferId:
-                item.cartItem.product_offer_id,
-              quantity: item.requestedQuantity,
-              reservedUntil: expiresAt,
+              userId,
+              expiresAt,
             },
             db
           );
 
-        reservations.push(reservation);
+      const reservations = [];
+
+      for (
+        const item of validatedItems
+      ) {
+        const reservation =
+          await ReservationRepository
+            .upsertCartReservation(
+              {
+                cartId: cart.id,
+                cartItemId:
+                  item.cartItem.id,
+                checkoutSessionId:
+                  checkoutSession.id,
+                productOfferId:
+                  item.cartItem
+                    .product_offer_id,
+                quantity:
+                  item.requestedQuantity,
+                reservedUntil:
+                  expiresAt,
+              },
+              db
+            );
+
+        reservations.push(
+          reservation
+        );
       }
 
       return {

@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE price_history
+ADD COLUMN IF NOT EXISTS change_percent NUMERIC(8,2);
+
+COMMIT;

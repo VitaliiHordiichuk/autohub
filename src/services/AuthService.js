@@ -1,0 +1,447 @@
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+import { pool } from "../config/db.js";
+
+const PASSWORD_SALT_ROUNDS = 12;
+const TOKEN_EXPIRES_IN =
+  process.env.AUTH_TOKEN_EXPIRES_IN || "7d";
+
+function getJwtSecret() {
+  const secret = process.env.AUTH_JWT_SECRET;
+
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "AUTH_JWT_SECRET отсутствует или короче 32 символов"
+    );
+  }
+
+  return secret;
+}
+
+function normalizeEmail(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function normalizePhone(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^\d+]/g, "");
+}
+
+function createError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function validateRegistration({
+  firstName,
+  lastName,
+  phone,
+  email,
+  password,
+}) {
+  if (!firstName) {
+    throw createError("Имя обязательно");
+  }
+
+  if (firstName.length > 100) {
+    throw createError(
+      "Имя не должно быть длиннее 100 символов"
+    );
+  }
+
+  if (lastName.length > 100) {
+    throw createError(
+      "Фамилия не должна быть длиннее 100 символов"
+    );
+  }
+
+  if (!phone) {
+    throw createError("Телефон обязателен");
+  }
+
+  if (!/^\+?\d{7,20}$/.test(phone)) {
+    throw createError("Некорректный номер телефона");
+  }
+
+  if (!email) {
+    throw createError("Email обязателен");
+  }
+
+  if (
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    throw createError("Некорректный email");
+  }
+
+  if (password.length < 8) {
+    throw createError(
+      "Пароль должен содержать минимум 8 символов"
+    );
+  }
+
+  if (password.length > 200) {
+    throw createError("Пароль слишком длинный");
+  }
+}
+
+function createToken(user) {
+  return jwt.sign(
+    {
+      sub: String(user.id),
+      role: user.roleName,
+    },
+    getJwtSecret(),
+    {
+      expiresIn: TOKEN_EXPIRES_IN,
+      issuer: "autohub-backend",
+      audience: "autohub-client",
+    }
+  );
+}
+
+function mapAuthResult(row) {
+  return {
+    user: {
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      phone: row.phone,
+      email: row.email,
+      role: row.role_name,
+      isActive: row.is_active,
+    },
+    customer: row.customer_id
+      ? {
+          id: row.customer_id,
+          customerType: row.customer_type,
+          priceGroupId: row.price_group_id,
+          priceGroupName: row.price_group_name,
+          discountPercent:
+            row.discount_percent === null
+              ? null
+              : Number(row.discount_percent),
+        }
+      : null,
+  };
+}
+
+async function findAuthUserByEmail(
+  email,
+  db = pool
+) {
+  const sql = `
+    SELECT
+      u.id,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.email,
+      u.password_hash,
+      u.is_active,
+      r.name AS role_name,
+      c.id AS customer_id,
+      c.customer_type,
+      c.price_group_id,
+      pg.name AS price_group_name,
+      pg.discount_percent
+    FROM users u
+    JOIN roles r
+      ON r.id = u.role_id
+    LEFT JOIN customers c
+      ON c.user_id = u.id
+    LEFT JOIN price_groups pg
+      ON pg.id = c.price_group_id
+    WHERE LOWER(u.email) = LOWER($1)
+    LIMIT 1;
+  `;
+
+  const result = await db.query(sql, [email]);
+
+  return result.rows[0] ?? null;
+}
+
+async function findAuthUserById(
+  userId,
+  db = pool
+) {
+  const sql = `
+    SELECT
+      u.id,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.email,
+      u.password_hash,
+      u.is_active,
+      r.name AS role_name,
+      c.id AS customer_id,
+      c.customer_type,
+      c.price_group_id,
+      pg.name AS price_group_name,
+      pg.discount_percent
+    FROM users u
+    JOIN roles r
+      ON r.id = u.role_id
+    LEFT JOIN customers c
+      ON c.user_id = u.id
+    LEFT JOIN price_groups pg
+      ON pg.id = c.price_group_id
+    WHERE u.id = $1
+    LIMIT 1;
+  `;
+
+  const result = await db.query(sql, [userId]);
+
+  return result.rows[0] ?? null;
+}
+
+export const AuthService = {
+  async register(input) {
+    const firstName = normalizeText(
+      input.firstName
+    );
+    const lastName = normalizeText(
+      input.lastName
+    );
+    const phone = normalizePhone(input.phone);
+    const email = normalizeEmail(input.email);
+    const password = String(input.password || "");
+
+    validateRegistration({
+      firstName,
+      lastName,
+      phone,
+      email,
+      password,
+    });
+
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const existingUser =
+        await findAuthUserByEmail(email, client);
+
+      if (existingUser) {
+        throw createError(
+          "Пользователь с таким email уже существует",
+          409
+        );
+      }
+
+      const roleResult = await client.query(
+        `
+          SELECT id
+          FROM roles
+          WHERE name = 'CLIENT'
+          LIMIT 1;
+        `
+      );
+
+      const roleId = roleResult.rows[0]?.id;
+
+      if (!roleId) {
+        throw createError(
+          "Роль CLIENT не найдена",
+          500
+        );
+      }
+
+      const priceGroupResult =
+        await client.query(
+          `
+            SELECT id
+            FROM price_groups
+            WHERE name = 'Registered'
+            LIMIT 1;
+          `
+        );
+
+      const priceGroupId =
+        priceGroupResult.rows[0]?.id;
+
+      if (!priceGroupId) {
+        throw createError(
+          "Ценовая группа Registered не найдена",
+          500
+        );
+      }
+
+      const passwordHash = await bcrypt.hash(
+        password,
+        PASSWORD_SALT_ROUNDS
+      );
+
+      const userResult = await client.query(
+        `
+          INSERT INTO users (
+            first_name,
+            last_name,
+            phone,
+            email,
+            password_hash,
+            role_id,
+            is_active
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+          RETURNING id;
+        `,
+        [
+          firstName,
+          lastName || null,
+          phone,
+          email,
+          passwordHash,
+          roleId,
+        ]
+      );
+
+      const userId = userResult.rows[0].id;
+
+      await client.query(
+        `
+          INSERT INTO customers (
+            user_id,
+            customer_type,
+            price_group_id,
+            is_active
+          )
+          VALUES ($1, 'REGISTERED', $2, TRUE);
+        `,
+        [userId, priceGroupId]
+      );
+
+      await client.query(
+        `
+          INSERT INTO user_delivery_profiles (
+            user_id,
+            recipient_first_name,
+            recipient_last_name,
+            recipient_phone,
+            recipient_email,
+            delivery_method
+          )
+          VALUES ($1, $2, $3, $4, $5, 'PICKUP')
+          ON CONFLICT (user_id) DO NOTHING;
+        `,
+        [
+          userId,
+          firstName,
+          lastName || null,
+          phone,
+          email,
+        ]
+      );
+
+      const authUser =
+        await findAuthUserById(userId, client);
+
+      await client.query("COMMIT");
+
+      const result = mapAuthResult(authUser);
+
+      return {
+        ...result,
+        token: createToken({
+          id: authUser.id,
+          roleName: authUser.role_name,
+        }),
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      if (error.code === "23505") {
+        throw createError(
+          "Пользователь с таким email уже существует",
+          409
+        );
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async login(input) {
+    const email = normalizeEmail(input.email);
+    const password = String(input.password || "");
+
+    if (!email || !password) {
+      throw createError(
+        "Email и пароль обязательны"
+      );
+    }
+
+    const authUser =
+      await findAuthUserByEmail(email);
+
+    if (!authUser) {
+      throw createError(
+        "Неверный email или пароль",
+        401
+      );
+    }
+
+    if (!authUser.is_active) {
+      throw createError(
+        "Пользователь заблокирован",
+        403
+      );
+    }
+
+    const passwordMatches =
+      await bcrypt.compare(
+        password,
+        authUser.password_hash
+      );
+
+    if (!passwordMatches) {
+      throw createError(
+        "Неверный email или пароль",
+        401
+      );
+    }
+
+    const result = mapAuthResult(authUser);
+
+    return {
+      ...result,
+      token: createToken({
+        id: authUser.id,
+        roleName: authUser.role_name,
+      }),
+    };
+  },
+
+  async getCurrentUser(userId) {
+    const authUser =
+      await findAuthUserById(userId);
+
+    if (!authUser || !authUser.is_active) {
+      throw createError(
+        "Пользователь не найден или заблокирован",
+        401
+      );
+    }
+
+    return mapAuthResult(authUser);
+  },
+
+  verifyToken(token) {
+    return jwt.verify(token, getJwtSecret(), {
+      issuer: "autohub-backend",
+      audience: "autohub-client",
+    });
+  },
+};

@@ -1,4 +1,7 @@
 import { OrderRepository } from "../../repositories/OrderRepository.js";
+import {
+  OrderDeliveryRepository,
+} from "../../repositories/OrderDeliveryRepository.js";
 
 export const GetManagerOrders = {
   async execute({
@@ -17,16 +20,63 @@ export const GetManagerOrders = {
     );
 
     const orders =
-      await OrderRepository.findAllForManager({
-        status,
-        limit: safeLimit,
-        offset: safeOffset,
-      });
+      await OrderRepository
+        .findAllForManager({
+          status,
+          limit: safeLimit,
+          offset: safeOffset,
+        });
 
-    return orders.map((order) => ({
-      ...order,
-      total_amount: Number(order.total_amount),
-      total_quantity: Number(order.total_quantity),
-    }));
+    const deliveryRows =
+      await OrderDeliveryRepository
+        .findByOrderIds(
+          orders.map((order) =>
+            Number(order.id)
+          )
+        );
+
+    const deliveryByOrderId =
+      new Map(
+        deliveryRows.map((delivery) => [
+          delivery.orderId,
+          delivery,
+        ])
+      );
+
+    return orders.map((order) => {
+      const delivery =
+        deliveryByOrderId.get(
+          Number(order.id)
+        ) ?? null;
+
+      return {
+        ...order,
+        total_amount:
+          Number(order.total_amount),
+        total_quantity:
+          Number(order.total_quantity),
+
+        delivery: delivery
+          ? {
+              deliveryMethod:
+                delivery.deliveryMethod,
+              recipientFirstName:
+                delivery.recipientFirstName,
+              recipientLastName:
+                delivery.recipientLastName,
+              recipientPhone:
+                delivery.recipientPhone,
+              cityName:
+                delivery.novaPoshta.cityName,
+              pointType:
+                delivery.novaPoshta.pointType,
+              pointName:
+                delivery.novaPoshta.pointName,
+              pointAddress:
+                delivery.novaPoshta.pointAddress,
+            }
+          : null,
+      };
+    });
   },
 };

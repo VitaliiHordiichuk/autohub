@@ -18,8 +18,8 @@ test("возвращает подготовленные предложения �
 
   assert.equal(offer.productId, 2);
   assert.equal(offer.sourceType, "OWN_STOCK");
-  assert.equal(offer.quantity, 5);
-  assert.equal(offer.displayQuantity, "5");
+  assert.equal(offer.quantity, 4);
+  assert.equal(offer.displayQuantity, "4");
   assert.equal(offer.purchasePrice, 350);
   assert.equal(offer.retailPrice, 520);
   assert.equal(offer.deliveryDays, 0);

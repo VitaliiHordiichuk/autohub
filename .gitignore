@@ -2,3 +2,17 @@ node_modules/
 .env
 .DS_Store
 npm-debug.log*
+
+# AutoHub local and secret files
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credential*.json
+*token*.json
+*.backup-before-*
+test-import.csv
+test-import.xlsx
+test-brand-admin.mjs

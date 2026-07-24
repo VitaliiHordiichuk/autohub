@@ -1,53 +1,143 @@
-import { SearchService } from "../services/SearchService.js";
-import { ProductCardService } from "../services/ProductCardService.js";
+import {
+  SearchService,
+} from "../services/SearchService.js";
 
-export async function searchByArticle(req, res) {
+import {
+  ProductCardService,
+} from "../services/ProductCardService.js";
+
+import {
+  PublicSearchPresenterService,
+} from "../services/PublicSearchPresenterService.js";
+
+import {
+  MercedesFamilyOfferService,
+} from "../services/MercedesFamilyOfferService.js";
+
+
+export async function searchByArticle(
+  req,
+  res
+) {
   try {
-    const article = req.query.article;
+    const article =
+      req.query.article;
+
+    const requestedLocale =
+      req.query.locale;
 
     if (!article) {
-      return res.status(400).json({
-        success: false,
-        error: "Параметр article обязателен",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+
+          error:
+            "Параметр article обязателен",
+        });
     }
 
     const searchResult =
-      await SearchService.searchByArticle(article);
+      await SearchService
+        .searchByArticle(
+          article
+        );
 
     if (!searchResult.found) {
-      return res.status(404).json({
-        success: false,
-        query: article,
-        normalized: searchResult.normalized,
-        message: "Товар не найден",
-      });
+      return res
+        .status(404)
+        .json({
+          success: false,
+
+          query:
+            article,
+
+          normalized:
+            searchResult.normalized,
+
+          message:
+            "Товар не найден",
+        });
     }
 
-    const productCard = searchResult.exactProduct
-      ? await ProductCardService.build(
-          searchResult.exactProduct
-        )
-      : null;
+    const productCard =
+      searchResult.exactProduct
+        ? await ProductCardService
+            .build(
+              searchResult
+                .exactProduct
+            )
+        : null;
+
+    const familyCards =
+      searchResult.rule === "MERCEDES"
+        ? await MercedesFamilyOfferService
+            .build({
+              family:
+                searchResult.family,
+
+              exactProductId:
+                searchResult
+                  .exactProduct
+                  ?.id ?? null,
+            })
+        : [];
+
+    const publicResult =
+      await PublicSearchPresenterService
+        .present({
+          requestedLocale,
+
+          family:
+            familyCards,
+
+          productCard,
+        });
 
     return res.json({
       success: true,
-      query: searchResult.query,
-      normalized: searchResult.normalized,
-      searchedArticle:
-        searchResult.searchedArticle ??
-        searchResult.normalized,
-      rule: searchResult.rule,
-      parsed: searchResult.parsed ?? null,
-      family: searchResult.family,
-      productCard,
-    });
-  } catch (error) {
-    console.error("Ошибка поиска:", error);
 
-    return res.status(500).json({
-      success: false,
-      error: "Внутренняя ошибка сервера",
+      locale:
+        publicResult.locale,
+
+      query:
+        searchResult.query,
+
+      normalized:
+        searchResult.normalized,
+
+      searchedArticle:
+        searchResult
+          .searchedArticle ??
+        searchResult.normalized,
+
+      rule:
+        searchResult.rule,
+
+      parsed:
+        searchResult.parsed ??
+        null,
+
+      family:
+        publicResult.family,
+
+      productCard:
+        publicResult.productCard,
     });
+
+  } catch (error) {
+    console.error(
+      "Ошибка поиска:",
+      error
+    );
+
+    return res
+      .status(500)
+      .json({
+        success: false,
+
+        error:
+          "Внутренняя ошибка сервера",
+      });
   }
 }

@@ -2,36 +2,90 @@ import { transaction } from "../../db/transaction.js";
 
 import { CartRepository } from "../../repositories/CartRepository.js";
 import { CheckoutRepository } from "../../repositories/CheckoutRepository.js";
+import { CustomerRepository } from "../../repositories/CustomerRepository.js";
 import { OrderRepository } from "../../repositories/OrderRepository.js";
+import { OrderDeliveryRepository } from "../../repositories/OrderDeliveryRepository.js";
 import { ReservationRepository } from "../../repositories/ReservationRepository.js";
+import { UserDeliveryProfileRepository } from "../../repositories/UserDeliveryProfileRepository.js";
+
+import {
+  CartAccessService,
+} from "../../services/CartAccessService.js";
+
+import {
+  deliveryInputFromProfileRow,
+  normalizeOrderDelivery,
+} from "../../services/OrderDeliveryService.js";
 
 function calculateTotal(items) {
-  return items.reduce((total, item) => {
-    return (
-      total +
-      Number(item.quantity) *
-        Number(item.retail_price)
+  return items.reduce(
+    (total, item) => {
+      return (
+        total +
+        Number(item.quantity) *
+          Number(item.retail_price)
+      );
+    },
+    0
+  );
+}
+
+async function resolveDelivery({
+  delivery,
+  userId,
+  db,
+}) {
+  if (delivery) {
+    return normalizeOrderDelivery(
+      delivery
     );
-  }, 0);
+  }
+
+  if (!userId) {
+    throw new Error(
+      "Гостю необходимо указать данные получения"
+    );
+  }
+
+  const profileRow =
+    await UserDeliveryProfileRepository
+      .findByUserId(userId, db);
+
+  if (!profileRow) {
+    throw new Error(
+      "Профиль доставки не найден"
+    );
+  }
+
+  return normalizeOrderDelivery(
+    deliveryInputFromProfileRow(
+      profileRow
+    )
+  );
 }
 
 export const SubmitOrder = {
   async execute({
     checkoutId,
-    customerId = null,
     userId = null,
+    guestToken = null,
     comment = null,
+    delivery = null,
+    saveDeliveryProfile = false,
   }) {
     if (!checkoutId) {
-      throw new Error("checkoutId обязателен");
+      throw new Error(
+        "checkoutId обязателен"
+      );
     }
 
     return transaction(async (db) => {
       const checkout =
-        await CheckoutRepository.findActiveById(
-          checkoutId,
-          db
-        );
+        await CheckoutRepository
+          .findActiveById(
+            checkoutId,
+            db
+          );
 
       if (!checkout) {
         throw new Error(
@@ -40,98 +94,169 @@ export const SubmitOrder = {
       }
 
       const cart =
-        await CartRepository.findActiveCartById(
-          checkout.cart_id,
+        await CartAccessService
+          .assertAccess({
+            cartId:
+              checkout.cart_id,
+            userId,
+            guestToken,
+            db,
+          });
+
+      const items =
+        await CartRepository.getItems(
+          cart.id,
           db
         );
 
-      if (!cart) {
-        throw new Error("Активная корзина не найдена");
-      }
-
-      const items =
-        await CartRepository.getItems(cart.id, db);
-
       if (!items.length) {
-        throw new Error("Корзина пустая");
+        throw new Error(
+          "Корзина пустая"
+        );
       }
 
       const reservations =
-        await ReservationRepository.findActiveByCheckoutSessionId(
-          checkout.id,
-          db
-        );
+        await ReservationRepository
+          .findActiveByCheckoutSessionId(
+            checkout.id,
+            db
+          );
 
-      if (reservations.length !== items.length) {
+      if (
+        reservations.length !==
+        items.length
+      ) {
         throw new Error(
           "Не все позиции корзины имеют активный резерв"
         );
       }
 
-      const totalAmount = calculateTotal(items);
+      let customer = null;
+
+      if (userId) {
+        customer =
+          await CustomerRepository
+            .findActiveByUserId(
+              userId,
+              db
+            );
+
+      }
+
+      const customerUserId =
+        customer ? userId : null;
+
+      const normalizedDelivery =
+        await resolveDelivery({
+          delivery,
+          userId,
+          db,
+        });
+
+      const totalAmount =
+        calculateTotal(items);
 
       const order =
-        await OrderRepository.createOrder(
-          {
-            customerId,
-            createdBy: userId,
-            comment,
-            totalAmount,
-          },
-          db
-        );
+        await OrderRepository
+          .createOrder(
+            {
+              customerId:
+                customer?.id ?? null,
+              createdBy:
+                customerUserId,
+              comment,
+              totalAmount,
+            },
+            db
+          );
 
       const orderItems = [];
 
       for (const item of items) {
         const orderItem =
-          await OrderRepository.addOrderItem(
-            {
-              orderId: order.id,
-              productId: item.product_id,
-              productOfferId:
-                item.product_offer_id,
-              quantity: Number(item.quantity),
-              priceAtPurchase:
-                Number(item.retail_price),
-            },
-            db
-          );
+          await OrderRepository
+            .addOrderItem(
+              {
+                orderId: order.id,
+                productId:
+                  item.product_id,
+                productOfferId:
+                  item.product_offer_id,
+                quantity:
+                  Number(item.quantity),
+                priceAtPurchase:
+                  Number(
+                    item.retail_price
+                  ),
+              },
+              db
+            );
 
         orderItems.push(orderItem);
       }
 
-      await ReservationRepository.attachToOrder(
-        checkout.id,
-        order.id,
-        db
-      );
+      const orderDelivery =
+        await OrderDeliveryRepository
+          .create(
+            {
+              orderId: order.id,
+              delivery:
+                normalizedDelivery,
+            },
+            db
+          );
 
-      await CheckoutRepository.markCompleted(
-        checkout.id,
-        db
-      );
+      if (
+        customerUserId &&
+        saveDeliveryProfile &&
+        delivery
+      ) {
+        await UserDeliveryProfileRepository
+          .upsert(
+            {
+              userId,
+              ...normalizedDelivery,
+            },
+            db
+          );
+      }
+
+      await ReservationRepository
+        .attachToOrder(
+          checkout.id,
+          order.id,
+          db
+        );
+
+      await CheckoutRepository
+        .markCompleted(
+          checkout.id,
+          db
+        );
 
       await CartRepository.closeCart(
         cart.id,
         db
       );
 
-      await OrderRepository.addStatusHistory(
-        {
-          orderId: order.id,
-          oldStatus: null,
-          newStatus: "NEW",
-          changedBy: userId,
-          comment:
-            "Клиент завершил оформление заказа",
-        },
-        db
-      );
+      await OrderRepository
+        .addStatusHistory(
+          {
+            orderId: order.id,
+            oldStatus: null,
+            newStatus: "NEW",
+            changedBy:
+              customerUserId,
+            comment:
+              "Клиент завершил оформление заказа",
+          },
+          db
+        );
 
       return {
         order,
         orderItems,
+        delivery: orderDelivery,
       };
     });
   },
