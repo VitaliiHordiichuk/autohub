@@ -16,6 +16,10 @@ import { BrandAliasRepository }
 from "../repositories/BrandAliasRepository.js";
 
 
+import { normalizeArticle }
+from "./articleEngine/normalize.js";
+
+
 function normalizeImportContext(importContext) {
   if (
     Number.isInteger(importContext) &&
@@ -492,12 +496,9 @@ export const ImportService = {
 
 
           const articleNormalized =
-            String(row.article)
-              .toUpperCase()
-              .replace(
-                /[^A-Z0-9]/g,
-                ""
-              );
+            normalizeArticle(
+              row.article
+            );
 
 
           if (!articleNormalized) {

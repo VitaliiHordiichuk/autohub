@@ -23,7 +23,8 @@ test(
     let settingsId = null;
     let warehouseSupplierImportId = null;
 
-    const articleA = `TEST${token}A`;
+    const articleAInput = `Н${token}С`;
+    const articleA = `H${token}C`;
     const articleB = `TEST${token}B`;
 
     try {
@@ -88,7 +89,7 @@ test(
         },
         [
           {
-            article: articleA,
+            article: articleAInput,
             name: "Тестовая позиция A",
             price: 100,
             quantity: 5,
@@ -116,7 +117,7 @@ test(
         },
         [
           {
-            article: articleA,
+            article: articleAInput,
             name: "Тестовая позиция A",
             price: 120,
             quantity: 3,
