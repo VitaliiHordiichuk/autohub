@@ -25,6 +25,164 @@ function cleanRow(row) {
 }
 
 
+const CSV_DELIMITERS = [
+  ",",
+  ";",
+  "|",
+];
+
+
+function countDelimiterOutsideQuotes(
+  line,
+  delimiter
+) {
+  let count = 0;
+  let insideQuotes = false;
+
+  for (
+    let index = 0;
+    index < line.length;
+    index++
+  ) {
+    const character =
+      line[index];
+
+    if (character === '"') {
+      const nextCharacter =
+        line[index + 1];
+
+      if (
+        insideQuotes &&
+        nextCharacter === '"'
+      ) {
+        index++;
+        continue;
+      }
+
+      insideQuotes =
+        !insideQuotes;
+
+      continue;
+    }
+
+    if (
+      !insideQuotes &&
+      character === delimiter
+    ) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+
+function detectCsvSeparator(buffer) {
+  const text =
+    buffer
+      .toString("utf8")
+      .replace(/^\uFEFF/, "");
+
+  const sampleLines =
+    text
+      .split(/\r?\n/)
+      .map(
+        (line) =>
+          line.trim()
+      )
+      .filter(Boolean)
+      .slice(0, 20);
+
+  if (!sampleLines.length) {
+    return ",";
+  }
+
+  let bestDelimiter = ",";
+  let bestScore = -1;
+
+  for (
+    const delimiter
+    of CSV_DELIMITERS
+  ) {
+    const counts =
+      sampleLines.map(
+        (line) =>
+          countDelimiterOutsideQuotes(
+            line,
+            delimiter
+          )
+      );
+
+    const positiveCounts =
+      counts.filter(
+        (count) =>
+          count > 0
+      );
+
+    if (!positiveCounts.length) {
+      continue;
+    }
+
+    const frequency = new Map();
+
+    for (
+      const count
+      of positiveCounts
+    ) {
+      frequency.set(
+        count,
+        (frequency.get(count) || 0) + 1
+      );
+    }
+
+    let mostCommonCount = 0;
+    let matchingLines = 0;
+
+    for (
+      const [
+        count,
+        occurrences,
+      ]
+      of frequency
+    ) {
+      if (
+        occurrences > matchingLines ||
+        (
+          occurrences === matchingLines &&
+          count > mostCommonCount
+        )
+      ) {
+        mostCommonCount =
+          count;
+
+        matchingLines =
+          occurrences;
+      }
+    }
+
+    const consistency =
+      matchingLines /
+      sampleLines.length;
+
+    const score =
+      (
+        consistency * 1000
+      ) +
+      (
+        mostCommonCount * 10
+      ) +
+      matchingLines;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestDelimiter = delimiter;
+    }
+  }
+
+  return bestDelimiter;
+}
+
+
 function parseCsvBuffer(
   buffer,
   startRow = 1
@@ -34,10 +192,13 @@ function parseCsvBuffer(
     const normalizedStartRow =
       normalizeStartRow(startRow);
 
+    const separator =
+      detectCsvSeparator(buffer);
+
     Readable.from(buffer)
       .pipe(
         csvParser({
-          separator: ",",
+          separator,
           headers: false,
           skipLines:
             normalizedStartRow - 1,
