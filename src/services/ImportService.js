@@ -356,6 +356,9 @@ export const ImportService = {
 
         missingOffersDisabled:
           0,
+
+        replacementApplied:
+          false,
       };
 
 
@@ -777,7 +780,6 @@ export const ImportService = {
 
 
       if (
-        result.errors === 0 &&
         result.successRows > 0
       ) {
         const disabledOffers =
@@ -800,6 +802,9 @@ export const ImportService = {
 
         result.missingOffersDisabled =
           disabledOffers.length;
+
+        result.replacementApplied =
+          true;
       }
 
 
@@ -819,7 +824,11 @@ export const ImportService = {
               result.errors,
 
             status:
-              "COMPLETED",
+              result.successRows === 0
+                ? "FAILED"
+                : result.errors > 0
+                  ? "COMPLETED_WITH_ERRORS"
+                  : "COMPLETED",
           },
           db
         );
