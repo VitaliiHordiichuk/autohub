@@ -386,6 +386,90 @@ test(
         );
 
 
+
+        const historyResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/history?` +
+            `warehouseId=${warehouseId}` +
+            `&limit=10`
+          );
+
+        assert.equal(
+          historyResponse.status,
+          200
+        );
+
+        const historyBody =
+          await historyResponse.json();
+
+        assert.equal(
+          historyBody.success,
+          true
+        );
+
+        assert.equal(
+          historyBody.warehouseId,
+          warehouseId
+        );
+
+        assert.equal(
+          historyBody.count,
+          2
+        );
+
+        assert.equal(
+          historyBody.imports.length,
+          2
+        );
+
+        assert.equal(
+          historyBody.imports[0].id,
+          secondImport.importId
+        );
+
+        assert.equal(
+          historyBody.imports[0].status,
+          "COMPLETED_WITH_ERRORS"
+        );
+
+        assert.equal(
+          historyBody.imports[0].successRows,
+          1
+        );
+
+        assert.equal(
+          historyBody.imports[0].errorRows,
+          1
+        );
+
+        assert.equal(
+          historyBody.imports[0].fileName,
+          "test-second-price.csv"
+        );
+
+        assert.equal(
+          historyBody.imports[1].id,
+          firstImport.importId
+        );
+
+        assert.equal(
+          historyBody.imports[1].status,
+          "COMPLETED"
+        );
+
+        assert.equal(
+          historyBody.imports[1].successRows,
+          2
+        );
+
+        assert.equal(
+          historyBody.imports[1].errorRows,
+          0
+        );
+
+
         const foreignResponse =
           await fetch(
             `http://127.0.0.1:` +

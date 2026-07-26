@@ -187,6 +187,54 @@ export const ImportRepository = {
   },
 
 
+
+  async findHistoryByWarehouse(
+    {
+      warehouseId,
+      limit = 20,
+    },
+    db = pool
+  ) {
+    const sql = `
+      SELECT
+        id,
+        warehouse_id,
+        supplier_id,
+        warehouse_supplier_import_id,
+        source,
+        file_name,
+        file_type,
+        import_method,
+        status,
+        total_rows,
+        success_rows,
+        error_rows,
+        created_at
+
+      FROM imports
+
+      WHERE warehouse_id = $1
+
+      ORDER BY
+        created_at DESC,
+        id DESC
+
+      LIMIT $2;
+    `;
+
+    const result =
+      await db.query(
+        sql,
+        [
+          warehouseId,
+          limit,
+        ]
+      );
+
+    return result.rows;
+  },
+
+
   async findErrorRows(
     {
       importId,

@@ -4,6 +4,7 @@ import {
   testImport,
   uploadImport,
   previewImport,
+  getImportHistory,
   getImportErrors
 }
 from "../controllers/admin-import.controller.js";
@@ -31,6 +32,12 @@ router.post(
   upload.single("file"),
   previewImport
 );
+
+router.get(
+  "/history",
+  getImportHistory
+);
+
 
 router.get(
   "/:importId/errors",

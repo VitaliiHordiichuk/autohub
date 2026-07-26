@@ -1312,6 +1312,122 @@ export async function previewImport(
   }
 }
 
+
+export async function getImportHistory(
+  req,
+  res
+) {
+  try {
+    const warehouseId =
+      parsePositiveInteger(
+        req.query.warehouseId,
+        "Некорректный номер склада"
+      );
+
+    const requestedLimit =
+      Number(
+        req.query.limit ?? 20
+      );
+
+    const limit =
+      Number.isInteger(
+        requestedLimit
+      ) &&
+      requestedLimit > 0
+        ? Math.min(
+            requestedLimit,
+            100
+          )
+        : 20;
+
+    const rows =
+      await ImportRepository
+        .findHistoryByWarehouse({
+          warehouseId,
+          limit,
+        });
+
+    return res.json({
+      success: true,
+      warehouseId,
+      count: rows.length,
+
+      imports:
+        rows.map(
+          (row) => ({
+            id:
+              Number(row.id),
+
+            warehouseId:
+              Number(
+                row.warehouse_id
+              ),
+
+            supplierId:
+              row.supplier_id === null
+                ? null
+                : Number(
+                    row.supplier_id
+                  ),
+
+            warehouseSupplierImportId:
+              row.warehouse_supplier_import_id ===
+              null
+                ? null
+                : Number(
+                    row
+                      .warehouse_supplier_import_id
+                  ),
+
+            source:
+              row.source,
+
+            fileName:
+              row.file_name,
+
+            fileType:
+              row.file_type,
+
+            importMethod:
+              row.import_method,
+
+            status:
+              row.status,
+
+            totalRows:
+              Number(
+                row.total_rows ?? 0
+              ),
+
+            successRows:
+              Number(
+                row.success_rows ?? 0
+              ),
+
+            errorRows:
+              Number(
+                row.error_rows ?? 0
+              ),
+
+            createdAt:
+              row.created_at,
+          })
+        ),
+    });
+  } catch(error) {
+    console.error(
+      "Ошибка получения истории импортов:",
+      error
+    );
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+
 export async function getImportErrors(
   req,
   res
