@@ -1,5 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import express from "express";
 
 import { pool } from "../src/config/db.js";
 import { SupplierService } from "../src/services/SupplierService.js";
@@ -7,13 +8,14 @@ import { WarehouseService } from "../src/services/WarehouseService.js";
 import { BrandAdminService } from "../src/services/BrandAdminService.js";
 import { WarehouseImportProfileService } from "../src/services/WarehouseImportProfileService.js";
 import { ImportService } from "../src/services/ImportService.js";
+import { adminImportRouter } from "../src/routes/admin-import.routes.js";
 
 after(async () => {
   await pool.end();
 });
 
 test(
-  "полностью заменяет прайс, сохраняет карточки и ошибки строк",
+  "полностью заменяет прайс и выдаёт сохранённые ошибки через API",
   async () => {
     const token = String(Date.now());
 
@@ -123,6 +125,13 @@ test(
             quantity: 3,
           },
           {
+            rowNumber: 2,
+            rawData: [
+              "!!!",
+              "Ошибочная строка",
+              "300",
+              "1",
+            ],
             article: "!!!",
             name: "Ошибочная строка",
             price: 300,
@@ -217,7 +226,12 @@ test(
 
       const errorsResult = await pool.query(
         `
-          SELECT article, status, error_message
+          SELECT
+            article,
+            status,
+            error_message,
+            source_row_number,
+            raw_data
           FROM import_rows
           WHERE import_id = $1
             AND status = 'ERROR'
@@ -231,6 +245,185 @@ test(
         errorsResult.rows[0].error_message,
         /нормализац/i
       );
+
+      assert.equal(
+        Number(
+          errorsResult.rows[0]
+            .source_row_number
+        ),
+        2
+      );
+
+      assert.deepEqual(
+        errorsResult.rows[0].raw_data,
+        [
+          "!!!",
+          "Ошибочная строка",
+          "300",
+          "1",
+        ]
+      );
+
+
+      const testApp = express();
+
+      testApp.use(
+        "/api/admin/import",
+        adminImportRouter
+      );
+
+
+      const server =
+        await new Promise(
+          (resolve) => {
+            const nextServer =
+              testApp.listen(
+                0,
+                "127.0.0.1",
+                () => {
+                  resolve(nextServer);
+                }
+              );
+          }
+        );
+
+      try {
+        const address =
+          server.address();
+
+        assert.ok(
+          address &&
+          typeof address === "object"
+        );
+
+        const apiResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/` +
+            `${secondImport.importId}` +
+            `/errors?warehouseId=` +
+            `${warehouseId}`
+          );
+
+        assert.equal(
+          apiResponse.status,
+          200
+        );
+
+        const apiBody =
+          await apiResponse.json();
+
+        assert.equal(
+          apiBody.success,
+          true
+        );
+
+        assert.equal(
+          apiBody.importId,
+          secondImport.importId
+        );
+
+        assert.equal(
+          apiBody.warehouseId,
+          warehouseId
+        );
+
+        assert.equal(
+          apiBody.count,
+          1
+        );
+
+        assert.equal(
+          apiBody.errors.length,
+          1
+        );
+
+        assert.equal(
+          apiBody.errors[0]
+            .sourceRowNumber,
+          2
+        );
+
+        assert.equal(
+          apiBody.errors[0].article,
+          "!!!"
+        );
+
+        assert.equal(
+          apiBody.errors[0].name,
+          "Ошибочная строка"
+        );
+
+        assert.equal(
+          Number(
+            apiBody.errors[0].price
+          ),
+          300
+        );
+
+        assert.equal(
+          Number(
+            apiBody.errors[0].quantity
+          ),
+          1
+        );
+
+        assert.match(
+          apiBody.errors[0]
+            .errorMessage,
+          /нормализац/i
+        );
+
+        assert.deepEqual(
+          apiBody.errors[0].rawData,
+          [
+            "!!!",
+            "Ошибочная строка",
+            "300",
+            "1",
+          ]
+        );
+
+
+        const foreignResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/` +
+            `${secondImport.importId}` +
+            `/errors?warehouseId=` +
+            `${warehouseId + 1000000}`
+          );
+
+        assert.equal(
+          foreignResponse.status,
+          200
+        );
+
+        const foreignBody =
+          await foreignResponse.json();
+
+        assert.equal(
+          foreignBody.count,
+          0
+        );
+      } finally {
+        await new Promise(
+          (resolve, reject) => {
+            server.close(
+              (error) => {
+                if (error) {
+                  reject(error);
+                  return;
+                }
+
+                resolve();
+              }
+            );
+          }
+        );
+      }
     } finally {
       const db = await pool.connect();
 
