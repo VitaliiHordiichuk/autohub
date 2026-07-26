@@ -43,7 +43,7 @@ export const WarehouseImportSettingsService = {
         warehouseId,
 
         brandMode:
-          data.brandMode ?? "NONE",
+          data.brandMode ?? "FROM_FILE",
 
         fixedBrandId:
           data.fixedBrandId ?? null,
@@ -89,7 +89,6 @@ export const WarehouseImportSettingsService = {
 
 
     const allowedModes = [
-      "NONE",
       "FIXED",
       "FROM_FILE"
     ];

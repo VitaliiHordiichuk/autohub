@@ -32,7 +32,7 @@ export const WarehouseImportSettingsRepository = {
   async create(
     {
       warehouseId,
-      brandMode = "NONE",
+      brandMode = "FROM_FILE",
       fixedBrandId = null,
       brandColumn = null,
       articleColumn = 1,

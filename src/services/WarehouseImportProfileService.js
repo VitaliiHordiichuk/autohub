@@ -1,7 +1,7 @@
 import { pool } from "../config/db.js";
 
 const FILE_TYPES = ["CSV", "XLSX"];
-const BRAND_MODES = ["NONE", "FIXED", "FROM_FILE"];
+const BRAND_MODES = ["FIXED", "FROM_FILE"];
 const EMAIL_MATCH_MODES = [
   "SENDER_ONLY",
   "SUBJECT",
@@ -362,7 +362,7 @@ export const WarehouseImportProfileService = {
       .toUpperCase();
 
     const brandMode = String(
-      data.brandMode ?? "NONE"
+      data.brandMode ?? "FROM_FILE"
     )
       .trim()
       .toUpperCase();
