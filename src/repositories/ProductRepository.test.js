@@ -34,3 +34,12 @@ test("находит предложения товара", async () => {
     "Основной склад Mercedes"
   );
 });
+
+test("возвращает эффективную ручную цену предложения", async () => {
+  const offer =
+    await ProductRepository.findOfferById(1);
+
+  assert.ok(offer);
+  assert.equal(offer.retailPrice, 550);
+  assert.equal(offer.isAvailable, true);
+});

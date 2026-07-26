@@ -239,34 +239,10 @@ async findRelatedProducts(productId, relationType) {
 
   return result.rows;
 },
-async findOfferById(id) {
-
-    const sql = `
-        SELECT *
-        FROM product_offers
-        WHERE id=$1
-    `;
-
-    const result =
-        await pool.query(sql, [id]);
-
-    if (!result.rows.length) {
-        return null;
-    }
-
-    const offer = result.rows[0];
-
-    return {
-        id: offer.id,
-        productId: offer.product_id,
-        quantity: Number(offer.quantity),
-        retailPrice: Number(offer.retail_price),
-        purchasePrice: Number(offer.purchase_price),
-        sourceType: offer.source_type,
-        isAvailable: Number(offer.quantity) > 0
-    };
-},
-async findOfferByIdForUpdate(id, db = pool) {
+async findOfferById(
+  id,
+  db = pool
+) {
   const sql = `
     SELECT
       id,
@@ -275,15 +251,30 @@ async findOfferByIdForUpdate(id, db = pool) {
       supplier_id,
       quantity,
       purchase_price,
-      retail_price,
+
+      CASE
+        WHEN price_mode = 'MANUAL'
+          AND manual_retail_price IS NOT NULL
+        THEN manual_retail_price
+        ELSE retail_price
+      END AS retail_price,
+
       source_type,
-      is_available
+      is_available,
+      is_hidden
+
     FROM product_offers
+
     WHERE id = $1
-    FOR UPDATE;
+
+    LIMIT 1;
   `;
 
-  const result = await db.query(sql, [id]);
+  const result =
+    await db.query(
+      sql,
+      [id]
+    );
 
   if (!result.rows.length) {
     return null;
@@ -292,25 +283,128 @@ async findOfferByIdForUpdate(id, db = pool) {
   const offer = result.rows[0];
 
   return {
-    id: offer.id,
-    productId: offer.product_id,
-    warehouseId: offer.warehouse_id,
-    supplierId: offer.supplier_id,
-    quantity: Number(offer.quantity),
+    id:
+      Number(offer.id),
+
+    productId:
+      Number(offer.product_id),
+
+    warehouseId:
+      offer.warehouse_id === null
+        ? null
+        : Number(offer.warehouse_id),
+
+    supplierId:
+      offer.supplier_id === null
+        ? null
+        : Number(offer.supplier_id),
+
+    quantity:
+      Number(offer.quantity),
+
     retailPrice:
       offer.retail_price === null
         ? null
         : Number(offer.retail_price),
+
     purchasePrice:
       offer.purchase_price === null
         ? null
         : Number(offer.purchase_price),
-    sourceType: offer.source_type,
+
+    sourceType:
+      offer.source_type,
+
     isAvailable:
       offer.is_available === true &&
+      offer.is_hidden !== true &&
       Number(offer.quantity) > 0,
   };
 },
+
+async findOfferByIdForUpdate(
+  id,
+  db = pool
+) {
+  const sql = `
+    SELECT
+      id,
+      product_id,
+      warehouse_id,
+      supplier_id,
+      quantity,
+      purchase_price,
+
+      CASE
+        WHEN price_mode = 'MANUAL'
+          AND manual_retail_price IS NOT NULL
+        THEN manual_retail_price
+        ELSE retail_price
+      END AS retail_price,
+
+      source_type,
+      is_available,
+      is_hidden
+
+    FROM product_offers
+
+    WHERE id = $1
+
+    FOR UPDATE;
+  `;
+
+  const result =
+    await db.query(
+      sql,
+      [id]
+    );
+
+  if (!result.rows.length) {
+    return null;
+  }
+
+  const offer = result.rows[0];
+
+  return {
+    id:
+      Number(offer.id),
+
+    productId:
+      Number(offer.product_id),
+
+    warehouseId:
+      offer.warehouse_id === null
+        ? null
+        : Number(offer.warehouse_id),
+
+    supplierId:
+      offer.supplier_id === null
+        ? null
+        : Number(offer.supplier_id),
+
+    quantity:
+      Number(offer.quantity),
+
+    retailPrice:
+      offer.retail_price === null
+        ? null
+        : Number(offer.retail_price),
+
+    purchasePrice:
+      offer.purchase_price === null
+        ? null
+        : Number(offer.purchase_price),
+
+    sourceType:
+      offer.source_type,
+
+    isAvailable:
+      offer.is_available === true &&
+      offer.is_hidden !== true &&
+      Number(offer.quantity) > 0,
+  };
+},
+
 async decreaseQuantityForSale(
   productOfferId,
   quantity,
