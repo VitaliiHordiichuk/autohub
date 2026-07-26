@@ -87,6 +87,8 @@ export const ImportRepository = {
       status = "NEW",
       errorMessage = null,
       productOfferId = null,
+      sourceRowNumber = null,
+      rawData = null,
     },
     db = pool
   ) {
@@ -102,12 +104,14 @@ export const ImportRepository = {
         brand,
         status,
         error_message,
-        product_offer_id
+        product_offer_id,
+        source_row_number,
+        raw_data
       )
 
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
       )
 
       RETURNING *;
@@ -126,6 +130,10 @@ export const ImportRepository = {
         status,
         errorMessage,
         productOfferId,
+        sourceRowNumber,
+        rawData === null
+          ? null
+          : JSON.stringify(rawData),
       ]
     );
 
@@ -177,6 +185,56 @@ export const ImportRepository = {
     return result.rows[0];
 
   },
+
+
+  async findErrorRows(
+    {
+      importId,
+      warehouseId,
+    },
+    db = pool
+  ) {
+    const sql = `
+      SELECT
+        ir.id,
+        ir.import_id,
+        ir.source_row_number,
+        ir.article,
+        ir.name,
+        ir.price,
+        ir.quantity,
+        ir.brand,
+        ir.error_message,
+        ir.raw_data,
+        ir.created_at
+
+      FROM import_rows ir
+
+      INNER JOIN imports i
+        ON i.id = ir.import_id
+
+      WHERE
+        ir.import_id = $1
+        AND i.warehouse_id = $2
+        AND ir.status = 'ERROR'
+
+      ORDER BY
+        ir.source_row_number NULLS LAST,
+        ir.id;
+    `;
+
+    const result =
+      await db.query(
+        sql,
+        [
+          importId,
+          warehouseId,
+        ]
+      );
+
+    return result.rows;
+  },
+
 
 
 };

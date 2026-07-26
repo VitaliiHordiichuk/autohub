@@ -694,6 +694,9 @@
 import { ImportService } from "../services/ImportService.js";
 import { ImportFileParserService } from "../services/ImportFileParserService.js";
 import { WarehouseSupplierImportRepository } from "../repositories/WarehouseSupplierImportRepository.js";
+
+import { ImportRepository }
+from "../repositories/ImportRepository.js";
 import {
   BrandAliasRepository,
   normalizeBrandAlias,
@@ -806,6 +809,9 @@ function normalizeImportedRow(
   }
 
   return {
+    rowNumber,
+    rawData: row,
+
     brand:
       brand || null,
     article,
@@ -824,6 +830,7 @@ function buildImportErrorRow(
 ) {
   return {
     rowNumber,
+    rawData: row,
 
     article:
       readColumn(
@@ -1304,3 +1311,86 @@ export async function previewImport(
     });
   }
 }
+
+export async function getImportErrors(
+  req,
+  res
+) {
+  try {
+    const importId =
+      parsePositiveInteger(
+        req.params.importId,
+        "Некорректный номер импорта"
+      );
+
+    const warehouseId =
+      parsePositiveInteger(
+        req.query.warehouseId,
+        "Некорректный номер склада"
+      );
+
+    const rows =
+      await ImportRepository
+        .findErrorRows({
+          importId,
+          warehouseId,
+        });
+
+    return res.json({
+      success: true,
+      importId,
+      warehouseId,
+      count: rows.length,
+
+      errors:
+        rows.map(
+          (row) => ({
+            id:
+              Number(row.id),
+
+            sourceRowNumber:
+              row.source_row_number === null
+                ? null
+                : Number(
+                    row.source_row_number
+                  ),
+
+            article:
+              row.article,
+
+            name:
+              row.name,
+
+            price:
+              row.price,
+
+            quantity:
+              row.quantity,
+
+            brand:
+              row.brand,
+
+            errorMessage:
+              row.error_message,
+
+            rawData:
+              row.raw_data,
+
+            createdAt:
+              row.created_at,
+          })
+        ),
+    });
+  } catch(error) {
+    console.error(
+      "Ошибка получения строк импорта:",
+      error
+    );
+
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+

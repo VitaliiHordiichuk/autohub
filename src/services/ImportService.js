@@ -410,6 +410,20 @@ export const ImportService = {
 
               productOfferId:
                 null,
+
+              sourceRowNumber:
+                Number.isInteger(
+                  Number(
+                    errorRow?.rowNumber
+                  )
+                )
+                  ? Number(
+                      errorRow.rowNumber
+                    )
+                  : null,
+
+              rawData:
+                errorRow?.rawData ?? null,
             },
             db
           );
@@ -763,6 +777,20 @@ export const ImportService = {
 
                 productOfferId:
                   null,
+
+                sourceRowNumber:
+                  Number.isInteger(
+                    Number(
+                      row?.rowNumber
+                    )
+                  )
+                    ? Number(
+                        row.rowNumber
+                      )
+                    : null,
+
+                rawData:
+                  row?.rawData ?? null,
               },
               db
             );
@@ -835,8 +863,10 @@ export const ImportService = {
         );
 
 
-      await db.query("COMMIT");
+      result.importId =
+        Number(importRecord.id);
 
+      await db.query("COMMIT");
 
       return result;
 

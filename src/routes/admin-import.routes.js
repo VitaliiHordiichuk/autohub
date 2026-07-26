@@ -3,7 +3,8 @@ import express from "express";
 import {
   testImport,
   uploadImport,
-  previewImport
+  previewImport,
+  getImportErrors
 }
 from "../controllers/admin-import.controller.js";
 
@@ -30,6 +31,12 @@ router.post(
   upload.single("file"),
   previewImport
 );
+
+router.get(
+  "/:importId/errors",
+  getImportErrors
+);
+
 
 export {
   router as adminImportRouter
