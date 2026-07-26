@@ -353,7 +353,14 @@ export const ImportService = {
 
         successRows:
           0,
+
+        missingOffersDisabled:
+          0,
       };
+
+
+      const importedOfferIds =
+        new Set();
 
 
       for (
@@ -666,6 +673,11 @@ export const ImportService = {
             );
 
 
+          importedOfferIds.add(
+            Number(productOfferId)
+          );
+
+
           await db.query(
             `RELEASE SAVEPOINT ${savepointName}`
           );
@@ -761,6 +773,33 @@ export const ImportService = {
 
         }
 
+      }
+
+
+      if (
+        result.errors === 0 &&
+        result.successRows > 0
+      ) {
+        const disabledOffers =
+          await ProductRepository
+            .disableMissingSupplierOffers(
+              {
+                warehouseId:
+                  context.warehouseId,
+
+                supplierId,
+
+                activeOfferIds:
+                  Array.from(
+                    importedOfferIds
+                  ),
+              },
+              db
+            );
+
+
+        result.missingOffersDisabled =
+          disabledOffers.length;
       }
 
 

@@ -621,4 +621,69 @@ async findOfferByProductAndWarehouse(
 
   return result.rows[0] ?? null;
 },
+
+  async disableMissingSupplierOffers(
+    {
+      warehouseId,
+      supplierId,
+      activeOfferIds = [],
+    },
+    db = pool
+  ) {
+    const safeOfferIds =
+      Array.from(
+        new Set(
+          activeOfferIds
+            .map(
+              (value) =>
+                Number(value)
+            )
+            .filter(
+              (value) =>
+                Number.isInteger(value) &&
+                value > 0
+            )
+        )
+      );
+
+
+    const result =
+      await db.query(
+        `
+          UPDATE product_offers
+
+          SET
+            quantity = 0,
+            is_available = FALSE,
+            updated_at = CURRENT_TIMESTAMP
+
+          WHERE warehouse_id = $1
+            AND supplier_id = $2
+            AND source_type = 'SUPPLIER'
+
+            AND (
+              COALESCE(quantity, 0) <> 0
+              OR
+              is_available IS DISTINCT FROM FALSE
+            )
+
+            AND NOT (
+              id = ANY(
+                $3::integer[]
+              )
+            )
+
+          RETURNING id;
+        `,
+        [
+          warehouseId,
+          supplierId,
+          safeOfferIds,
+        ]
+      );
+
+
+    return result.rows;
+  },
+
 };
