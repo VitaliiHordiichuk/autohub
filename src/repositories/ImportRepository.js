@@ -191,51 +191,144 @@ export const ImportRepository = {
   async findHistoryByWarehouse(
     {
       warehouseId,
-      limit = 20,
+      page = 1,
+      pageSize = 20,
+      dateFrom = null,
+      dateTo = null,
+      importMethod = null,
+      status = null,
     },
     db = pool
   ) {
-    const sql = `
-      SELECT
-        id,
-        warehouse_id,
-        supplier_id,
-        warehouse_supplier_import_id,
-        source,
-        file_name,
-        file_type,
-        import_method,
-        status,
-        total_rows,
-        success_rows,
-        error_rows,
-        created_at
+    const offset =
+      (page - 1) * pageSize;
 
-      FROM imports
+    const filterSql = `
+      warehouse_id = $1
 
-      WHERE warehouse_id = $1
+      AND (
+        $2::date IS NULL
+        OR created_at >= $2::date
+      )
 
-      ORDER BY
-        created_at DESC,
-        id DESC
+      AND (
+        $3::date IS NULL
+        OR created_at <
+          (
+            $3::date +
+            INTERVAL '1 day'
+          )
+      )
 
-      LIMIT $2;
+      AND (
+        $4::text IS NULL
+        OR import_method = $4
+      )
+
+      AND (
+        $5::text IS NULL
+
+        OR (
+          $5 = 'WITH_ERRORS'
+          AND COALESCE(
+            error_rows,
+            0
+          ) > 0
+        )
+
+        OR (
+          $5 = 'COMPLETED'
+          AND COALESCE(
+            error_rows,
+            0
+          ) = 0
+          AND status = 'COMPLETED'
+        )
+
+        OR (
+          $5 = 'FAILED'
+          AND status = 'FAILED'
+        )
+
+        OR (
+          $5 = 'PROCESSING'
+          AND status = 'PROCESSING'
+        )
+      )
     `;
 
-    const result =
+    const filterValues = [
+      warehouseId,
+      dateFrom,
+      dateTo,
+      importMethod,
+      status,
+    ];
+
+    const countResult =
       await db.query(
-        sql,
+        `
+          SELECT
+            COUNT(*)::integer AS total
+
+          FROM imports
+
+          WHERE ${filterSql};
+        `,
+        filterValues
+      );
+
+    const rowsResult =
+      await db.query(
+        `
+          SELECT
+            id,
+            warehouse_id,
+            supplier_id,
+            warehouse_supplier_import_id,
+            source,
+            file_name,
+            file_type,
+            import_method,
+            status,
+            total_rows,
+            success_rows,
+            error_rows,
+            created_at
+
+          FROM imports
+
+          WHERE ${filterSql}
+
+          ORDER BY
+            created_at DESC,
+            id DESC
+
+          LIMIT $6
+          OFFSET $7;
+        `,
         [
-          warehouseId,
-          limit,
+          ...filterValues,
+          pageSize,
+          offset,
         ]
       );
 
-    return result.rows;
+    return {
+      rows:
+        rowsResult.rows,
+
+      total:
+        Number(
+          countResult.rows[0]
+            ?.total ?? 0
+        ),
+    };
   },
 
 
   async findErrorRows(
+
     {
       importId,
       warehouseId,

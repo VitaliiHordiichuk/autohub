@@ -550,6 +550,118 @@ test(
         );
 
 
+
+        const firstPageResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/history?` +
+            `warehouseId=${warehouseId}` +
+            `&page=1&pageSize=1`
+          );
+
+        assert.equal(
+          firstPageResponse.status,
+          200
+        );
+
+        const firstPage =
+          await firstPageResponse.json();
+
+        assert.equal(
+          firstPage.count,
+          1
+        );
+
+        assert.equal(
+          firstPage.pagination.page,
+          1
+        );
+
+        assert.equal(
+          firstPage.pagination.pageSize,
+          1
+        );
+
+        assert.equal(
+          firstPage.pagination.total,
+          2
+        );
+
+        assert.equal(
+          firstPage.pagination.totalPages,
+          2
+        );
+
+        assert.equal(
+          firstPage.pagination.hasPrevious,
+          false
+        );
+
+        assert.equal(
+          firstPage.pagination.hasNext,
+          true
+        );
+
+        assert.equal(
+          firstPage.imports[0].id,
+          secondImport.importId
+        );
+
+
+        const secondPageResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/history?` +
+            `warehouseId=${warehouseId}` +
+            `&page=2&pageSize=1`
+          );
+
+        assert.equal(
+          secondPageResponse.status,
+          200
+        );
+
+        const secondPage =
+          await secondPageResponse.json();
+
+        assert.equal(
+          secondPage.pagination.page,
+          2
+        );
+
+        assert.equal(
+          secondPage.pagination.hasPrevious,
+          true
+        );
+
+        assert.equal(
+          secondPage.pagination.hasNext,
+          false
+        );
+
+        assert.equal(
+          secondPage.imports[0].id,
+          firstImport.importId
+        );
+
+
+        const invalidPageResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/history?` +
+            `warehouseId=${warehouseId}` +
+            `&page=0&pageSize=20`
+          );
+
+        assert.equal(
+          invalidPageResponse.status,
+          400
+        );
+
+
         const foreignResponse =
           await fetch(
             `http://127.0.0.1:` +

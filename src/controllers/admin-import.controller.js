@@ -1324,33 +1324,222 @@ export async function getImportHistory(
         "Некорректный номер склада"
       );
 
-    const requestedLimit =
-      Number(
-        req.query.limit ?? 20
+    const page =
+      parsePositiveInteger(
+        req.query.page ?? 1,
+        "Некорректный номер страницы"
       );
 
-    const limit =
-      Number.isInteger(
-        requestedLimit
-      ) &&
-      requestedLimit > 0
-        ? Math.min(
-            requestedLimit,
-            100
-          )
-        : 20;
+    const requestedPageSize =
+      Number(
+        req.query.pageSize ??
+        req.query.limit ??
+        20
+      );
 
-    const rows =
+    if (
+      !Number.isInteger(
+        requestedPageSize
+      ) ||
+      requestedPageSize <= 0
+    ) {
+      throw new Error(
+        "Некорректный размер страницы"
+      );
+    }
+
+    const pageSize =
+      Math.min(
+        requestedPageSize,
+        100
+      );
+
+
+    function parseOptionalDate(
+      value,
+      label
+    ) {
+      if (
+        value === undefined ||
+        value === null ||
+        value === ""
+      ) {
+        return null;
+      }
+
+      const text =
+        String(value);
+
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/
+          .test(text)
+      ) {
+        throw new Error(
+          `Некорректная дата: ${label}`
+        );
+      }
+
+      const parsed =
+        new Date(
+          `${text}T00:00:00Z`
+        );
+
+      if (
+        Number.isNaN(
+          parsed.getTime()
+        ) ||
+        parsed
+          .toISOString()
+          .slice(0, 10) !== text
+      ) {
+        throw new Error(
+          `Некорректная дата: ${label}`
+        );
+      }
+
+      return text;
+    }
+
+
+    const dateFrom =
+      parseOptionalDate(
+        req.query.dateFrom,
+        "с"
+      );
+
+    const dateTo =
+      parseOptionalDate(
+        req.query.dateTo,
+        "по"
+      );
+
+    if (
+      dateFrom &&
+      dateTo &&
+      dateFrom > dateTo
+    ) {
+      throw new Error(
+        "Дата начала не может быть позже даты окончания"
+      );
+    }
+
+
+    const rawMethod =
+      req.query.importMethod ===
+        undefined ||
+      req.query.importMethod ===
+        null ||
+      req.query.importMethod ===
+        ""
+        ? null
+        : String(
+            req.query.importMethod
+          )
+            .trim()
+            .toUpperCase();
+
+    const allowedMethods =
+      new Set([
+        "MANUAL",
+        "EMAIL",
+      ]);
+
+    const importMethod =
+      rawMethod === null
+        ? null
+        : allowedMethods.has(
+            rawMethod
+          )
+          ? rawMethod
+          : (() => {
+              throw new Error(
+                "Некорректный способ импорта"
+              );
+            })();
+
+
+    const rawStatus =
+      req.query.status ===
+        undefined ||
+      req.query.status ===
+        null ||
+      req.query.status ===
+        ""
+        ? null
+        : String(
+            req.query.status
+          )
+            .trim()
+            .toUpperCase();
+
+    const allowedStatuses =
+      new Set([
+        "COMPLETED",
+        "WITH_ERRORS",
+        "FAILED",
+        "PROCESSING",
+      ]);
+
+    const status =
+      rawStatus === null
+        ? null
+        : allowedStatuses.has(
+            rawStatus
+          )
+          ? rawStatus
+          : (() => {
+              throw new Error(
+                "Некорректный статус импорта"
+              );
+            })();
+
+
+    const {
+      rows,
+      total,
+    } =
       await ImportRepository
         .findHistoryByWarehouse({
           warehouseId,
-          limit,
+          page,
+          pageSize,
+          dateFrom,
+          dateTo,
+          importMethod,
+          status,
         });
+
+    const totalPages =
+      Math.max(
+        1,
+        Math.ceil(
+          total / pageSize
+        )
+      );
 
     return res.json({
       success: true,
       warehouseId,
       count: rows.length,
+
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasPrevious:
+          page > 1,
+
+        hasNext:
+          page < totalPages,
+      },
+
+      filters: {
+        dateFrom,
+        dateTo,
+        importMethod,
+        status,
+      },
 
       imports:
         rows.map(
@@ -1429,6 +1618,7 @@ export async function getImportHistory(
 
 
 export async function getImportErrors(
+
   req,
   res
 ) {
