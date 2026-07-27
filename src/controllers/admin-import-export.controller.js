@@ -45,6 +45,96 @@ function formatRawData(value) {
 }
 
 
+function extractLegacyRowNumber(
+  errorMessage
+) {
+  const text =
+    String(
+      errorMessage ?? ""
+    ).trim();
+
+  const match =
+    text.match(
+      /^(?:Строка|Рядок|Row)\s+(\d+)\s*:\s*/i
+    );
+
+  if (!match) {
+    return {
+      rowNumber: null,
+      cleanMessage: text,
+    };
+  }
+
+  return {
+    rowNumber:
+      Number(match[1]),
+
+    cleanMessage:
+      text
+        .slice(
+          match[0].length
+        )
+        .trim(),
+  };
+}
+
+
+export function buildImportErrorExportRow(
+  row
+) {
+  const legacy =
+    extractLegacyRowNumber(
+      row.error_message
+    );
+
+  const storedRowNumber =
+    row.source_row_number === null ||
+    row.source_row_number === undefined
+      ? null
+      : Number(
+          row.source_row_number
+        );
+
+  return {
+    "Строка файла":
+      Number.isInteger(
+        storedRowNumber
+      )
+        ? storedRowNumber
+        : legacy.rowNumber ?? "",
+
+    "Бренд":
+      row.brand ?? "",
+
+    "Артикул":
+      row.article ?? "",
+
+    "Название":
+      row.name ?? "",
+
+    "Количество":
+      row.quantity === null ||
+      row.quantity === undefined
+        ? ""
+        : Number(row.quantity),
+
+    "Цена":
+      row.price === null ||
+      row.price === undefined
+        ? ""
+        : Number(row.price),
+
+    "Причина ошибки":
+      legacy.cleanMessage,
+
+    "Исходные данные":
+      formatRawData(
+        row.raw_data
+      ),
+  };
+}
+
+
 export async function downloadImportErrorsXlsx(
   req,
   res
@@ -71,41 +161,7 @@ export async function downloadImportErrorsXlsx(
 
     const exportRows =
       rows.map(
-        (row) => ({
-          "Строка файла":
-            row.source_row_number === null
-              ? ""
-              : Number(
-                  row.source_row_number
-                ),
-
-          "Бренд":
-            row.brand ?? "",
-
-          "Артикул":
-            row.article ?? "",
-
-          "Название":
-            row.name ?? "",
-
-          "Количество":
-            row.quantity === null
-              ? ""
-              : Number(row.quantity),
-
-          "Цена":
-            row.price === null
-              ? ""
-              : Number(row.price),
-
-          "Причина ошибки":
-            row.error_message ?? "",
-
-          "Исходные данные":
-            formatRawData(
-              row.raw_data
-            ),
-        })
+        buildImportErrorExportRow
       );
 
     const headers = [
