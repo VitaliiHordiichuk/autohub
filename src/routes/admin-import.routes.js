@@ -10,6 +10,10 @@ import {
 from "../controllers/admin-import.controller.js";
 
 
+import { downloadImportErrorsXlsx }
+from "../controllers/admin-import-export.controller.js";
+
+
 import { upload } from "../config/upload.js";
 
 
@@ -36,6 +40,12 @@ router.post(
 router.get(
   "/history",
   getImportHistory
+);
+
+
+router.get(
+  "/:importId/errors.xlsx",
+  downloadImportErrorsXlsx
 );
 
 

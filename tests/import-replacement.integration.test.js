@@ -1,5 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import * as XLSX from "xlsx";
 import express from "express";
 
 import { pool } from "../src/config/db.js";
@@ -467,6 +468,85 @@ test(
         assert.equal(
           historyBody.imports[1].errorRows,
           0
+        );
+
+
+        const xlsxResponse =
+          await fetch(
+            `http://127.0.0.1:` +
+            `${address.port}` +
+            `/api/admin/import/` +
+            `${secondImport.importId}` +
+            `/errors.xlsx?warehouseId=` +
+            `${warehouseId}`
+          );
+
+        assert.equal(
+          xlsxResponse.status,
+          200
+        );
+
+        assert.match(
+          xlsxResponse.headers.get(
+            "content-type"
+          ) || "",
+          /spreadsheetml/
+        );
+
+        const xlsxBuffer =
+          Buffer.from(
+            await xlsxResponse.arrayBuffer()
+          );
+
+        const workbook =
+          XLSX.read(
+            xlsxBuffer,
+            {
+              type: "buffer",
+            }
+          );
+
+        assert.ok(
+          workbook.SheetNames.includes(
+            "Ошибки импорта"
+          )
+        );
+
+        const exportedRows =
+          XLSX.utils.sheet_to_json(
+            workbook.Sheets[
+              "Ошибки импорта"
+            ],
+            {
+              defval: "",
+            }
+          );
+
+        assert.equal(
+          exportedRows.length,
+          1
+        );
+
+        assert.equal(
+          exportedRows[0]["Строка файла"],
+          2
+        );
+
+        assert.equal(
+          exportedRows[0]["Артикул"],
+          "!!!"
+        );
+
+        assert.equal(
+          exportedRows[0]["Название"],
+          "Ошибочная строка"
+        );
+
+        assert.match(
+          exportedRows[0][
+            "Причина ошибки"
+          ],
+          /нормализац/i
         );
 
 
