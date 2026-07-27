@@ -69,6 +69,8 @@ test(
             startRow: 1,
             isActive: true,
             emailAutoImportEnabled: false,
+
+            newProductsMode: "AUTO",
           }
         );
 

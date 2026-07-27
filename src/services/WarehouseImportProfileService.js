@@ -1,5 +1,10 @@
 import { pool } from "../config/db.js";
 
+import {
+  normalizeNewProductsMode,
+  normalizePriceThreshold,
+} from "./ImportPolicyService.js";
+
 const FILE_TYPES = ["CSV", "XLSX"];
 const BRAND_MODES = ["FIXED", "FROM_FILE"];
 const EMAIL_MATCH_MODES = [
@@ -133,6 +138,19 @@ function mapProfile(row) {
     priceColumn: Number(row.price_column),
     quantityColumn: Number(row.quantity_column),
     startRow: Number(row.start_row),
+    newProductsMode:
+      row.new_products_mode ||
+      "REVIEW",
+    priceDropThreshold:
+      Number(
+        row.price_drop_threshold ??
+        30
+      ),
+    priceRiseThreshold:
+      Number(
+        row.price_rise_threshold ??
+        40
+      ),
     emailAutoImportEnabled:
       row.email_auto_import_enabled === true,
     emailFrom: row.email_from,
@@ -416,6 +434,32 @@ export const WarehouseImportProfileService = {
       "Некорректная первая строка данных"
     );
 
+    const newProductsMode =
+      normalizeNewProductsMode(
+        data.newProductsMode,
+        { allowUndefined: true }
+      );
+
+    const priceDropThreshold =
+      normalizePriceThreshold(
+        data.priceDropThreshold,
+        "Порог снижения цены",
+        {
+          fallback: 30,
+          allowUndefined: true,
+        }
+      );
+
+    const priceRiseThreshold =
+      normalizePriceThreshold(
+        data.priceRiseThreshold,
+        "Порог роста цены",
+        {
+          fallback: 40,
+          allowUndefined: true,
+        }
+      );
+
     if (
       brandMode === "FIXED" &&
       fixedBrandId === null
@@ -581,6 +625,21 @@ export const WarehouseImportProfileService = {
               email_match_mode = $6,
               email_subject_contains = $7,
               email_filename_contains = $8,
+              new_products_mode =
+                COALESCE(
+                  $9,
+                  new_products_mode
+                ),
+              price_drop_threshold =
+                COALESCE(
+                  $10,
+                  price_drop_threshold
+                ),
+              price_rise_threshold =
+                COALESCE(
+                  $11,
+                  price_rise_threshold
+                ),
               updated_at = CURRENT_TIMESTAMP
             WHERE id = $1
           `,
@@ -593,6 +652,9 @@ export const WarehouseImportProfileService = {
             emailMatchMode,
             emailSubjectContains,
             emailFilenameContains,
+            newProductsMode,
+            priceDropThreshold,
+            priceRiseThreshold,
           ]
         );
       } else {
@@ -669,12 +731,16 @@ export const WarehouseImportProfileService = {
               email_from,
               email_match_mode,
               email_subject_contains,
-              email_filename_contains
+              email_filename_contains,
+              new_products_mode,
+              price_drop_threshold,
+              price_rise_threshold
             )
             VALUES
             (
               $1,$2,$3,$4,$5,
-              $6,$7,$8,$9
+              $6,$7,$8,$9,
+              $10,$11,$12
             )
           `,
           [
@@ -687,6 +753,12 @@ export const WarehouseImportProfileService = {
             emailMatchMode,
             emailSubjectContains,
             emailFilenameContains,
+            newProductsMode ??
+              "REVIEW",
+            priceDropThreshold ??
+              30,
+            priceRiseThreshold ??
+              40,
           ]
         );
       }

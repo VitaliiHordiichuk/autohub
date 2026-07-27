@@ -5,20 +5,26 @@ import {
   uploadImport,
   previewImport,
   getImportHistory,
-  getImportErrors
+  getImportErrors,
 }
 from "../controllers/admin-import.controller.js";
-
 
 import { downloadImportErrorsXlsx }
 from "../controllers/admin-import-export.controller.js";
 
+import {
+  getPendingNewProducts,
+  approveNewProduct,
+  approveAllNewProducts,
+  rejectNewProduct,
+  getImportReport,
+}
+from "../controllers/admin-import-review.controller.js";
 
-import { upload } from "../config/upload.js";
-
+import { upload }
+from "../config/upload.js";
 
 const router = express.Router();
-
 
 router.post(
   "/test",
@@ -42,19 +48,41 @@ router.get(
   getImportHistory
 );
 
+router.get(
+  "/new-products",
+  getPendingNewProducts
+);
+
+router.post(
+  "/new-products/approve-all",
+  approveAllNewProducts
+);
+
+router.post(
+  "/new-products/:reviewId/approve",
+  approveNewProduct
+);
+
+router.post(
+  "/new-products/:reviewId/reject",
+  rejectNewProduct
+);
+
+router.get(
+  "/:importId/report",
+  getImportReport
+);
 
 router.get(
   "/:importId/errors.xlsx",
   downloadImportErrorsXlsx
 );
 
-
 router.get(
   "/:importId/errors",
   getImportErrors
 );
 
-
 export {
-  router as adminImportRouter
+  router as adminImportRouter,
 };

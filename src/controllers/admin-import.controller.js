@@ -1598,6 +1598,44 @@ export async function getImportHistory(
                 row.error_rows ?? 0
               ),
 
+            newProductsCount:
+              Number(
+                row.new_products_count ??
+                0
+              ),
+
+            pendingNewProductsCount:
+              Number(
+                row
+                  .pending_new_products_count ??
+                0
+              ),
+
+            ignoredNewProductsCount:
+              Number(
+                row
+                  .ignored_new_products_count ??
+                0
+              ),
+
+            priceChangesCount:
+              Number(
+                row.price_changes_count ??
+                0
+              ),
+
+            priceDropCount:
+              Number(
+                row.price_drop_count ??
+                0
+              ),
+
+            priceRiseCount:
+              Number(
+                row.price_rise_count ??
+                0
+              ),
+
             createdAt:
               row.created_at,
           })
@@ -1699,4 +1737,3 @@ export async function getImportErrors(
     });
   }
 }
-
