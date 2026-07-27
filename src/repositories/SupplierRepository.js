@@ -256,6 +256,55 @@ async findWarehouses(
   return result.rows;
 },
 
+  async syncLinkedWarehouseTypes(
+    supplierId,
+    supplierType,
+    db = pool
+  ) {
+    const warehouseType =
+      supplierType === "OWN"
+        ? "OWN"
+        : "SUPPLIER";
+
+    const offerSourceType =
+      supplierType === "OWN"
+        ? "OWN_STOCK"
+        : "SUPPLIER";
+
+
+    await db.query(
+      `
+        UPDATE warehouses
+        SET
+          type = $2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE supplier_id = $1;
+      `,
+      [
+        supplierId,
+        warehouseType,
+      ]
+    );
+
+
+    await db.query(
+      `
+        UPDATE product_offers po
+        SET
+          source_type = $2,
+          updated_at = CURRENT_TIMESTAMP
+        FROM warehouses w
+        WHERE w.id = po.warehouse_id
+          AND w.supplier_id = $1;
+      `,
+      [
+        supplierId,
+        offerSourceType,
+      ]
+    );
+  },
+
+
   async setActive(
     supplierId,
     isActive,

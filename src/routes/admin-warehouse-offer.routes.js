@@ -3,8 +3,10 @@ import {
 } from "express";
 
 import {
+  addManualWarehousePosition,
   getOfferPriceHistory,
   listWarehouseOffers,
+  removeOfferUntilNextImport,
   resetAutomaticOfferPrice,
   setManualOfferPrice,
   setOfferVisibility,
@@ -18,6 +20,18 @@ export const adminWarehouseOfferRouter =
 adminWarehouseOfferRouter.get(
   "/:warehouseId/offers",
   listWarehouseOffers
+);
+
+
+adminWarehouseOfferRouter.post(
+  "/:warehouseId/offers/manual",
+  addManualWarehousePosition
+);
+
+
+adminWarehouseOfferRouter.delete(
+  "/:warehouseId/offers/:offerId",
+  removeOfferUntilNextImport
 );
 
 

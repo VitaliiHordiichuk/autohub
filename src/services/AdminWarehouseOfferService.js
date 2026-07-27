@@ -6,6 +6,10 @@ import {
   AdminWarehouseOfferRepository,
 } from "../repositories/AdminWarehouseOfferRepository.js";
 
+import {
+  normalizeArticle,
+} from "./articleEngine/normalize.js";
+
 
 const ALLOWED_STATUSES =
   new Set([
@@ -129,6 +133,59 @@ function parseManualPrice(value) {
   }
 
   return Number(parsed.toFixed(2));
+}
+
+
+function normalizeRequiredText(
+  value,
+  fieldName,
+  maxLength
+) {
+  const text =
+    String(value ?? "")
+      .normalize("NFKC")
+      .trim()
+      .replace(/\s+/g, " ");
+
+  if (!text) {
+    throw createError(
+      `${fieldName}: поле обязательно`
+    );
+  }
+
+  if (text.length > maxLength) {
+    throw createError(
+      `${fieldName}: превышена допустимая длина`
+    );
+  }
+
+  return text;
+}
+
+
+function parseNonNegativeNumber(
+  value,
+  fieldName
+) {
+  const parsed =
+    Number(
+      String(value ?? "")
+        .replace(",", ".")
+        .trim()
+    );
+
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < 0
+  ) {
+    throw createError(
+      `${fieldName}: должно быть числом не меньше нуля`
+    );
+  }
+
+  return Number(
+    parsed.toFixed(2)
+  );
 }
 
 
@@ -502,6 +559,315 @@ export const AdminWarehouseOfferService = {
       offers:
         result.rows.map(mapOffer),
     };
+  },
+
+
+  async addManualPosition({
+    warehouseId,
+    brandId,
+    article,
+    name,
+    quantity,
+    purchasePrice,
+  }) {
+    const normalizedWarehouseId =
+      parsePositiveInteger(
+        warehouseId,
+        "warehouseId"
+      );
+
+    const normalizedBrandId =
+      parsePositiveInteger(
+        brandId,
+        "brandId"
+      );
+
+    const normalizedArticle =
+      normalizeRequiredText(
+        article,
+        "Артикул",
+        100
+      );
+
+    const articleNormalized =
+      normalizeArticle(
+        normalizedArticle
+      );
+
+    if (!articleNormalized) {
+      throw createError(
+        "После нормализации артикул оказался пустым"
+      );
+    }
+
+    const normalizedName =
+      normalizeRequiredText(
+        name,
+        "Название",
+        255
+      );
+
+    const normalizedQuantity =
+      parseNonNegativeNumber(
+        quantity,
+        "Количество"
+      );
+
+    const normalizedPurchasePrice =
+      parseNonNegativeNumber(
+        purchasePrice,
+        "Цена"
+      );
+
+    return transaction(async (db) => {
+      const warehouse =
+        await requireWarehouse(
+          normalizedWarehouseId,
+          db
+        );
+
+      const brand =
+        await AdminWarehouseOfferRepository
+          .findBrandById(
+            normalizedBrandId,
+            db
+          );
+
+      if (
+        !brand ||
+        brand.is_active !== true
+      ) {
+        throw createError(
+          "Бренд не найден или отключён",
+          404
+        );
+      }
+
+      let product =
+        await AdminWarehouseOfferRepository
+          .findProductByBrandAndArticle(
+            {
+              brandId:
+                normalizedBrandId,
+
+              articleNormalized,
+            },
+            db
+          );
+
+      let productCreated = false;
+
+      if (!product) {
+        product =
+          await AdminWarehouseOfferRepository
+            .createProduct(
+              {
+                brandId:
+                  normalizedBrandId,
+
+                article:
+                  normalizedArticle,
+
+                articleNormalized,
+
+                name:
+                  normalizedName,
+              },
+              db
+            );
+
+        productCreated = true;
+      }
+
+      const existingOffer =
+        await AdminWarehouseOfferRepository
+          .findOfferByProductAndWarehouseForUpdate(
+            {
+              productId:
+                Number(product.id),
+
+              warehouseId:
+                normalizedWarehouseId,
+            },
+            db
+          );
+
+      const supplierId =
+        warehouse.supplier_id === null
+          ? null
+          : Number(
+              warehouse.supplier_id
+            );
+
+      const sourceType =
+        supplierId !== null
+          ? "SUPPLIER"
+          : "OWN_STOCK";
+
+      const deliveryDays =
+        Number(
+          warehouse.delivery_days ?? 0
+        );
+
+      let offer;
+
+      if (existingOffer) {
+        offer =
+          await AdminWarehouseOfferRepository
+            .updateManualOffer(
+              {
+                offerId:
+                  Number(
+                    existingOffer.id
+                  ),
+
+                supplierId,
+                quantity:
+                  normalizedQuantity,
+
+                purchasePrice:
+                  normalizedPurchasePrice,
+
+                deliveryDays,
+                sourceType,
+              },
+              db
+            );
+      } else {
+        offer =
+          await AdminWarehouseOfferRepository
+            .createManualOffer(
+              {
+                productId:
+                  Number(product.id),
+
+                warehouseId:
+                  normalizedWarehouseId,
+
+                supplierId,
+                quantity:
+                  normalizedQuantity,
+
+                purchasePrice:
+                  normalizedPurchasePrice,
+
+                deliveryDays,
+                sourceType,
+              },
+              db
+            );
+      }
+
+      return {
+        created:
+          !existingOffer,
+
+        productCreated,
+
+        product: {
+          id:
+            Number(product.id),
+
+          brandId:
+            normalizedBrandId,
+
+          article:
+            product.article,
+
+          articleNormalized:
+            product.article_normalized,
+
+          name:
+            product.name,
+        },
+
+        offer: {
+          id:
+            Number(offer.id),
+
+          warehouseId:
+            normalizedWarehouseId,
+
+          supplierId,
+          quantity:
+            Number(offer.quantity),
+
+          purchasePrice:
+            toNumberOrNull(
+              offer.purchase_price
+            ),
+
+          sourceType:
+            offer.source_type,
+
+          isAvailable:
+            offer.is_available === true,
+
+          isHidden:
+            offer.is_hidden === true,
+        },
+      };
+    });
+  },
+
+
+  async removeUntilNextImport({
+    warehouseId,
+    offerId,
+  }) {
+    const normalizedWarehouseId =
+      parsePositiveInteger(
+        warehouseId,
+        "warehouseId"
+      );
+
+    const normalizedOfferId =
+      parsePositiveInteger(
+        offerId,
+        "offerId"
+      );
+
+    return transaction(async (db) => {
+      await requireWarehouse(
+        normalizedWarehouseId,
+        db
+      );
+
+      const oldOffer =
+        await requireOfferForUpdate(
+          {
+            warehouseId:
+              normalizedWarehouseId,
+
+            offerId:
+              normalizedOfferId,
+          },
+          db
+        );
+
+      const updated =
+        await AdminWarehouseOfferRepository
+          .removeUntilNextImport(
+            normalizedOfferId,
+            db
+          );
+
+      return {
+        offer: mapOffer({
+          ...oldOffer,
+          ...updated,
+
+          automatic_retail_price:
+            updated.retail_price,
+
+          effective_retail_price:
+            updated.price_mode ===
+              "MANUAL"
+              ? updated.manual_retail_price
+              : updated.retail_price,
+        }),
+      };
+    });
   },
 
 

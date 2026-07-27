@@ -66,6 +66,84 @@ export async function listWarehouseOffers(
 }
 
 
+export async function addManualWarehousePosition(
+  req,
+  res
+) {
+  try {
+    const result =
+      await AdminWarehouseOfferService
+        .addManualPosition({
+          warehouseId:
+            req.params.warehouseId,
+
+          brandId:
+            req.body.brandId,
+
+          article:
+            req.body.article,
+
+          name:
+            req.body.name,
+
+          quantity:
+            req.body.quantity,
+
+          purchasePrice:
+            req.body.purchasePrice,
+        });
+
+    return res.status(201).json({
+      success: true,
+      message:
+        result.created
+          ? "Позиция добавлена на склад"
+          : "Позиция склада обновлена",
+      ...result,
+    });
+
+  } catch(error) {
+    return sendError(
+      res,
+      error,
+      "Ошибка ручного добавления позиции"
+    );
+  }
+}
+
+
+export async function removeOfferUntilNextImport(
+  req,
+  res
+) {
+  try {
+    const result =
+      await AdminWarehouseOfferService
+        .removeUntilNextImport({
+          warehouseId:
+            req.params.warehouseId,
+
+          offerId:
+            req.params.offerId,
+        });
+
+    return res.json({
+      success: true,
+      message:
+        "Позиция убрана со склада до следующего импорта",
+      ...result,
+    });
+
+  } catch(error) {
+    return sendError(
+      res,
+      error,
+      "Ошибка удаления позиции со склада"
+    );
+  }
+}
+
+
 export async function setManualOfferPrice(
   req,
   res

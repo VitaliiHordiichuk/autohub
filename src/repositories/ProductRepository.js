@@ -719,7 +719,6 @@ async findOfferByProductAndWarehouse(
   async disableMissingSupplierOffers(
     {
       warehouseId,
-      supplierId,
       activeOfferIds = [],
     },
     db = pool
@@ -752,8 +751,6 @@ async findOfferByProductAndWarehouse(
             updated_at = CURRENT_TIMESTAMP
 
           WHERE warehouse_id = $1
-            AND supplier_id = $2
-            AND source_type = 'SUPPLIER'
 
             AND (
               COALESCE(quantity, 0) <> 0
@@ -763,7 +760,7 @@ async findOfferByProductAndWarehouse(
 
             AND NOT (
               id = ANY(
-                $3::integer[]
+                $2::integer[]
               )
             )
 
@@ -771,7 +768,6 @@ async findOfferByProductAndWarehouse(
         `,
         [
           warehouseId,
-          supplierId,
           safeOfferIds,
         ]
       );

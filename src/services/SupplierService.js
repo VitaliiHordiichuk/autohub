@@ -1,3 +1,4 @@
+import { transaction } from "../db/transaction.js";
 import { SupplierRepository } from "../repositories/SupplierRepository.js";
 
 
@@ -218,7 +219,7 @@ export const SupplierService = {
 
     if (
       data.name !== undefined &&
-      !data.name.trim()
+      !String(data.name).trim()
     ) {
       throw new Error(
         "Название поставщика не может быть пустым"
@@ -236,29 +237,57 @@ export const SupplierService = {
     }
 
 
-    return await SupplierRepository.update(
-      id,
-      {
-        ...data,
+    const normalizedType =
+      data.type === undefined
+        ? undefined
+        : normalizeSupplierType(
+            data.type
+          );
 
-        name:
-          data.name
-            ? data.name.trim()
-            : undefined,
 
-        type:
-          data.type === undefined
-            ? undefined
-            : normalizeSupplierType(
-                data.type
+    return transaction(async (db) => {
+      const supplier =
+        await SupplierRepository.update(
+          id,
+          {
+            ...data,
+
+            name:
+              data.name === undefined
+                ? undefined
+                : String(data.name).trim(),
+
+            type:
+              normalizedType,
+
+            warehousePriorityEnabled:
+              normalizeWarehousePriorityEnabled(
+                data.warehousePriorityEnabled
               ),
+          },
+          db
+        );
 
-        warehousePriorityEnabled:
-          normalizeWarehousePriorityEnabled(
-            data.warehousePriorityEnabled
-          ),
+
+      if (!supplier) {
+        throw new Error(
+          "Поставщик не найден"
+        );
       }
-    );
+
+
+      if (normalizedType !== undefined) {
+        await SupplierRepository
+          .syncLinkedWarehouseTypes(
+            Number(supplier.id),
+            normalizedType,
+            db
+          );
+      }
+
+
+      return supplier;
+    });
   },
 
 

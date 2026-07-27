@@ -89,6 +89,9 @@ export const AdminWarehouseOfferRepository = {
           id,
           name,
           city,
+          type,
+          supplier_id,
+          delivery_days,
           is_active
         FROM warehouses
         WHERE id = $1
@@ -96,6 +99,241 @@ export const AdminWarehouseOfferRepository = {
       `,
       [warehouseId]
     );
+
+    return result.rows[0] ?? null;
+  },
+
+
+  async findBrandById(
+    brandId,
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          SELECT
+            id,
+            name,
+            is_active
+          FROM brands
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [brandId]
+      );
+
+    return result.rows[0] ?? null;
+  },
+
+
+  async findProductByBrandAndArticle(
+    {
+      brandId,
+      articleNormalized,
+    },
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          SELECT *
+          FROM products
+          WHERE brand_id = $1
+            AND article_normalized = $2
+          LIMIT 1
+          FOR UPDATE;
+        `,
+        [
+          brandId,
+          articleNormalized,
+        ]
+      );
+
+    return result.rows[0] ?? null;
+  },
+
+
+  async createProduct(
+    {
+      brandId,
+      article,
+      articleNormalized,
+      name,
+    },
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          INSERT INTO products (
+            brand_id,
+            article,
+            article_normalized,
+            name
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4
+          )
+          RETURNING *;
+        `,
+        [
+          brandId,
+          article,
+          articleNormalized,
+          name,
+        ]
+      );
+
+    return result.rows[0];
+  },
+
+
+  async findOfferByProductAndWarehouseForUpdate(
+    {
+      productId,
+      warehouseId,
+    },
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          SELECT *
+          FROM product_offers
+          WHERE product_id = $1
+            AND warehouse_id = $2
+          LIMIT 1
+          FOR UPDATE;
+        `,
+        [
+          productId,
+          warehouseId,
+        ]
+      );
+
+    return result.rows[0] ?? null;
+  },
+
+
+  async createManualOffer(
+    {
+      productId,
+      warehouseId,
+      supplierId,
+      quantity,
+      purchasePrice,
+      deliveryDays,
+      sourceType,
+    },
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          INSERT INTO product_offers (
+            product_id,
+            warehouse_id,
+            supplier_id,
+            quantity,
+            purchase_price,
+            delivery_days,
+            source_type,
+            is_available,
+            is_hidden,
+            updated_at
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            ($4::numeric > 0),
+            FALSE,
+            CURRENT_TIMESTAMP
+          )
+          RETURNING *;
+        `,
+        [
+          productId,
+          warehouseId,
+          supplierId,
+          quantity,
+          purchasePrice,
+          deliveryDays,
+          sourceType,
+        ]
+      );
+
+    return result.rows[0];
+  },
+
+
+  async updateManualOffer(
+    {
+      offerId,
+      supplierId,
+      quantity,
+      purchasePrice,
+      deliveryDays,
+      sourceType,
+    },
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          UPDATE product_offers
+          SET
+            supplier_id = $2,
+            quantity = $3,
+            purchase_price = $4,
+            delivery_days = $5,
+            source_type = $6,
+            is_available =
+              ($3::numeric > 0),
+            updated_at =
+              CURRENT_TIMESTAMP
+          WHERE id = $1
+          RETURNING *;
+        `,
+        [
+          offerId,
+          supplierId,
+          quantity,
+          purchasePrice,
+          deliveryDays,
+          sourceType,
+        ]
+      );
+
+    return result.rows[0] ?? null;
+  },
+
+
+  async removeUntilNextImport(
+    offerId,
+    db = pool
+  ) {
+    const result =
+      await db.query(
+        `
+          UPDATE product_offers
+          SET
+            quantity = 0,
+            is_available = FALSE,
+            updated_at =
+              CURRENT_TIMESTAMP
+          WHERE id = $1
+          RETURNING *;
+        `,
+        [offerId]
+      );
 
     return result.rows[0] ?? null;
   },
