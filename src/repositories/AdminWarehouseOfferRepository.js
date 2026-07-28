@@ -364,6 +364,16 @@ export const AdminWarehouseOfferRepository = {
     const offset =
       (page - 1) * limit;
 
+    const warehouseTotalResult =
+      await db.query(
+        `
+          SELECT COUNT(*)::integer AS total
+          FROM product_offers
+          WHERE warehouse_id = $1;
+        `,
+        [warehouseId]
+      );
+
     const countResult =
       await db.query(
         `
@@ -486,6 +496,8 @@ export const AdminWarehouseOfferRepository = {
       rows: result.rows,
       total:
         countResult.rows[0]?.total ?? 0,
+      warehouseTotal:
+        warehouseTotalResult.rows[0]?.total ?? 0,
     };
   },
 

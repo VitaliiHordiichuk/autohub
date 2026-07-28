@@ -220,13 +220,13 @@ function normalizePage(value) {
 
 
 function normalizeLimit(value) {
-  const limit = Number(value || 50);
+  const limit = Number(value || 100);
 
   if (
     !Number.isInteger(limit) ||
     limit <= 0
   ) {
-    return 50;
+    return 100;
   }
 
   return Math.min(limit, 200);
@@ -548,6 +548,9 @@ export const AdminWarehouseOfferService = {
 
         total:
           Number(result.total),
+
+        warehouseTotal:
+          Number(result.warehouseTotal),
 
         pages:
           Math.ceil(
