@@ -15,6 +15,7 @@ import { managerOrderRouter } from "./routes/manager-order.routes.js";
 import { adminWarehouseRouter } from "./routes/admin-warehouse.routes.js";
 import { adminSupplierRouter } from "./routes/admin-supplier.routes.js";
 import { adminBrandRouter } from "./routes/admin-brand.routes.js";
+import { adminSearchAnalyticsRouter } from "./routes/admin-search-analytics.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import {
   deliveryProfileRouter,
@@ -153,6 +154,7 @@ app.use("/api/admin/warehouses", adminWarehouseRouter);
 app.use("/api/admin/warehouses", adminWarehouseOfferRouter);
 app.use("/api/admin/suppliers", adminSupplierRouter);
 app.use("/api/admin/brands", adminBrandRouter);
+app.use("/api/admin/search-analytics", adminSearchAnalyticsRouter);
 app.use("/api/admin", adminImportSettingsRouter);
 app.use("/api/admin/import", adminImportRouter);
 app.use("/api/admin/email-import", adminEmailImportRouter);
