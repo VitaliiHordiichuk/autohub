@@ -16,6 +16,9 @@ import {
 let server;
 let baseUrl;
 
+const ANALYTICS_SESSION_ID =
+  "api-search-analytics-test";
+
 
 before(async () => {
   server = app.listen(0);
@@ -62,7 +65,18 @@ test(
   async () => {
     const response =
       await fetch(
-        `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}`
+        `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}`,
+        {
+          headers: {
+            "X-Analytics-Session":
+              ANALYTICS_SESSION_ID,
+
+            "X-Client-City":
+              encodeURIComponent(
+                "Харьков"
+              ),
+          },
+        }
       );
 
     assert.equal(
@@ -152,6 +166,132 @@ test(
         "purchasePrice"
       ),
       false
+    );
+
+    const analyticsResult =
+      await pool.query(
+        `
+          SELECT
+            id,
+            user_id,
+            raw_query,
+            normalized_query,
+            searched_article,
+            found,
+            result_products_count,
+            result_offers_count,
+            city
+          FROM search_events
+          WHERE visitor_session_id = $1
+          ORDER BY id DESC
+          LIMIT 1;
+        `,
+        [
+          ANALYTICS_SESSION_ID,
+        ]
+      );
+
+    const analyticsEvent =
+      analyticsResult.rows[0];
+
+    assert.ok(analyticsEvent);
+
+    assert.equal(
+      analyticsEvent.user_id,
+      null
+    );
+
+    assert.equal(
+      analyticsEvent.raw_query,
+      SEARCH_FIXTURE.originalArticle
+    );
+
+    assert.equal(
+      analyticsEvent.normalized_query,
+      SEARCH_FIXTURE.originalNormalized
+    );
+
+    assert.equal(
+      analyticsEvent.searched_article,
+      SEARCH_FIXTURE.originalArticle
+    );
+
+    assert.equal(
+      analyticsEvent.found,
+      true
+    );
+
+    assert.equal(
+      Number(
+        analyticsEvent
+          .result_products_count
+      ) >= 2,
+      true
+    );
+
+    assert.equal(
+      Number(
+        analyticsEvent
+          .result_offers_count
+      ) >= 1,
+      true
+    );
+
+    assert.equal(
+      analyticsEvent.city,
+      "Харьков"
+    );
+
+    const shownOfferResult =
+      await pool.query(
+        `
+          SELECT
+            relation_type,
+            article,
+            retail_price,
+            quantity,
+            source_type
+          FROM search_event_results
+          WHERE search_event_id = $1
+            AND product_offer_id = $2
+          LIMIT 1;
+        `,
+        [
+          analyticsEvent.id,
+          analogOffer.id,
+        ]
+      );
+
+    const shownOffer =
+      shownOfferResult.rows[0];
+
+    assert.ok(shownOffer);
+
+    assert.equal(
+      shownOffer.relation_type,
+      "ANALOG"
+    );
+
+    assert.equal(
+      shownOffer.article,
+      SEARCH_FIXTURE.analogArticle
+    );
+
+    assert.equal(
+      Number(
+        shownOffer.retail_price
+      ),
+      SEARCH_FIXTURE.manualRetailPrice
+    );
+
+    assert.equal(
+      Number(shownOffer.quantity),
+      SEARCH_FIXTURE.quantity
+    );
+
+    assert.equal(
+      shownOffer.source_type,
+      "OWN_STOCK"
     );
   }
 );

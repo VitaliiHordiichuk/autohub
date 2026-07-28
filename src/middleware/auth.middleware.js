@@ -50,6 +50,29 @@ export function optionalAuth(req, res, next) {
   }
 }
 
+
+export function optionalAuthSilent(
+  req,
+  res,
+  next
+) {
+  const token = getToken(req);
+
+  req.auth = null;
+
+  if (!token) {
+    return next();
+  }
+
+  try {
+    attachAuth(req, token);
+  } catch {
+    req.auth = null;
+  }
+
+  return next();
+}
+
 export function requireAuth(req, res, next) {
   const token = getToken(req);
 

@@ -14,6 +14,10 @@ import {
   MercedesFamilyOfferService,
 } from "../services/MercedesFamilyOfferService.js";
 
+import {
+  SearchAnalyticsService,
+} from "../services/SearchAnalyticsService.js";
+
 
 export async function searchByArticle(
   req,
@@ -44,6 +48,14 @@ export async function searchByArticle(
         );
 
     if (!searchResult.found) {
+      await SearchAnalyticsService
+        .recordSearch({
+          req,
+          article,
+          searchResult,
+          requestedLocale,
+        });
+
       return res
         .status(404)
         .json({
@@ -93,6 +105,15 @@ export async function searchByArticle(
 
           productCard,
         });
+
+    await SearchAnalyticsService
+      .recordSearch({
+        req,
+        article,
+        searchResult,
+        publicResult,
+        requestedLocale,
+      });
 
     return res.json({
       success: true,
