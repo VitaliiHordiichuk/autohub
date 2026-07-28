@@ -21,6 +21,10 @@ import {
   deliveryProfileRouter,
 } from "./routes/delivery-profile.routes.js";
 
+import {
+  clientCartRouter,
+} from "./routes/client-cart.routes.js";
+
 import { adminImportSettingsRouter }
 from "./routes/admin-import-settings.routes.js";
 
@@ -84,6 +88,7 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRouter);
 app.use("/api/account", deliveryProfileRouter);
+app.use("/api/account/cart", clientCartRouter);
 
 app.use(
   "/api/admin",
