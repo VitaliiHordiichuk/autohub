@@ -8,6 +8,10 @@ import assert from "node:assert/strict";
 import { app } from "../../src/app.js";
 import { pool } from "../../src/config/db.js";
 
+import {
+  SEARCH_FIXTURE,
+} from "../helpers/search-fixture.js";
+
 
 let server;
 let baseUrl;
@@ -58,14 +62,13 @@ test(
   async () => {
     const response =
       await fetch(
-        `${baseUrl}/api/search?article=A2711800109`
+        `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}`
       );
 
     assert.equal(
       response.status,
       200
     );
-
 
     const body =
       await response.json();
@@ -78,7 +81,7 @@ test(
     assert.equal(
       body.productCard
         .product.article,
-      "A2711800109"
+      SEARCH_FIXTURE.originalArticle
     );
 
     assert.equal(
@@ -93,14 +96,13 @@ test(
       1
     );
 
-
     const analog =
       body.productCard
         .analogs[0];
 
     assert.equal(
       analog.product.article,
-      "HU718/5X"
+      SEARCH_FIXTURE.analogArticle
     );
 
     assert.equal(
@@ -108,51 +110,17 @@ test(
       1
     );
 
-
     const analogOffer =
       analog.offers[0];
 
-    const databaseResult =
-      await pool.query(
-        `
-          SELECT
-            quantity,
-
-            CASE
-              WHEN price_mode = 'MANUAL'
-                AND manual_retail_price IS NOT NULL
-              THEN manual_retail_price
-              ELSE retail_price
-            END AS retail_price
-
-          FROM product_offers
-
-          WHERE id = $1
-
-          LIMIT 1
-        `,
-        [
-          analogOffer.id,
-        ]
-      );
-
-    const databaseOffer =
-      databaseResult.rows[0];
-
-    assert.ok(databaseOffer);
-
     assert.equal(
       analogOffer.quantity,
-      Number(
-        databaseOffer.quantity
-      )
+      SEARCH_FIXTURE.quantity
     );
 
     assert.equal(
       analogOffer.retailPrice,
-      Number(
-        databaseOffer.retail_price
-      )
+      SEARCH_FIXTURE.manualRetailPrice
     );
 
     assert.equal(
@@ -194,7 +162,7 @@ test(
   async () => {
     const response =
       await fetch(
-        `${baseUrl}/api/search?article=2711800109`
+        `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalWithoutPrefix}`
       );
 
     assert.equal(
@@ -212,7 +180,7 @@ test(
 
     assert.equal(
       body.searchedArticle,
-      "A2711800109"
+      SEARCH_FIXTURE.originalArticle
     );
   }
 );

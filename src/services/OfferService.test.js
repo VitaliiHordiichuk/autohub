@@ -2,7 +2,12 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 
 import { pool } from "../config/db.js";
+import { ProductRepository } from "../repositories/ProductRepository.js";
 import { OfferService } from "./OfferService.js";
+
+import {
+  SEARCH_FIXTURE,
+} from "../../tests/helpers/search-fixture.js";
 
 
 after(async () => {
@@ -13,9 +18,20 @@ after(async () => {
 test(
   "возвращает подготовленные предложения товара",
   async () => {
+    const product =
+      await ProductRepository
+        .findByNormalizedArticle(
+          SEARCH_FIXTURE
+            .analogNormalized
+        );
+
+    assert.ok(product);
+
     const offers =
       await OfferService
-        .getOffersByProductId(2);
+        .getOffersByProductId(
+          product.id
+        );
 
     assert.ok(
       Array.isArray(offers)
@@ -25,7 +41,6 @@ test(
       offers.length,
       1
     );
-
 
     const offer = offers[0];
 
@@ -72,11 +87,8 @@ test(
 
           LIMIT 1
         `,
-        [
-          offer.id,
-        ]
+        [offer.id]
       );
-
 
     const databaseOffer =
       databaseResult.rows[0];
@@ -87,7 +99,6 @@ test(
       Number(
         databaseOffer.quantity
       );
-
 
     assert.equal(
       offer.productId,
@@ -142,16 +153,14 @@ test(
 
     assert.equal(
       offer.availabilityText,
-      quantity > 0
-        ? "Есть сегодня"
-        : "Нет в наличии"
+      "Есть сегодня"
     );
 
     assert.ok(offer.warehouse);
 
     assert.equal(
       offer.warehouse.name,
-      databaseOffer.warehouse_name
+      SEARCH_FIXTURE.warehouseName
     );
 
     assert.equal(
@@ -159,33 +168,9 @@ test(
       databaseOffer.warehouse_city
     );
 
-    if (
-      databaseOffer
-        .effective_supplier_id === null
-    ) {
-      assert.equal(
-        offer.supplier,
-        null
-      );
-    } else {
-      assert.deepEqual(
-        offer.supplier,
-        {
-          id:
-            Number(
-              databaseOffer
-                .effective_supplier_id
-            ),
-
-          name:
-            databaseOffer
-              .supplier_name,
-
-          type:
-            databaseOffer
-              .supplier_type,
-        }
-      );
-    }
+    assert.equal(
+      offer.supplier,
+      null
+    );
   }
 );
