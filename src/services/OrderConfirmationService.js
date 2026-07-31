@@ -2,6 +2,7 @@ import { transaction } from "../db/transaction.js";
 
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
+import { NotificationRepository } from "../repositories/NotificationRepository.js";
 
 export const OrderConfirmationService = {
   async confirmOrder({
@@ -91,6 +92,16 @@ export const OrderConfirmationService = {
           },
           db
         );
+
+      if (order.created_by) {
+        await NotificationRepository.createForUser({
+          userId: Number(order.created_by),
+          eventKey: `order:${numericOrderId}:status:CONFIRMED`,
+          type: "ORDER_CONFIRMED",
+          orderId: numericOrderId,
+          payload: { orderId: numericOrderId },
+        }, db);
+      }
 
       return {
         order: updatedOrder,

@@ -4,6 +4,7 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import { StockMovementRepository } from "../repositories/StockMovementRepository.js";
+import { NotificationRepository } from "../repositories/NotificationRepository.js";
 
 export const OrderCompletionService = {
   async completeOrder({
@@ -130,6 +131,16 @@ export const OrderCompletionService = {
           },
           db
         );
+
+      if (order.created_by) {
+        await NotificationRepository.createForUser({
+          userId: Number(order.created_by),
+          eventKey: `order:${numericOrderId}:status:COMPLETED`,
+          type: "ORDER_COMPLETED",
+          orderId: numericOrderId,
+          payload: { orderId: numericOrderId },
+        }, db);
+      }
 
       return {
         order: updatedOrder,

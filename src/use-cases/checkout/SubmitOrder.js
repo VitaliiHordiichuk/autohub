@@ -17,6 +17,7 @@ import {
   normalizeOrderDelivery,
 } from "../../services/OrderDeliveryService.js";
 import { CustomerPricingService } from "../../services/CustomerPricingService.js";
+import { NotificationRepository } from "../../repositories/NotificationRepository.js";
 
 function calculateTotal(items) {
   return items.reduce(
@@ -280,6 +281,20 @@ export const SubmitOrder = {
           },
           db
         );
+
+      await NotificationRepository.createForStaff({
+        eventKey: `order:${order.id}:new`,
+        type: "NEW_ORDER",
+        orderId: order.id,
+        payload: {
+          orderId: Number(order.id),
+          totalAmount: Number(totalAmount),
+          customerName: [
+            normalizedDelivery.recipientFirstName,
+            normalizedDelivery.recipientLastName,
+          ].filter(Boolean).join(" "),
+        },
+      }, db);
 
       return {
         order,

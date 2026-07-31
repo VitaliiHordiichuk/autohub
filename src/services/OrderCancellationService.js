@@ -2,6 +2,7 @@ import { transaction } from "../db/transaction.js";
 
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
+import { NotificationRepository } from "../repositories/NotificationRepository.js";
 
 const CANCELLABLE_STATUSES = new Set([
   "NEW",
@@ -70,6 +71,16 @@ export const OrderCancellationService = {
           },
           db
         );
+
+      if (order.created_by) {
+        await NotificationRepository.createForUser({
+          userId: Number(order.created_by),
+          eventKey: `order:${numericOrderId}:status:CANCELLED`,
+          type: "ORDER_CANCELLED",
+          orderId: numericOrderId,
+          payload: { orderId: numericOrderId },
+        }, db);
+      }
 
       return {
         order: updatedOrder,
