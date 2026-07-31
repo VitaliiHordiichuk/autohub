@@ -154,6 +154,21 @@ export const OrderRepository = {
   return result.rows;
 },
 
+async getManagerStatusCounts(db = pool) {
+  const result = await db.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE status = 'NEW')::integer AS new_count,
+      COUNT(*) FILTER (WHERE status IN ('CONFIRMED', 'PROCESSING', 'READY'))::integer AS confirmed_count,
+      COUNT(*) FILTER (WHERE status = 'COMPLETED')::integer AS completed_count,
+      COUNT(*) FILTER (WHERE status = 'CANCELLED')::integer AS cancelled_count,
+      COUNT(*) FILTER (WHERE status NOT IN ('COMPLETED', 'CANCELLED'))::integer AS active_count,
+      COUNT(*)::integer AS all_count
+    FROM orders;
+  `);
+
+  return result.rows[0];
+},
+
 async findByIdForManager(orderId, db = pool) {
   const sql = `
     SELECT

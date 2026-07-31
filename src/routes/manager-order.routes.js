@@ -12,6 +12,7 @@ import {
   restoreManagerOrderItem,
   getManagerOrder,
   getManagerOrders,
+  getManagerOrderSummary,
 } from "../controllers/manager-order.controller.js";
 
 import {
@@ -35,6 +36,11 @@ managerOrderRouter.patch(
 managerOrderRouter.get(
   "/",
   getManagerOrders
+);
+
+managerOrderRouter.get(
+  "/summary",
+  getManagerOrderSummary
 );
 
 managerOrderRouter.patch(

@@ -5,6 +5,7 @@ import { OrderConfirmationService } from "../services/OrderConfirmationService.j
 import { OrderCancellationService } from "../services/OrderCancellationService.js";
 import { OrderWorkflowService } from "../services/OrderWorkflowService.js";
 import { OrderCompletionService } from "../services/OrderCompletionService.js";
+import { OrderRepository } from "../repositories/OrderRepository.js";
 
 export async function getManagerOrders(req, res) {
   try {
@@ -29,6 +30,26 @@ export async function getManagerOrders(req, res) {
       error:
         "Не удалось получить список заказов",
     });
+  }
+}
+
+export async function getManagerOrderSummary(req, res) {
+  try {
+    const counts = await OrderRepository.getManagerStatusCounts();
+    return res.json({
+      success: true,
+      counts: {
+        all: Number(counts.all_count || 0),
+        active: Number(counts.active_count || 0),
+        NEW: Number(counts.new_count || 0),
+        CONFIRMED: Number(counts.confirmed_count || 0),
+        COMPLETED: Number(counts.completed_count || 0),
+        CANCELLED: Number(counts.cancelled_count || 0),
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка счётчиков заказов:", error);
+    return res.status(500).json({ success: false, error: "Не удалось получить счётчики заказов" });
   }
 }
 
