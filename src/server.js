@@ -8,6 +8,7 @@ import { app } from "./app.js";
 import {
   startEmailImportScheduler,
 } from "./services/EmailImportScheduler.js";
+import { startTelegramBot } from "./services/TelegramBotService.js";
 
 
 const PORT =
@@ -21,4 +22,5 @@ app.listen(PORT, () => {
 
   startEmailImportScheduler();
 startAutomaticTranslationScheduler();
+  startTelegramBot();
 });

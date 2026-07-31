@@ -60,6 +60,7 @@ import { adminProductImageRouter } from "./routes/admin-product-image.routes.js"
 import { clientSearchHistoryRouter } from "./routes/client-search-history.routes.js";
 import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
+import { telegramConnectionRouter } from "./routes/telegram-connection.routes.js";
 
 export const app = express();
 
@@ -100,6 +101,7 @@ app.use("/api/account/search-history", clientSearchHistoryRouter);
 app.use("/api/account/cart", clientCartRouter);
 app.use("/api/account/orders", clientOrderRouter);
 app.use("/api/notifications", notificationRouter);
+app.use("/api/account/telegram", telegramConnectionRouter);
 
 app.use(
   "/api/admin",
