@@ -10,13 +10,20 @@ export const ReservationRepository = {
       SELECT COALESCE(SUM(quantity), 0) AS reserved_quantity
       FROM stock_reservations
       WHERE product_offer_id = $1
-AND status IN ('ACTIVE', 'ORDER_PENDING')        AND (
-          reserved_until IS NULL
-          OR reserved_until > CURRENT_TIMESTAMP
+        AND (
+          status = 'ORDER_PENDING'
+          OR (
+            status = 'ACTIVE'
+            AND (
+              order_id IS NOT NULL
+              OR reserved_until IS NULL
+              OR reserved_until > CURRENT_TIMESTAMP
+            )
+          )
         )
         AND (
           $2::integer IS NULL
-          OR cart_item_id <> $2
+          OR cart_item_id IS DISTINCT FROM $2
         );
     `;
 
@@ -129,7 +136,8 @@ async attachToOrder(
     UPDATE stock_reservations
     SET
       order_id = $2,
-      status = 'ORDER_PENDING'
+      status = 'ORDER_PENDING',
+      reserved_until = NULL
     WHERE checkout_session_id = $1
       AND status = 'ACTIVE'
     RETURNING *;
