@@ -18,6 +18,7 @@ import {
 } from "../../services/OrderDeliveryService.js";
 import { CustomerPricingService } from "../../services/CustomerPricingService.js";
 import { NotificationRepository } from "../../repositories/NotificationRepository.js";
+import { TelegramNotificationService } from "../../services/TelegramNotificationService.js";
 
 function calculateTotal(items) {
   return items.reduce(
@@ -95,7 +96,7 @@ export const SubmitOrder = {
       );
     }
 
-    return transaction(async (db) => {
+    const result = await transaction(async (db) => {
       const checkout =
         await CheckoutRepository
           .findActiveById(
@@ -303,5 +304,19 @@ export const SubmitOrder = {
         remainingItemsCount: allItems.length - items.length,
       };
     });
+
+    void TelegramNotificationService.sendNewOrder({
+      orderId: result.order.id,
+      customerName: [
+        result.delivery.recipientFirstName,
+        result.delivery.recipientLastName,
+      ].filter(Boolean).join(" "),
+      totalAmount: result.order.total_amount,
+      itemsCount: result.orderItems.length,
+    }).catch((error) => {
+      console.error("Ошибка отправки нового заказа в Telegram:", error.message);
+    });
+
+    return result;
   },
 };
