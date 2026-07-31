@@ -91,8 +91,10 @@ async function lockAndValidateItems(
           db
         );
 
-    const freeQuantity =
-      offer.quantity - reservedByOthers;
+    const freeQuantity = Math.max(
+      0,
+      offer.quantity - reservedByOthers
+    );
 
     const requestedQuantity =
       Number(item.quantity);
