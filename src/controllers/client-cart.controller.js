@@ -1,6 +1,7 @@
 import {
   ClientCartService,
 } from "../services/ClientCartService.js";
+import { CartService } from "../services/CartService.js";
 
 
 function guestTokenFromRequest(
@@ -54,5 +55,23 @@ export async function claimGuestCart(
         error:
           error.message,
       });
+  }
+}
+
+export async function getCurrentCart(req, res) {
+  try {
+    const result = await CartService.getCurrentCart({
+      userId: req.auth.userId,
+    });
+
+    return res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      error: error.message,
+    });
   }
 }

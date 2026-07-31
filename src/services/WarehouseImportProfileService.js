@@ -136,6 +136,7 @@ function mapProfile(row) {
     articleColumn: Number(row.article_column),
     nameColumn: Number(row.name_column),
     priceColumn: Number(row.price_column),
+    retailPriceColumn: row.retail_price_column === null ? null : Number(row.retail_price_column),
     quantityColumn: Number(row.quantity_column),
     startRow: Number(row.start_row),
     newProductsMode:
@@ -173,6 +174,9 @@ async function findWarehouse(db, warehouseId) {
         w.city,
         w.is_active,
         w.supplier_id,
+        w.pricing_model,
+        w.retail_markup_percent,
+        w.minimum_markup_percent,
         s.name AS supplier_name,
         s.type AS supplier_type,
         s.is_active AS supplier_is_active
@@ -204,6 +208,7 @@ async function findProfile(
         sis.article_column,
         sis.name_column,
         sis.price_column,
+        sis.retail_price_column,
         sis.quantity_column,
         sis.start_row,
         COALESCE(
@@ -356,6 +361,9 @@ export const WarehouseImportProfileService = {
             warehouse.supplier_type,
           supplierIsActive:
             warehouse.supplier_is_active === true,
+          pricingModel: warehouse.pricing_model,
+          retailMarkupPercent: Number(warehouse.retail_markup_percent),
+          minimumMarkupPercent: Number(warehouse.minimum_markup_percent),
         },
         profile: mapProfile(profile),
       };
@@ -427,6 +435,12 @@ export const WarehouseImportProfileService = {
     const quantityColumn = positiveInteger(
       data.quantityColumn ?? 4,
       "Некорректная колонка количества"
+    );
+
+    const retailPriceColumn = positiveInteger(
+      data.retailPriceColumn,
+      "Некорректная колонка розничной цены",
+      { nullable: true }
     );
 
     const startRow = positiveInteger(
@@ -531,6 +545,10 @@ export const WarehouseImportProfileService = {
         throw new Error("Склад не найден");
       }
 
+      if (warehouse.pricing_model === "OWN_DUAL_PRICE" && retailPriceColumn === null) {
+        throw new Error("Для модели «Мой склад» укажите колонку розничной цены");
+      }
+
       if (
         warehouse.supplier_id === null
       ) {
@@ -589,9 +607,10 @@ export const WarehouseImportProfileService = {
               article_column = $8,
               name_column = $9,
               price_column = $10,
-              quantity_column = $11,
-              start_row = $12,
-              is_active = $13,
+              retail_price_column = $11,
+              quantity_column = $12,
+              start_row = $13,
+              is_active = $14,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = $1
           `,
@@ -608,6 +627,7 @@ export const WarehouseImportProfileService = {
             articleColumn,
             nameColumn,
             priceColumn,
+            retailPriceColumn,
             quantityColumn,
             startRow,
             isActive,
@@ -673,6 +693,7 @@ export const WarehouseImportProfileService = {
                 article_column,
                 name_column,
                 price_column,
+                retail_price_column,
                 quantity_column,
                 start_row,
                 is_active
@@ -680,7 +701,7 @@ export const WarehouseImportProfileService = {
               VALUES
               (
                 $1,$2,$3,$4,$5,$6,
-                $7,$8,$9,$10,$11,$12
+                $7,$8,$9,$10,$11,$12,$13
               )
               RETURNING id
             `,
@@ -696,6 +717,7 @@ export const WarehouseImportProfileService = {
               articleColumn,
               nameColumn,
               priceColumn,
+              retailPriceColumn,
               quantityColumn,
               startRow,
               isActive,

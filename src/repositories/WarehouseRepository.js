@@ -201,6 +201,9 @@ export const WarehouseRepository = {
       pickupAvailable,
       shippingAvailable,
       priority,
+      pricingModel,
+      retailMarkupPercent,
+      minimumMarkupPercent,
     },
     db = pool
   ) {
@@ -247,6 +250,10 @@ export const WarehouseRepository = {
             ELSE priority
           END,
 
+        pricing_model = COALESCE($14, pricing_model),
+        retail_markup_percent = COALESCE($15, retail_markup_percent),
+        minimum_markup_percent = COALESCE($16, minimum_markup_percent),
+
         updated_at =
           CURRENT_TIMESTAMP
 
@@ -278,6 +285,9 @@ export const WarehouseRepository = {
       shippingAvailable,
       hasPriority,
       priority ?? null,
+      pricingModel,
+      retailMarkupPercent,
+      minimumMarkupPercent,
     ]);
 
     return result.rows[0] ?? null;

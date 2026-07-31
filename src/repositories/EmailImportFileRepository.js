@@ -18,11 +18,16 @@ export const EmailImportFileRepository = {
   ) {
     const result = await getDb(db).query(
       `
-        SELECT *
-        FROM email_import_files
-        WHERE warehouse_supplier_import_id = $1
-          AND email_message_id = $2
-          AND attachment_sha256 = $3
+        SELECT
+          eif.*,
+          i.status AS import_status,
+          i.success_rows AS import_success_rows,
+          i.error_rows AS import_error_rows
+        FROM email_import_files eif
+        LEFT JOIN imports i ON i.id = eif.import_id
+        WHERE eif.warehouse_supplier_import_id = $1
+          AND eif.email_message_id = $2
+          AND eif.attachment_sha256 = $3
         LIMIT 1
       `,
       [
@@ -45,12 +50,15 @@ export const EmailImportFileRepository = {
   ) {
     const result = await getDb(db).query(
       `
-        SELECT *
-        FROM email_import_files
-        WHERE warehouse_supplier_import_id = $1
-          AND attachment_sha256 = $2
-          AND status = 'COMPLETED'
-        ORDER BY id DESC
+        SELECT eif.*
+        FROM email_import_files eif
+        JOIN imports i ON i.id = eif.import_id
+        WHERE eif.warehouse_supplier_import_id = $1
+          AND eif.attachment_sha256 = $2
+          AND eif.status = 'COMPLETED'
+          AND i.status IN ('COMPLETED', 'COMPLETED_WITH_ERRORS')
+          AND i.success_rows > 0
+        ORDER BY eif.id DESC
         LIMIT 1
       `,
       [
@@ -343,8 +351,11 @@ export const EmailImportFileRepository = {
           sis.article_column,
           sis.name_column,
           sis.price_column,
+          sis.retail_price_column,
           sis.quantity_column,
           sis.start_row,
+
+          w.pricing_model,
 
           s.name AS supplier_name
 
@@ -358,6 +369,9 @@ export const EmailImportFileRepository = {
 
         JOIN suppliers AS s
           ON s.id = wsi.supplier_id
+
+        JOIN warehouses AS w
+          ON w.id = wsi.warehouse_id
 
 
         WHERE eif.status = 'FAILED'

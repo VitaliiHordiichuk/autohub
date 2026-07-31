@@ -26,6 +26,12 @@ import {
 }
 from "./ImportPolicyService.js";
 
+
+import {
+  ArticleNumberService,
+} from "./ArticleNumberService.js";
+import { WarehousePricingService } from "./WarehousePricingService.js";
+
 function normalizeImportContext(
   importContext
 ) {
@@ -488,24 +494,33 @@ export const ImportService = {
             );
           }
 
-          const articleNormalized =
-            normalizeArticle(
-              row.article
-            );
 
-          if (!articleNormalized) {
-            throw new Error(
-              "После нормализации артикул оказался пустым"
-            );
-          }
+          const articleResolution =
+            await ArticleNumberService
+              .resolveForImport({
+                brandId,
+                article: row.article,
+                db,
+              });
+
+          brandId =
+            articleResolution.brandId;
+
+          const articleForProduct =
+            articleResolution.article;
+
+          const articleNormalized =
+            articleResolution
+              .articleNormalized;
+
 
           let product =
-            await ProductRepository
-              .findByBrandAndArticle(
-                brandId,
-                articleNormalized,
-                db
-              );
+            await ArticleNumberService
+              .findOrPromoteProduct({
+                resolution:
+                  articleResolution,
+                db,
+              });
 
           let productWasCreated = false;
 
@@ -566,7 +581,7 @@ export const ImportService = {
                         ),
                       brandId,
                       article:
-                        row.article,
+                        articleForProduct,
                       articleNormalized,
                       name: row.name,
                       price: row.price,
@@ -691,7 +706,7 @@ export const ImportService = {
                   {
                     brandId,
                     article:
-                      row.article,
+                      articleForProduct,
                     articleNormalized,
                     name: row.name,
                   },
@@ -727,6 +742,14 @@ export const ImportService = {
           const newPrice = Number(
             row.price
           );
+
+          const calculatedPrices = WarehousePricingService.calculateOfferPrices({
+            pricingModel: settings.pricing_model || "SUPPLIER_MARKUP",
+            basePrice: newPrice,
+            importedRetailPrice: row.retailPrice,
+            retailMarkupPercent: settings.retail_markup_percent,
+            minimumMarkupPercent: settings.minimum_markup_percent,
+          });
 
           const newQuantity = Number(
             row.quantity
@@ -768,6 +791,8 @@ export const ImportService = {
                       newQuantity,
                     purchasePrice:
                       newPrice,
+                    retailPrice: calculatedPrices.retailPrice,
+                    minimumSalePrice: calculatedPrices.minimumSalePrice,
                   },
                   db
                 );
@@ -797,6 +822,8 @@ export const ImportService = {
                       newQuantity,
                     purchasePrice:
                       newPrice,
+                    retailPrice: calculatedPrices.retailPrice,
+                    minimumSalePrice: calculatedPrices.minimumSalePrice,
                     sourceType:
                       "SUPPLIER",
                   },

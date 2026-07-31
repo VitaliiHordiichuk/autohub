@@ -105,12 +105,22 @@ function normalizeImportedRow(row, settings, rowNumber) {
     rowNumber
   );
 
+  const retailPrice = settings.retail_price_column
+    ? parseRequiredNumber(readColumn(row, settings.retail_price_column), "розничная цена", article, rowNumber)
+    : null;
+
+  if (settings.pricing_model === "OWN_DUAL_PRICE" && retailPrice === null) {
+    throw new Error(`Строка ${rowNumber}: отсутствует розничная цена для артикула ${article}`);
+  }
+
   return {
+    rowNumber,
     brand: brand || null,
     article,
     name,
     quantity,
     price,
+    retailPrice,
   };
 }
 
@@ -380,6 +390,21 @@ async function claimAttachment(
       attachmentSha256,
     });
 
+  if (
+    exact?.status === "COMPLETED" &&
+    exact.import_id &&
+    (
+      exact.import_status === "FAILED" ||
+      Number(exact.import_success_rows || 0) === 0
+    )
+  ) {
+    await EmailImportFileRepository.markFailed({
+      id: exact.id,
+      errorMessage: "Предыдущий импорт файла не создал ни одной позиции",
+    });
+    exact.status = "FAILED";
+  }
+
   if (exact?.status === "COMPLETED") {
     return {
       action: "SKIP_COMPLETED",
@@ -395,6 +420,26 @@ async function claimAttachment(
   }
 
   if (exact?.status === "FAILED") {
+    const completedSameFile =
+      await EmailImportFileRepository.findCompletedByHash({
+        warehouseSupplierImportId:
+          recordData.warehouseSupplierImportId,
+        attachmentSha256,
+      });
+
+    if (completedSameFile) {
+      const duplicateRecord =
+        await EmailImportFileRepository.createCompletedReference({
+          ...recordData,
+          importId: completedSameFile.import_id,
+        });
+
+      return {
+        action: "SKIP_SAME_FILE",
+        record: duplicateRecord,
+      };
+    }
+
     const retried =
       await EmailImportFileRepository.retryFailed(
         exact.id
@@ -567,6 +612,15 @@ async function processRoutedAttachment(
       attachment
     );
 
+    if (
+      Number(imported.result.successRows || 0) === 0 &&
+      Number(imported.result.errors || 0) > 0
+    ) {
+      throw new Error(
+        `Импорт не выполнен: ошибок строк ${imported.result.errors}, успешных строк 0`
+      );
+    }
+
     await EmailImportFileRepository.markCompleted({
       id: claim.record.id,
       importId: imported.result.importId,
@@ -670,6 +724,15 @@ async function retryFailedFiles(client, summary) {
         record,
         attachment
       );
+
+      if (
+        Number(imported.result.successRows || 0) === 0 &&
+        Number(imported.result.errors || 0) > 0
+      ) {
+        throw new Error(
+          `Импорт не выполнен: ошибок строк ${imported.result.errors}, успешных строк 0`
+        );
+      }
 
       await EmailImportFileRepository.markCompleted({
         id: record.id,

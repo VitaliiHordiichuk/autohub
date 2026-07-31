@@ -9,6 +9,7 @@ import {
 
 import { pool } from "./config/db.js";
 import { searchRouter } from "./routes/search.routes.js";
+import { catalogRouter } from "./routes/catalog.routes.js";
 import { cartRouter } from "./routes/cart.routes.js";
 import { checkoutRouter } from "./routes/checkout.routes.js";
 import { managerOrderRouter } from "./routes/manager-order.routes.js";
@@ -16,6 +17,7 @@ import { adminWarehouseRouter } from "./routes/admin-warehouse.routes.js";
 import { adminSupplierRouter } from "./routes/admin-supplier.routes.js";
 import { adminBrandRouter } from "./routes/admin-brand.routes.js";
 import { adminSearchAnalyticsRouter } from "./routes/admin-search-analytics.routes.js";
+import { adminArticleNumberRouter } from "./routes/admin-article-number.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import {
   deliveryProfileRouter,
@@ -52,6 +54,11 @@ import {
 
 import adminAutomaticTranslationRoutes
   from "./routes/admin-automatic-translation.routes.js";
+import { customerManagementRouter } from "./routes/customer-management.routes.js";
+import { adminEmployeeRouter } from "./routes/admin-employee.routes.js";
+import { adminProductImageRouter } from "./routes/admin-product-image.routes.js";
+import { clientSearchHistoryRouter } from "./routes/client-search-history.routes.js";
+import { clientOrderRouter } from "./routes/client-order.routes.js";
 
 export const app = express();
 
@@ -88,7 +95,9 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRouter);
 app.use("/api/account", deliveryProfileRouter);
+app.use("/api/account/search-history", clientSearchHistoryRouter);
 app.use("/api/account/cart", clientCartRouter);
+app.use("/api/account/orders", clientOrderRouter);
 
 app.use(
   "/api/admin",
@@ -152,14 +161,19 @@ app.get("/test", async (req, res) => {
 });
 
 app.use("/api/search", searchRouter);
+app.use("/api/catalog", catalogRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/checkout", checkoutRouter);
 app.use("/api/manager/orders", managerOrderRouter);
+app.use("/api/management", customerManagementRouter);
 app.use("/api/admin/warehouses", adminWarehouseRouter);
 app.use("/api/admin/warehouses", adminWarehouseOfferRouter);
 app.use("/api/admin/suppliers", adminSupplierRouter);
 app.use("/api/admin/brands", adminBrandRouter);
 app.use("/api/admin/search-analytics", adminSearchAnalyticsRouter);
+app.use("/api/admin/article-numbers", adminArticleNumberRouter);
+app.use("/api/admin/employees", adminEmployeeRouter);
+app.use("/api/admin/product-images", adminProductImageRouter);
 app.use("/api/admin", adminImportSettingsRouter);
 app.use("/api/admin/import", adminImportRouter);
 app.use("/api/admin/email-import", adminEmailImportRouter);

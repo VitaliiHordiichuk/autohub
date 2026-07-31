@@ -186,6 +186,48 @@ async findByIdForManager(orderId, db = pool) {
   return result.rows[0] ?? null;
 },
 
+async findAllForCustomerUser(userId, db = pool) {
+  const result = await db.query(`
+    SELECT
+      o.id,
+      o.status,
+      o.total_amount,
+      o.comment,
+      o.created_at,
+      o.updated_at,
+      COUNT(oi.id)::integer AS items_count,
+      COALESCE(SUM(oi.quantity), 0)::integer AS total_quantity
+    FROM orders o
+    JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN order_items oi
+      ON oi.order_id = o.id AND oi.status = 'ACTIVE'
+    WHERE c.user_id = $1
+    GROUP BY o.id
+    ORDER BY o.created_at DESC
+    LIMIT 100;
+  `, [userId]);
+
+  return result.rows;
+},
+
+async findByIdForCustomerUser(orderId, userId, db = pool) {
+  const result = await db.query(`
+    SELECT
+      o.id,
+      o.status,
+      o.total_amount,
+      o.comment,
+      o.created_at,
+      o.updated_at
+    FROM orders o
+    JOIN customers c ON c.id = o.customer_id
+    WHERE o.id = $1 AND c.user_id = $2
+    LIMIT 1;
+  `, [orderId, userId]);
+
+  return result.rows[0] ?? null;
+},
+
 async findItemsByOrderId(orderId, db = pool) {
   const sql = `
     SELECT

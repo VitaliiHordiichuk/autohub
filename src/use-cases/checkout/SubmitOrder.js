@@ -16,6 +16,7 @@ import {
   deliveryInputFromProfileRow,
   normalizeOrderDelivery,
 } from "../../services/OrderDeliveryService.js";
+import { CustomerPricingService } from "../../services/CustomerPricingService.js";
 
 function calculateTotal(items) {
   return items.reduce(
@@ -28,6 +29,20 @@ function calculateTotal(items) {
     },
     0
   );
+}
+
+export function selectReservedCartItems(allItems, reservations) {
+  const reservedCartItemIds = new Set(
+    reservations.map((reservation) => Number(reservation.cart_item_id))
+  );
+
+  return allItems.filter((item) =>
+    reservedCartItemIds.has(Number(item.id))
+  );
+}
+
+export function cartHasRemainingItems(allItems, orderedItems) {
+  return allItems.length > orderedItems.length;
 }
 
 async function resolveDelivery({
@@ -103,17 +118,11 @@ export const SubmitOrder = {
             db,
           });
 
-      const items =
+      const allItems =
         await CartRepository.getItems(
           cart.id,
           db
         );
-
-      if (!items.length) {
-        throw new Error(
-          "Корзина пустая"
-        );
-      }
 
       const reservations =
         await ReservationRepository
@@ -121,6 +130,19 @@ export const SubmitOrder = {
             checkout.id,
             db
           );
+
+      const items = selectReservedCartItems(allItems, reservations);
+
+      if (!items.length) {
+        throw new Error("В оформлении нет выбранных товаров");
+      }
+
+      const pricingContext = await CustomerPricingService.getContext(userId, db);
+      for (const item of items) {
+        const pricing = CustomerPricingService.price({ retailPrice: item.retail_price,
+          minimumSalePrice: item.minimum_sale_price }, pricingContext);
+        item.retail_price = pricing?.customerPrice;
+      }
 
       if (
         reservations.length !==
@@ -228,16 +250,22 @@ export const SubmitOrder = {
           db
         );
 
+      await ReservationRepository.detachCartItems(checkout.id, db);
+      await CartRepository.deleteItems(
+        cart.id,
+        items.map((item) => item.id),
+        db
+      );
+
       await CheckoutRepository
         .markCompleted(
           checkout.id,
           db
         );
 
-      await CartRepository.closeCart(
-        cart.id,
-        db
-      );
+      if (!cartHasRemainingItems(allItems, items)) {
+        await CartRepository.closeCart(cart.id, db);
+      }
 
       await OrderRepository
         .addStatusHistory(
@@ -257,6 +285,7 @@ export const SubmitOrder = {
         order,
         orderItems,
         delivery: orderDelivery,
+        remainingItemsCount: allItems.length - items.length,
       };
     });
   },

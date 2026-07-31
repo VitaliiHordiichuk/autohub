@@ -23,7 +23,12 @@ export const WarehouseSupplierImportRepository = {
         sis.article_column,
         sis.name_column,
         sis.price_column,
+        sis.retail_price_column,
         sis.quantity_column,
+
+        w.pricing_model,
+        w.retail_markup_percent,
+        w.minimum_markup_percent,
 
         sis.start_row,
 
@@ -37,6 +42,8 @@ export const WarehouseSupplierImportRepository = {
 
         ON sis.id =
            wsi.supplier_import_settings_id
+
+      INNER JOIN warehouses w ON w.id = wsi.warehouse_id
 
 
       WHERE wsi.warehouse_id = $1
@@ -81,7 +88,12 @@ export const WarehouseSupplierImportRepository = {
         sis.article_column,
         sis.name_column,
         sis.price_column,
+        sis.retail_price_column,
         sis.quantity_column,
+
+        w.pricing_model,
+        w.retail_markup_percent,
+        w.minimum_markup_percent,
 
         sis.start_row,
 
@@ -95,6 +107,8 @@ export const WarehouseSupplierImportRepository = {
 
         ON sis.id =
            wsi.supplier_import_settings_id
+
+      INNER JOIN warehouses w ON w.id = wsi.warehouse_id
 
 
       WHERE wsi.id = $1

@@ -16,3 +16,4 @@ npm-debug.log*
 test-import.csv
 test-import.xlsx
 test-brand-admin.mjs
+uploads/

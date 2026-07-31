@@ -5,6 +5,19 @@ const WAREHOUSE_TYPES = new Set([
   "OWN",
   "SUPPLIER",
 ]);
+const PRICING_MODELS = new Set(["OWN_DUAL_PRICE", "SUPPLIER_MARKUP"]);
+
+function normalizePricingModel(value) {
+  const model = String(value ?? "").trim().toUpperCase();
+  if (!PRICING_MODELS.has(model)) throw new Error("Неизвестная модель ценообразования");
+  return model;
+}
+
+function normalizeMarkup(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${label} должна быть не меньше 0%`);
+  return number;
+}
 
 function validateId(value, errorMessage) {
   const numericValue = Number(value);
@@ -303,6 +316,9 @@ export const WarehouseService = {
       pickupAvailable,
       shippingAvailable,
       priority,
+      pricingModel,
+      retailMarkupPercent,
+      minimumMarkupPercent,
     }
   ) {
     const numericWarehouseId = validateId(
@@ -334,6 +350,16 @@ export const WarehouseService = {
         nextType,
         nextSupplierId
       );
+
+    const nextPricingModel = pricingModel === undefined
+      ? currentWarehouse.pricing_model : normalizePricingModel(pricingModel);
+    const nextRetailMarkup = retailMarkupPercent === undefined
+      ? Number(currentWarehouse.retail_markup_percent) : normalizeMarkup(retailMarkupPercent, "Розничная наценка");
+    const nextMinimumMarkup = minimumMarkupPercent === undefined
+      ? Number(currentWarehouse.minimum_markup_percent) : normalizeMarkup(minimumMarkupPercent, "Минимальная наценка");
+    if (nextRetailMarkup < nextMinimumMarkup && nextPricingModel === "SUPPLIER_MARKUP") {
+      throw new Error("Розничная наценка не может быть меньше минимальной");
+    }
 
     let normalizedOrganizationId;
 
@@ -383,6 +409,9 @@ export const WarehouseService = {
 
           priority:
             normalizePriority(priority),
+          pricingModel: nextPricingModel,
+          retailMarkupPercent: nextRetailMarkup,
+          minimumMarkupPercent: nextMinimumMarkup,
         }
       );
 

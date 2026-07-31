@@ -4,6 +4,7 @@ import {
 
 import {
   claimGuestCart,
+  getCurrentCart,
 } from "../controllers/client-cart.controller.js";
 
 import {
@@ -13,6 +14,12 @@ import {
 
 export const clientCartRouter =
   Router();
+
+clientCartRouter.get(
+  "/",
+  requireAuth,
+  getCurrentCart
+);
 
 
 clientCartRouter.post(

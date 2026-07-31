@@ -1,4 +1,5 @@
 import { ProductRepository } from "../repositories/ProductRepository.js";
+import { CustomerPricingService } from "./CustomerPricingService.js";
 
 
 function formatQuantity(quantity) {
@@ -101,7 +102,7 @@ function buildAvailabilityText(offer) {
 }
 
 
-function mapOffer(offer) {
+function mapOffer(offer, pricingContext) {
   const quantity =
     formatQuantity(
       offer.quantity
@@ -121,6 +122,16 @@ function mapOffer(offer) {
         ? "SUPPLIER"
         : offer.source_type;
 
+  const customerPricing = CustomerPricingService.price({
+    retailPrice: offer.retail_price,
+    minimumSalePrice: offer.minimum_sale_price,
+  }, pricingContext);
+
+  const priceMatrix = CustomerPricingService.priceMatrix({
+    retailPrice: offer.retail_price,
+    minimumSalePrice: offer.minimum_sale_price,
+  }, pricingContext);
+
   const mappedOffer = {
     id:
       Number(offer.id),
@@ -137,15 +148,10 @@ function mapOffer(offer) {
         ? ">5"
         : String(quantity),
 
-    purchasePrice:
-      formatPrice(
-        offer.purchase_price
-      ),
-
     retailPrice:
-      formatPrice(
-        offer.retail_price
-      ),
+      formatPrice(customerPricing?.customerPrice),
+
+    priceMatrix,
 
     deliveryDays:
       Number(
@@ -318,7 +324,8 @@ function applyWarehousePriorities(
 
 export const OfferService = {
   async getOffersByProductId(
-    productId
+    productId,
+    pricingContext = null
   ) {
     const offers =
       await ProductRepository
@@ -327,7 +334,7 @@ export const OfferService = {
         );
 
     const mappedOffers =
-      offers.map(mapOffer);
+      offers.map((offer) => mapOffer(offer, pricingContext));
 
     return applyWarehousePriorities(
       mappedOffers

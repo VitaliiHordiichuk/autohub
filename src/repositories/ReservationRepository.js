@@ -91,6 +91,16 @@ AND status IN ('ACTIVE', 'ORDER_PENDING')        AND (
 
     return result.rows[0] ?? null;
   },
+  async releaseActiveByCartId(cartId, db = pool) {
+    const sql = `
+      UPDATE stock_reservations
+      SET status = 'RELEASED', reserved_until = CURRENT_TIMESTAMP
+      WHERE cart_id = $1 AND status = 'ACTIVE'
+      RETURNING *;
+    `;
+    const result = await db.query(sql, [cartId]);
+    return result.rows;
+  },
   async findActiveByCheckoutSessionId(
   checkoutSessionId,
   db = pool
@@ -131,6 +141,15 @@ async attachToOrder(
   ]);
 
   return result.rows;
+},
+async detachCartItems(checkoutSessionId, db = pool) {
+  const sql = `
+    UPDATE stock_reservations
+    SET cart_item_id = NULL
+    WHERE checkout_session_id = $1
+      AND status = 'ORDER_PENDING';
+  `;
+  await db.query(sql, [checkoutSessionId]);
 },
 async findByOrderAndOfferForUpdate(
   orderId,

@@ -33,6 +33,30 @@ function validateCart(cart, items) {
   }
 }
 
+export function selectCheckoutItems(allItems, itemIds = null) {
+  if (!Array.isArray(itemIds)) {
+    return [...allItems];
+  }
+
+  const selectedIds = new Set(
+    itemIds.map(Number).filter(Number.isInteger)
+  );
+
+  const items = allItems.filter((item) =>
+    selectedIds.has(Number(item.id))
+  );
+
+  if (items.length !== selectedIds.size) {
+    const error = new Error(
+      "Одна или несколько выбранных позиций корзины не найдены"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return items;
+}
+
 async function lockAndValidateItems(
   items,
   db
@@ -96,6 +120,7 @@ async function lockAndValidateItems(
 export const CheckoutService = {
   async start({
     cartId,
+    itemIds = null,
     userId = null,
     guestToken = null,
   }) {
@@ -112,11 +137,13 @@ export const CheckoutService = {
           db,
         });
 
-      const items =
+      const allItems =
         await CartRepository.getItems(
           cart.id,
           db
         );
+
+      const items = selectCheckoutItems(allItems, itemIds);
 
       validateCart(cart, items);
 
@@ -126,20 +153,8 @@ export const CheckoutService = {
           db
         );
 
-      const existingSession =
-        await CheckoutRepository
-          .findActiveByCartId(
-            cart.id,
-            db
-          );
-
-      if (existingSession) {
-        return {
-          checkoutSession:
-            existingSession,
-          reused: true,
-        };
-      }
+      await ReservationRepository.releaseActiveByCartId(cart.id, db);
+      await CheckoutRepository.cancelActiveForCart(cart.id, db);
 
       const validatedItems =
         await lockAndValidateItems(

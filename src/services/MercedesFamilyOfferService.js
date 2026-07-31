@@ -15,12 +15,14 @@ export const MercedesFamilyOfferService = {
   async build({
     family = [],
     exactProductId = null,
+    requireEnabledSupplierRule = true,
+    pricingContext = null,
   } = {}) {
     const enabledSupplierIds =
-      await SupplierRepository
-        .findEnabledSupplierIdsByArticleSearchRule(
-          RULE_CODE
-        );
+      requireEnabledSupplierRule
+        ? await SupplierRepository
+            .findEnabledSupplierIdsByArticleSearchRule(RULE_CODE)
+        : [];
 
     const enabledSupplierIdSet =
       new Set(
@@ -47,11 +49,13 @@ export const MercedesFamilyOfferService = {
       const offers =
         await OfferService
           .getOffersByProductId(
-            product.id
+            product.id,
+            pricingContext
           );
 
       const allowedOffers =
-        offers.filter(
+        requireEnabledSupplierRule
+          ? offers.filter(
           (offer) => {
             const supplierId =
               Number(
@@ -67,7 +71,8 @@ export const MercedesFamilyOfferService = {
               )
             );
           }
-        );
+        )
+          : offers;
 
       if (
         allowedOffers.length === 0

@@ -17,6 +17,8 @@ import {
 import {
   SearchAnalyticsService,
 } from "../services/SearchAnalyticsService.js";
+import { ArticleNumberRepository } from "../repositories/ArticleNumberRepository.js";
+import { CustomerPricingService } from "../services/CustomerPricingService.js";
 
 
 export async function searchByArticle(
@@ -47,6 +49,8 @@ export async function searchByArticle(
           article
         );
 
+    const pricingContext = await CustomerPricingService.getContext(req.auth?.userId ?? null);
+
     if (!searchResult.found) {
       await SearchAnalyticsService
         .recordSearch({
@@ -76,13 +80,32 @@ export async function searchByArticle(
       searchResult.exactProduct
         ? await ProductCardService
             .build(
-              searchResult
-                .exactProduct
+              searchResult.exactProduct,
+              pricingContext
             )
         : null;
 
+    const replacementLinks =
+      (searchResult.replacementPath || [])
+        .filter((link) => link.linkType === "REPLACEMENT");
+    const replacementLink = replacementLinks[0] || null;
+    const finalReplacementLink = replacementLinks.at(-1) || null;
+
+    const replacementSourceProduct = replacementLink
+      ? await ArticleNumberRepository.findSearchProductByBrandAndArticle({
+          brandId: replacementLink.sourceBrandId,
+          articleNormalized: replacementLink.sourceArticleNormalized,
+        })
+      : null;
+
+    const replacementSourceCard =
+      replacementSourceProduct &&
+      Number(replacementSourceProduct.id) !== Number(searchResult.exactProduct?.id)
+        ? await ProductCardService.build(replacementSourceProduct, pricingContext)
+        : null;
+
     const familyCards =
-      searchResult.rule === "MERCEDES"
+      searchResult.family.length > 1
         ? await MercedesFamilyOfferService
             .build({
               family:
@@ -92,6 +115,11 @@ export async function searchByArticle(
                 searchResult
                   .exactProduct
                   ?.id ?? null,
+
+              requireEnabledSupplierRule:
+                searchResult.rule === "MERCEDES" &&
+                searchResult.numberResolution !== "PREFIX",
+              pricingContext,
             })
         : [];
 
@@ -104,6 +132,7 @@ export async function searchByArticle(
             familyCards,
 
           productCard,
+          replacementSourceCard,
         });
 
     await SearchAnalyticsService
@@ -144,6 +173,16 @@ export async function searchByArticle(
 
       productCard:
         publicResult.productCard,
+
+      replacement: replacementLink
+        ? {
+            sourceBrand: replacementLink.sourceBrandName,
+            sourceArticle: replacementLink.sourceArticle,
+            targetBrand: finalReplacementLink.targetBrandName,
+            targetArticle: finalReplacementLink.targetArticle,
+            sourceProductCard: publicResult.replacementSourceCard,
+          }
+        : null,
     });
 
   } catch (error) {

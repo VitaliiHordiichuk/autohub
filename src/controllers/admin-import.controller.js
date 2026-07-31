@@ -759,6 +759,10 @@ function normalizeImportedRow(
       .replace(",", ".")
   );
 
+  const retailPrice = settings.retail_price_column
+    ? Number(String(readColumn(row, settings.retail_price_column) ?? "").trim().replace(",", "."))
+    : null;
+
   let brand = null;
 
   if (
@@ -776,6 +780,11 @@ function normalizeImportedRow(
         `Строка ${rowNumber}: не указан бренд`
       );
     }
+  }
+
+  if (settings.pricing_model === "OWN_DUAL_PRICE" &&
+      (!Number.isFinite(retailPrice) || retailPrice < 0)) {
+    throw new Error(`Строка ${rowNumber}: некорректная розничная цена для артикула ${article}`);
   }
 
   if (!article) {
@@ -818,6 +827,7 @@ function normalizeImportedRow(
     name,
     quantity,
     price,
+    retailPrice,
   };
 }
 

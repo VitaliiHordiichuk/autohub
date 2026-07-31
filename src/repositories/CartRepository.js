@@ -213,6 +213,8 @@ export const CartRepository = {
           ELSE po.retail_price
         END AS retail_price,
 
+        po.minimum_sale_price,
+
         po.quantity
           AS available_quantity,
         po.source_type,
@@ -257,5 +259,17 @@ export const CartRepository = {
       await db.query(sql, [cartId]);
 
     return result.rows[0] ?? null;
+  },
+
+  async deleteItems(cartId, itemIds, db = pool) {
+    if (!Array.isArray(itemIds) || itemIds.length === 0) return [];
+    const sql = `
+      DELETE FROM cart_items
+      WHERE cart_id = $1
+        AND id = ANY($2::integer[])
+      RETURNING *;
+    `;
+    const result = await db.query(sql, [cartId, itemIds]);
+    return result.rows;
   },
 };

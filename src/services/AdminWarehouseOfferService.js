@@ -11,6 +11,11 @@ import {
 } from "./articleEngine/normalize.js";
 
 
+
+import {
+  ArticleNumberService,
+} from "./ArticleNumberService.js";
+
 const ALLOWED_STATUSES =
   new Set([
     "ALL",
@@ -592,12 +597,13 @@ export const AdminWarehouseOfferService = {
         100
       );
 
-    const articleNormalized =
+
+    const sourceArticleNormalized =
       normalizeArticle(
         normalizedArticle
       );
 
-    if (!articleNormalized) {
+    if (!sourceArticleNormalized) {
       throw createError(
         "После нормализации артикул оказался пустым"
       );
@@ -646,17 +652,34 @@ export const AdminWarehouseOfferService = {
         );
       }
 
-      let product =
-        await AdminWarehouseOfferRepository
-          .findProductByBrandAndArticle(
-            {
-              brandId:
-                normalizedBrandId,
+      const articleResolution =
+        await ArticleNumberService
+          .resolveForImport({
+            brandId:
+              normalizedBrandId,
+            article:
+              normalizedArticle,
+            db,
+          });
 
-              articleNormalized,
-            },
-            db
-          );
+      const resolvedBrandId =
+        articleResolution.brandId;
+
+      const articleForProduct =
+        articleResolution.article;
+
+      const articleNormalized =
+        articleResolution
+          .articleNormalized;
+
+
+      let product =
+        await ArticleNumberService
+          .findOrPromoteProduct({
+            resolution:
+              articleResolution,
+            db,
+          });
 
       let productCreated = false;
 
@@ -666,10 +689,10 @@ export const AdminWarehouseOfferService = {
             .createProduct(
               {
                 brandId:
-                  normalizedBrandId,
+                  resolvedBrandId,
 
                 article:
-                  normalizedArticle,
+                  articleForProduct,
 
                 articleNormalized,
 

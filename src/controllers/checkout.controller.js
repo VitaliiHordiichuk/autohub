@@ -25,11 +25,13 @@ export async function startCheckout(
   try {
     const {
       cartId,
+      itemIds = null,
     } = req.body;
 
     const result =
       await StartCheckout.execute({
         cartId,
+        itemIds,
         userId:
           req.auth?.userId ?? null,
         guestToken:
@@ -81,6 +83,7 @@ export async function submitOrder(
       order: result.order,
       items: result.orderItems,
       delivery: result.delivery,
+      remainingItemsCount: result.remainingItemsCount,
     });
   } catch (error) {
     return sendError(

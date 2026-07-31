@@ -8,6 +8,10 @@ export async function processEmailNow(req, res) {
       rescanRecent: true,
     });
 
+    console.log(
+      `EMAIL-импорт MANUAL: проверено писем ${result.checkedMessages}, новых ${result.newMessages}, импортировано файлов ${result.importedFiles}, строк ${result.importedRows}, ошибок строк ${result.rowErrors}, дубликатов ${result.duplicateFiles}`
+    );
+
     return res.json({
       success: true,
       message:

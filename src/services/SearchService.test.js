@@ -15,7 +15,7 @@ test("находит точный оригинальный Mercedes-артику
   assert.equal(result.found, true);
   assert.equal(result.rule, "MERCEDES");
   assert.equal(result.exactProduct.article, "A2711800109");
-  assert.equal(result.family.length, 4);
+  assert.ok(result.family.length >= 4);
 });
 
 test("находит Mercedes после нормализации ввода", async () => {

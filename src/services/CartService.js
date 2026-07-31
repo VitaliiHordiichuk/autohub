@@ -3,6 +3,7 @@ import { ProductRepository } from "../repositories/ProductRepository.js";
 import {
   CartAccessService,
 } from "./CartAccessService.js";
+import { CustomerPricingService } from "./CustomerPricingService.js";
 
 function createError(
   message,
@@ -56,13 +57,14 @@ function publicCart(cart) {
   };
 }
 
-function publicItems(items) {
+function publicItems(items, pricingContext) {
   return items.map((item) => {
     const quantity =
       Number(item.quantity);
 
-    const retailPrice =
-      Number(item.retail_price);
+    const pricing = CustomerPricingService.price({ retailPrice: item.retail_price,
+      minimumSalePrice: item.minimum_sale_price }, pricingContext);
+    const retailPrice = Number(pricing?.customerPrice);
 
     return {
       id: item.id,
@@ -99,10 +101,11 @@ function publicItems(items) {
 function cartResult(
   cart,
   items,
-  cartToken = null
+  cartToken = null,
+  pricingContext = null
 ) {
   const serializedItems =
-    publicItems(items);
+    publicItems(items, pricingContext);
 
   const totalQuantity =
     serializedItems.reduce(
@@ -138,21 +141,37 @@ function cartResult(
 
 async function loadCartResult(
   cart,
-  cartToken = null
+  cartToken = null,
+  userId = null
 ) {
   const items =
     await CartRepository.getItems(
       cart.id
     );
 
+  const pricingContext = await CustomerPricingService.getContext(userId);
   return cartResult(
     cart,
     items,
-    cartToken
+    cartToken,
+    pricingContext
   );
 }
 
 export const CartService = {
+  async getCurrentCart({ userId }) {
+    const access =
+      await CartAccessService.getOrCreate({
+        userId,
+      });
+
+    return loadCartResult(
+      access.cart,
+      null,
+      userId
+    );
+  },
+
   async addProduct({
     cartId = null,
     userId = null,
@@ -230,7 +249,8 @@ export const CartService = {
 
     return loadCartResult(
       cart,
-      access.guestToken
+      access.guestToken,
+      userId
     );
   },
 
@@ -247,7 +267,7 @@ export const CartService = {
           guestToken,
         });
 
-    return loadCartResult(cart);
+    return loadCartResult(cart, null, userId);
   },
 
   async updateItemQuantity({
@@ -324,7 +344,7 @@ export const CartService = {
         numericQuantity
       );
 
-    return loadCartResult(cart);
+    return loadCartResult(cart, null, userId);
   },
 
   async removeItem({
@@ -357,6 +377,6 @@ export const CartService = {
       );
     }
 
-    return loadCartResult(cart);
+    return loadCartResult(cart, null, userId);
   },
 };

@@ -130,7 +130,14 @@ async function loadPublicNames(
             THEN default_language.code
 
             ELSE NULL
-          END AS translation_locale
+          END AS translation_locale,
+
+          ARRAY(
+            SELECT pi.url
+            FROM product_images pi
+            WHERE pi.product_id = p.id
+            ORDER BY pi.priority, pi.id
+          ) AS image_urls
 
         FROM products p
 
@@ -190,6 +197,9 @@ async function loadPublicNames(
           translationLocale:
             row.translation_locale ??
             null,
+          imageUrls:
+            row.image_urls ??
+            [],
         },
       ]
     )
@@ -267,6 +277,14 @@ function localizeProduct(
     translationLocale:
       localized?.translationLocale ??
       null,
+
+    imageUrl:
+      localized?.imageUrls?.[0] ??
+      null,
+
+    imageUrls:
+      localized?.imageUrls ??
+      [],
   };
 }
 
@@ -441,6 +459,21 @@ function mapPublicOffer(
 
     retailPrice,
 
+    ...(Array.isArray(offer.priceMatrix)
+      ? {
+          priceMatrix: offer.priceMatrix.map((row) => ({
+            key: row.key,
+            name: row.name,
+            price: formatPrice(row.price),
+            pricingMode: row.pricingMode || null,
+            discountPercent:
+              row.discountPercent === undefined
+                ? null
+                : Number(row.discountPercent),
+          })),
+        }
+      : {}),
+
     deliveryDays:
       Number(
         offer.deliveryDays
@@ -504,6 +537,7 @@ export const PublicSearchPresenterService = {
     requestedLocale,
     family,
     productCard,
+    replacementSourceCard = null,
   }) {
     const locale =
       await resolvePublicLocale(
@@ -512,10 +546,10 @@ export const PublicSearchPresenterService = {
 
     const names =
       await loadPublicNames(
-        collectProductIds(
-          family,
-          productCard
-        ),
+        [
+          ...collectProductIds(family, productCard),
+          ...collectProductIds([], replacementSourceCard),
+        ],
         locale
       );
 
@@ -528,6 +562,15 @@ export const PublicSearchPresenterService = {
           names,
           locale
         ),
+
+      replacementSourceCard: replacementSourceCard
+        ? {
+            product: localizeProduct(replacementSourceCard.product, names),
+            offers: mapPublicOffers(replacementSourceCard.offers, locale),
+            analogs: localizeRelated(replacementSourceCard.analogs, names, locale),
+            replacements: localizeRelated(replacementSourceCard.replacements, names, locale),
+          }
+        : null,
 
       productCard:
         productCard

@@ -125,10 +125,11 @@ test(
     );
 
     assert.equal(
-      offer.purchasePrice,
-      Number(
-        databaseOffer.purchase_price
-      )
+      Object.hasOwn(
+        offer,
+        "purchasePrice"
+      ),
+      false
     );
 
     assert.equal(

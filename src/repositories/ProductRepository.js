@@ -60,6 +60,7 @@ export const ProductRepository = {
           AS automatic_retail_price,
 
         po.manual_retail_price,
+        po.minimum_sale_price,
         po.price_mode,
 
         CASE
@@ -239,6 +240,51 @@ async findRelatedProducts(productId, relationType) {
 
   return result.rows;
 },
+async findArticleNumberRelatedProducts(
+  brandId,
+  articleNormalized,
+  linkType
+) {
+  if (!brandId || !articleNormalized) return [];
+
+  const sql = `
+    WITH related_numbers AS (
+      SELECT target_brand_id AS brand_id,
+             target_article_normalized AS article_normalized
+      FROM article_number_links
+      WHERE is_active = TRUE
+        AND link_type = $3
+        AND source_brand_id = $1
+        AND source_article_normalized = $2
+
+      UNION
+
+      SELECT source_brand_id AS brand_id,
+             source_article_normalized AS article_normalized
+      FROM article_number_links
+      WHERE is_active = TRUE
+        AND link_type = 'ANALOG'
+        AND $3 = 'ANALOG'
+        AND target_brand_id = $1
+        AND target_article_normalized = $2
+    )
+    SELECT p.id, p.brand_id, p.article, p.article_normalized, p.name,
+      COALESCE(b.name, pm.name) AS manufacturer,
+      pt.name AS product_type,
+      $3::varchar AS relation_type
+    FROM related_numbers rn
+    JOIN products p ON p.brand_id = rn.brand_id
+      AND p.article_normalized = rn.article_normalized
+      AND p.is_active = TRUE
+    LEFT JOIN brands b ON b.id = p.brand_id
+    LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
+    LEFT JOIN product_types pt ON pt.id = p.product_type_id
+    ORDER BY p.article;
+  `;
+
+  const result = await pool.query(sql, [brandId, articleNormalized, linkType]);
+  return result.rows;
+},
 async findOfferById(
   id,
   db = pool
@@ -258,6 +304,8 @@ async findOfferById(
         THEN manual_retail_price
         ELSE retail_price
       END AS retail_price,
+
+      minimum_sale_price,
 
       source_type,
       is_available,
@@ -311,6 +359,7 @@ async findOfferById(
       offer.purchase_price === null
         ? null
         : Number(offer.purchase_price),
+    minimumSalePrice: offer.minimum_sale_price === null ? null : Number(offer.minimum_sale_price),
 
     sourceType:
       offer.source_type,
@@ -341,6 +390,8 @@ async findOfferByIdForUpdate(
         THEN manual_retail_price
         ELSE retail_price
       END AS retail_price,
+
+      minimum_sale_price,
 
       source_type,
       is_available,
@@ -394,6 +445,11 @@ async findOfferByIdForUpdate(
       offer.purchase_price === null
         ? null
         : Number(offer.purchase_price),
+
+    minimumSalePrice:
+      offer.minimum_sale_price === null
+        ? null
+        : Number(offer.minimum_sale_price),
 
     sourceType:
       offer.source_type,
@@ -525,6 +581,8 @@ async createOffer(
     supplierId = null,
     quantity,
     purchasePrice,
+    retailPrice = null,
+    minimumSalePrice = null,
     sourceType = "OWN_STOCK",
   },
   db = pool
@@ -538,6 +596,8 @@ async createOffer(
       supplier_id,
       quantity,
       purchase_price,
+      retail_price,
+      minimum_sale_price,
       source_type,
       is_available,
       updated_at
@@ -550,7 +610,9 @@ async createOffer(
       $3,
       $4::numeric,
       $5::numeric,
-      $6,
+      $6::numeric,
+      $7::numeric,
+      $8,
       ($4::numeric > 0),
       CURRENT_TIMESTAMP
     )
@@ -567,6 +629,8 @@ async createOffer(
       supplierId,
       quantity,
       purchasePrice,
+      retailPrice,
+      minimumSalePrice,
       sourceType
     ]
   );
@@ -579,6 +643,8 @@ async updateOfferStock(
   {
     quantity,
     purchasePrice,
+    retailPrice = null,
+    minimumSalePrice = null,
   },
   db = pool
 ) {
@@ -621,6 +687,8 @@ async updateOfferStock(
     SET
       quantity = $2::numeric,
       purchase_price = $3::numeric,
+      retail_price = $4::numeric,
+      minimum_sale_price = $5::numeric,
       is_available = ($2::numeric > 0),
       updated_at = CURRENT_TIMESTAMP
     WHERE id = $1
@@ -630,6 +698,8 @@ async updateOfferStock(
       offerId,
       quantity,
       purchasePrice
+      ,retailPrice
+      ,minimumSalePrice
     ]
   );
 

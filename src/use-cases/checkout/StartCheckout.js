@@ -3,6 +3,7 @@ import { CheckoutService } from "../../services/CheckoutService.js";
 export const StartCheckout = {
   async execute({
     cartId,
+    itemIds = null,
     userId = null,
     guestToken = null,
   }) {
@@ -13,6 +14,7 @@ export const StartCheckout = {
     const result =
       await CheckoutService.start({
         cartId,
+        itemIds,
         userId,
         guestToken,
       });

@@ -28,8 +28,11 @@ export const EmailImportRuleRepository = {
           sis.article_column,
           sis.name_column,
           sis.price_column,
+          sis.retail_price_column,
           sis.quantity_column,
           sis.start_row,
+
+          w.pricing_model,
 
           s.name AS supplier_name
 
@@ -40,6 +43,9 @@ export const EmailImportRuleRepository = {
 
         JOIN suppliers AS s
           ON s.id = wsi.supplier_id
+
+        JOIN warehouses AS w
+          ON w.id = wsi.warehouse_id
 
 
         WHERE wsi.is_active = TRUE

@@ -33,6 +33,18 @@ export const CheckoutRepository = {
     return result.rows[0] ?? null;
   },
 
+  async cancelActiveForCart(cartId, db = pool) {
+    const sql = `
+      UPDATE checkout_sessions
+      SET status = 'CANCELLED', cancelled_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE cart_id = $1 AND status = 'ACTIVE'
+      RETURNING *;
+    `;
+    const result = await db.query(sql, [cartId]);
+    return result.rows;
+  },
+
   async createSession(
     {
       cartId,
