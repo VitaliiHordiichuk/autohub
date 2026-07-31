@@ -304,6 +304,27 @@ function mapOffer(row) {
     quantity:
       Number(row.quantity),
 
+    reservedQuantity:
+      Number(row.reserved_quantity || 0),
+
+    freeQuantity:
+      Number(row.free_quantity ?? row.quantity),
+
+    reservations:
+      Array.isArray(row.reservation_details)
+        ? row.reservation_details.map((reservation) => ({
+            orderId:
+              reservation.orderId === null
+                ? null
+                : Number(reservation.orderId),
+            quantity: Number(reservation.quantity || 0),
+            orderStatus: reservation.orderStatus ?? null,
+            customerName: reservation.customerName ?? null,
+            customerEmail: reservation.customerEmail ?? null,
+            customerPhone: reservation.customerPhone ?? null,
+          }))
+        : [],
+
     purchasePrice:
       toNumberOrNull(
         row.purchase_price

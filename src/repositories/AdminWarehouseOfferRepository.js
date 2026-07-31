@@ -435,6 +435,14 @@ export const AdminWarehouseOfferRepository = {
             s.name AS supplier_name,
 
             po.quantity,
+            COALESCE(reservations.reserved_quantity, 0)
+              AS reserved_quantity,
+            GREATEST(
+              po.quantity - COALESCE(reservations.reserved_quantity, 0),
+              0
+            ) AS free_quantity,
+            COALESCE(reservations.details, '[]'::jsonb)
+              AS reservation_details,
             po.purchase_price,
 
             po.retail_price
@@ -479,6 +487,47 @@ export const AdminWarehouseOfferRepository = {
 
           LEFT JOIN suppliers s
             ON s.id = po.supplier_id
+
+          LEFT JOIN LATERAL (
+            SELECT
+              COALESCE(SUM(sr.quantity), 0)
+                AS reserved_quantity,
+              JSONB_AGG(
+                JSONB_BUILD_OBJECT(
+                  'orderId', sr.order_id,
+                  'quantity', sr.quantity,
+                  'orderStatus', o.status,
+                  'customerName', NULLIF(
+                    CONCAT_WS(
+                      ' ',
+                      odd.recipient_first_name,
+                      odd.recipient_last_name
+                    ),
+                    ''
+                  ),
+                  'customerEmail', odd.recipient_email,
+                  'customerPhone', odd.recipient_phone
+                )
+                ORDER BY sr.order_id, sr.id
+              ) AS details
+            FROM stock_reservations sr
+            LEFT JOIN orders o
+              ON o.id = sr.order_id
+            LEFT JOIN order_delivery_details odd
+              ON odd.order_id = sr.order_id
+            WHERE sr.product_offer_id = po.id
+              AND (
+                sr.status = 'ORDER_PENDING'
+                OR (
+                  sr.status = 'ACTIVE'
+                  AND (
+                    sr.order_id IS NOT NULL
+                    OR sr.reserved_until IS NULL
+                    OR sr.reserved_until > CURRENT_TIMESTAMP
+                  )
+                )
+              )
+          ) reservations ON TRUE
 
           WHERE ${whereSql}
 

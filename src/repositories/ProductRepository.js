@@ -53,7 +53,13 @@ export const ProductRepository = {
           w.supplier_id
         ) AS effective_supplier_id,
 
-        po.quantity,
+        GREATEST(
+          po.quantity - COALESCE(reservations.reserved_quantity, 0),
+          0
+        ) AS quantity,
+        po.quantity AS stock_quantity,
+        COALESCE(reservations.reserved_quantity, 0)
+          AS reserved_quantity,
         po.purchase_price,
 
         po.retail_price
@@ -98,10 +104,31 @@ export const ProductRepository = {
           w.supplier_id
         )
 
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(sr.quantity), 0)
+          AS reserved_quantity
+        FROM stock_reservations sr
+        WHERE sr.product_offer_id = po.id
+          AND (
+            sr.status = 'ORDER_PENDING'
+            OR (
+              sr.status = 'ACTIVE'
+              AND (
+                sr.order_id IS NOT NULL
+                OR sr.reserved_until IS NULL
+                OR sr.reserved_until > CURRENT_TIMESTAMP
+              )
+            )
+          )
+      ) reservations ON TRUE
+
       WHERE po.product_id = $1
         AND po.is_available = TRUE
         AND po.is_hidden = FALSE
-        AND po.quantity > 0
+        AND GREATEST(
+          po.quantity - COALESCE(reservations.reserved_quantity, 0),
+          0
+        ) > 0
 
         AND (
           w.id IS NULL

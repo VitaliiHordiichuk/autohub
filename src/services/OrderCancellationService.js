@@ -6,6 +6,8 @@ import { ReservationRepository } from "../repositories/ReservationRepository.js"
 const CANCELLABLE_STATUSES = new Set([
   "NEW",
   "CONFIRMED",
+  "PROCESSING",
+  "READY",
 ]);
 
 export const OrderCancellationService = {

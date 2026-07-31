@@ -31,7 +31,13 @@ export const OrderCompletionService = {
         throw new Error("Заказ не найден");
       }
 
-      if (order.status !== "READY") {
+      const completableStatuses = new Set([
+        "CONFIRMED",
+        "PROCESSING",
+        "READY",
+      ]);
+
+      if (!completableStatuses.has(order.status)) {
         throw new Error(
           `Заказ со статусом ${order.status} завершить нельзя`
         );
@@ -115,7 +121,7 @@ export const OrderCompletionService = {
         await OrderRepository.addStatusHistory(
           {
             orderId: numericOrderId,
-            oldStatus: "READY",
+            oldStatus: order.status,
             newStatus: "COMPLETED",
             changedBy,
             comment:
