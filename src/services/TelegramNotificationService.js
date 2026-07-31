@@ -40,6 +40,7 @@ export const TelegramNotificationService = {
 
     const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
     const orderUrl = `${frontendUrl}/uk/admin/orders/${Number(orderId)}`;
+    const canOpenOrderFromTelegram = /^https:\/\//i.test(frontendUrl);
     const text = [
       `🛒 <b>Нове замовлення №${Number(orderId)}</b>`,
       `Клієнт: ${escapeHtml(customerName || "Не вказано")}`,
@@ -50,7 +51,9 @@ export const TelegramNotificationService = {
     const deliveries = await Promise.allSettled(result.rows.map((row) =>
       sendMessage(row.telegram_chat_id, {
         text,
-        reply_markup: { inline_keyboard: [[{ text: "Відкрити замовлення", url: orderUrl }]] },
+        ...(canOpenOrderFromTelegram ? {
+          reply_markup: { inline_keyboard: [[{ text: "Відкрити замовлення", url: orderUrl }]] },
+        } : {}),
       })
     ));
     deliveries.forEach((delivery) => {
