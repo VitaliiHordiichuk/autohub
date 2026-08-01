@@ -3,6 +3,7 @@ import { transaction } from "../db/transaction.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
+import { TelegramNotificationService } from "./TelegramNotificationService.js";
 
 export const OrderConfirmationService = {
   async confirmOrder({
@@ -19,7 +20,8 @@ export const OrderConfirmationService = {
       throw new Error("Некорректный номер заказа");
     }
 
-    return transaction(async (db) => {
+    let customerUserId = null;
+    const result = await transaction(async (db) => {
       const order =
         await OrderRepository.findByIdForUpdate(
           numericOrderId,
@@ -94,6 +96,7 @@ export const OrderConfirmationService = {
         );
 
       if (order.created_by) {
+        customerUserId = Number(order.created_by);
         await NotificationRepository.createForUser({
           userId: Number(order.created_by),
           eventKey: `order:${numericOrderId}:status:CONFIRMED`,
@@ -110,5 +113,13 @@ export const OrderConfirmationService = {
         history,
       };
     });
+
+    void TelegramNotificationService.sendOrderStatusToUser({
+      userId: customerUserId,
+      orderId: numericOrderId,
+      status: "CONFIRMED",
+    }).catch((error) => console.error("Ошибка Telegram-уведомления клиента:", error.message));
+
+    return result;
   },
 };

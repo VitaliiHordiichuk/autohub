@@ -3,6 +3,7 @@ import { transaction } from "../db/transaction.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
+import { TelegramNotificationService } from "./TelegramNotificationService.js";
 
 const CANCELLABLE_STATUSES = new Set([
   "NEW",
@@ -26,7 +27,8 @@ export const OrderCancellationService = {
       throw new Error("Некорректный номер заказа");
     }
 
-    return transaction(async (db) => {
+    let customerUserId = null;
+    const result = await transaction(async (db) => {
       const order =
         await OrderRepository.findByIdForUpdate(
           numericOrderId,
@@ -73,6 +75,7 @@ export const OrderCancellationService = {
         );
 
       if (order.created_by) {
+        customerUserId = Number(order.created_by);
         await NotificationRepository.createForUser({
           userId: Number(order.created_by),
           eventKey: `order:${numericOrderId}:status:CANCELLED`,
@@ -88,5 +91,13 @@ export const OrderCancellationService = {
         history,
       };
     });
+
+    void TelegramNotificationService.sendOrderStatusToUser({
+      userId: customerUserId,
+      orderId: numericOrderId,
+      status: "CANCELLED",
+    }).catch((error) => console.error("Ошибка Telegram-уведомления клиента:", error.message));
+
+    return result;
   },
 };

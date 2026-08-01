@@ -30,7 +30,7 @@ export const TelegramNotificationService = {
   async sendNewOrder({ orderId, customerName, totalAmount, itemsCount }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN) return;
     const result = await db.query(`
-      SELECT c.telegram_chat_id
+      SELECT DISTINCT c.telegram_chat_id
       FROM user_telegram_connections c
       JOIN users u ON u.id = c.user_id
       JOIN roles r ON r.id = u.role_id
@@ -58,6 +58,33 @@ export const TelegramNotificationService = {
     ));
     deliveries.forEach((delivery) => {
       if (delivery.status === "rejected") console.error("Не удалось отправить Telegram-уведомление:", delivery.reason?.message || delivery.reason);
+    });
+  },
+
+  async sendOrderStatusToUser({ userId, orderId, status }, db = pool) {
+    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
+    const result = await db.query(`
+      SELECT telegram_chat_id
+      FROM user_telegram_connections
+      WHERE user_id = $1 AND notifications_enabled = TRUE`, [userId]);
+    if (!result.rows[0]) return;
+
+    const labels = {
+      CONFIRMED: "✅ Ваше замовлення підтверджено",
+      COMPLETED: "🎉 Ваше замовлення завершено",
+      CANCELLED: "↩️ Ваше замовлення скасовано",
+    };
+    const title = labels[status];
+    if (!title) return;
+
+    const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
+    const canOpenOrder = /^https:\/\//i.test(frontendUrl);
+    const orderUrl = `${frontendUrl}/uk/account/orders/${Number(orderId)}`;
+    await sendMessage(result.rows[0].telegram_chat_id, {
+      text: `${title}\nЗамовлення №${Number(orderId)}`,
+      ...(canOpenOrder ? {
+        reply_markup: { inline_keyboard: [[{ text: "Переглянути замовлення", url: orderUrl }]] },
+      } : {}),
     });
   },
 };

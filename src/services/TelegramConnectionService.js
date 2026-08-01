@@ -43,11 +43,10 @@ export const TelegramConnectionService = {
         JOIN roles r ON r.id = u.role_id
         WHERE t.token_hash = $1 AND t.used_at IS NULL
           AND t.expires_at > CURRENT_TIMESTAMP AND u.is_active = TRUE
-          AND r.name IN ('ADMIN', 'MANAGER')
+          AND r.name IN ('ADMIN', 'MANAGER', 'CLIENT')
         FOR UPDATE`, [hash(token)]);
       const link = result.rows[0];
       if (!link) return null;
-      await db.query("DELETE FROM user_telegram_connections WHERE telegram_chat_id = $1 AND user_id <> $2", [chatId, link.user_id]);
       await db.query(`
         INSERT INTO user_telegram_connections(
           user_id, telegram_chat_id, telegram_username, telegram_first_name
