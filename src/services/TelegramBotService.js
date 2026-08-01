@@ -35,8 +35,12 @@ async function poll() {
       await api("sendMessage", {
         chat_id: message.chat.id,
         text: connection
-          ? "✅ Telegram успешно привязан к AutoHub. Здесь будут приходить уведомления о заказах."
-          : "Ссылка устарела или уже использована. Создайте новую ссылку в AutoHub.",
+          ? ({
+              uk:"✅ Telegram успішно підключено до AutoHub. Тут надходитимуть сповіщення про замовлення.",
+              en:"✅ Telegram is now connected to AutoHub. Order notifications will arrive here.",
+              ru:"✅ Telegram успешно подключён к AutoHub. Здесь будут приходить уведомления о заказах.",
+            }[connection.locale] || "✅ Telegram успішно підключено до AutoHub. Тут надходитимуть сповіщення про замовлення.")
+          : "Посилання застаріло або вже використане. Створіть нове посилання в AutoHub.",
       });
     }
   } catch (error) {

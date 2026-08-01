@@ -3,6 +3,7 @@ import { pool } from "../config/db.js";
 import { transaction } from "../db/transaction.js";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+const normalizeLocale = (value) => ["uk", "en", "ru"].includes(value) ? value : "uk";
 
 export const TelegramConnectionService = {
   async status(userId, db = pool) {
@@ -19,7 +20,7 @@ export const TelegramConnectionService = {
     } : { connected: false };
   },
 
-  async createLink(userId, db = pool) {
+  async createLink(userId, locale, db = pool) {
     const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "").trim();
     if (!process.env.TELEGRAM_BOT_TOKEN || !botUsername) {
       const error = new Error("Telegram-бот ещё не настроен");
@@ -29,15 +30,15 @@ export const TelegramConnectionService = {
     const token = randomBytes(24).toString("hex");
     await db.query("DELETE FROM telegram_link_tokens WHERE user_id = $1 OR expires_at < CURRENT_TIMESTAMP", [userId]);
     await db.query(`
-      INSERT INTO telegram_link_tokens(user_id, token_hash, expires_at)
-      VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '15 minutes')`, [userId, hash(token)]);
+      INSERT INTO telegram_link_tokens(user_id, token_hash, expires_at, locale)
+      VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '15 minutes', $3)`, [userId, hash(token), normalizeLocale(locale)]);
     return { url: `https://t.me/${botUsername}?start=${token}`, expiresInMinutes: 15 };
   },
 
   async connectFromTelegram({ token, chatId, username, firstName }) {
     return transaction(async (db) => {
       const result = await db.query(`
-        SELECT t.id, t.user_id
+        SELECT t.id, t.user_id, t.locale
         FROM telegram_link_tokens t
         JOIN users u ON u.id = t.user_id
         JOIN roles r ON r.id = u.role_id
@@ -49,16 +50,17 @@ export const TelegramConnectionService = {
       if (!link) return null;
       await db.query(`
         INSERT INTO user_telegram_connections(
-          user_id, telegram_chat_id, telegram_username, telegram_first_name
-        ) VALUES ($1, $2, $3, $4)
+          user_id, telegram_chat_id, telegram_username, telegram_first_name, preferred_locale
+        ) VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (user_id) DO UPDATE SET
           telegram_chat_id = EXCLUDED.telegram_chat_id,
           telegram_username = EXCLUDED.telegram_username,
           telegram_first_name = EXCLUDED.telegram_first_name,
+          preferred_locale = EXCLUDED.preferred_locale,
           notifications_enabled = TRUE,
-          updated_at = CURRENT_TIMESTAMP`, [link.user_id, chatId, username || null, firstName || null]);
+          updated_at = CURRENT_TIMESTAMP`, [link.user_id, chatId, username || null, firstName || null, normalizeLocale(link.locale)]);
       await db.query("UPDATE telegram_link_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = $1", [link.id]);
-      return { userId: link.user_id };
+      return { userId: link.user_id, locale:normalizeLocale(link.locale) };
     });
   },
 

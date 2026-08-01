@@ -11,7 +11,7 @@ export async function getTelegramStatus(req, res) {
 }
 
 export async function createTelegramLink(req, res) {
-  try { return res.json({ success: true, ...(await TelegramConnectionService.createLink(req.auth.userId)) }); }
+  try { return res.json({ success: true, ...(await TelegramConnectionService.createLink(req.auth.userId, req.body?.locale)) }); }
   catch (error) { return fail(res, error); }
 }
 
