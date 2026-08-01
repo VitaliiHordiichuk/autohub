@@ -2,6 +2,7 @@ import { OrderRepository } from "../../repositories/OrderRepository.js";
 import {
   OrderDeliveryRepository,
 } from "../../repositories/OrderDeliveryRepository.js";
+import { OrderReturnRepository } from "../../repositories/OrderReturnRepository.js";
 
 export const GetManagerOrder = {
   async execute(orderId) {
@@ -32,6 +33,7 @@ export const GetManagerOrder = {
       statusHistory,
       itemHistory,
       delivery,
+      returns,
     ] = await Promise.all([
       OrderRepository
         .findItemsByOrderId(
@@ -49,6 +51,7 @@ export const GetManagerOrder = {
         .findByOrderId(
           numericOrderId
         ),
+      OrderReturnRepository.listByOrder(numericOrderId),
     ]);
 
     return {
@@ -99,6 +102,7 @@ export const GetManagerOrder = {
 
       statusHistory,
       itemHistory,
+      returns,
     };
   },
 };

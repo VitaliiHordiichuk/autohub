@@ -161,4 +161,18 @@ export const TelegramNotificationService = {
       ...(canOpenOrder ? { reply_markup:{inline_keyboard:[[{text:copy.open,url:orderUrl}]]} } : {}),
     });
   },
+
+  async sendReturnCompletedToUser({userId,orderId,items},db=pool){
+    if(process.env.NODE_ENV==="test"||!process.env.TELEGRAM_BOT_TOKEN||!userId)return;
+    const result=await db.query(`SELECT telegram_chat_id,preferred_locale FROM user_telegram_connections WHERE user_id=$1 AND notifications_enabled=TRUE`,[userId]);
+    if(!result.rows[0])return;
+    const locale=localeOf(result.rows[0].preferred_locale);
+    const copy={
+      uk:{title:`↩️ <b>Повернення за замовленням №${Number(orderId)} підтверджено</b>`,items:"Повернені позиції"},
+      en:{title:`↩️ <b>Return for order №${Number(orderId)} confirmed</b>`,items:"Returned items"},
+      ru:{title:`↩️ <b>Возврат по заказу №${Number(orderId)} подтверждён</b>`,items:"Возвращённые позиции"},
+    }[locale];
+    const rows=(items||[]).map((item)=>`• <b>${escapeHtml(item.article)}</b>${item.name?` — ${escapeHtml(item.name)}`:""} × ${Number(item.quantity)}`);
+    await sendMessage(result.rows[0].telegram_chat_id,{text:[copy.title,"",copy.items+":",...rows].join("\n")});
+  },
 };

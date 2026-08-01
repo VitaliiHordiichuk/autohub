@@ -530,6 +530,15 @@ async decreaseQuantityForSale(
 
   return result.rows[0] ?? null;
 },
+async increaseQuantityForReturn(productOfferId, quantity, db = pool) {
+  const result = await db.query(`WITH locked AS (
+      SELECT id,quantity AS old_quantity FROM product_offers WHERE id=$1 FOR UPDATE
+    ), updated AS (
+      UPDATE product_offers po SET quantity=po.quantity+$2,is_available=TRUE,updated_at=CURRENT_TIMESTAMP
+      FROM locked l WHERE po.id=l.id RETURNING po.*,l.old_quantity
+    ) SELECT *,quantity AS new_quantity FROM updated`, [productOfferId,quantity]);
+  return result.rows[0] || null;
+},
 async findByBrandAndArticle(
   brandId,
   articleNormalized,

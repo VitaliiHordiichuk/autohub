@@ -2,6 +2,7 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { OrderDeliveryRepository } from "../repositories/OrderDeliveryRepository.js";
 import { CartService } from "../services/CartService.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
+import { OrderReturnRepository } from "../repositories/OrderReturnRepository.js";
 
 function normalizeItem(item) {
   return {
@@ -49,10 +50,11 @@ export async function getClientOrder(req, res) {
       return res.status(404).json({ success: false, error: "Заказ не найден" });
     }
 
-    const [items, statusHistory, delivery] = await Promise.all([
+    const [items, statusHistory, delivery, returns] = await Promise.all([
       OrderRepository.findItemsByOrderId(orderId),
       OrderRepository.findStatusHistory(orderId),
       OrderDeliveryRepository.findByOrderId(orderId),
+      OrderReturnRepository.listByOrder(orderId),
     ]);
 
     return res.json({
@@ -69,6 +71,7 @@ export async function getClientOrder(req, res) {
           new_status: entry.new_status,
           created_at: entry.created_at,
         })),
+        returns,
       },
     });
   } catch (error) {
