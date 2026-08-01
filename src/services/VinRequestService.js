@@ -1,5 +1,6 @@
 import { VinRequestRepository } from "../repositories/VinRequestRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
+import { VinDecoderService } from "./VinDecoderService.js";
 
 const statuses=new Set(['NEW','IN_PROGRESS','ANSWERED','CLOSED']);
 function id(value){const n=Number(value);if(!Number.isInteger(n)||n<=0)throw new Error('Некорректный номер VIN-запроса');return n;}
@@ -12,6 +13,12 @@ export const VinRequestService={
     const row=await VinRequestRepository.create({userId,vehicleBrandId:brandId,vin:normalizeVin(vin),requestText:text(requestText),contactPhone:String(contactPhone||'').trim()||null});
     await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin}});
     return row;
+  },
+  async decode({vehicleBrandId,vin}){
+    const brandId=id(vehicleBrandId);const brand=await VinRequestRepository.supportedBrand(brandId);if(!brand)throw new Error('Извините, этой маркой мы пока не занимаемся');
+    const result=await VinDecoderService.decode(normalizeVin(vin));
+    if(result.vehicle.make&&brand.name.toLowerCase().includes('mercedes')&&!result.vehicle.make.toLowerCase().includes('mercedes')){const error=new Error('VIN не соответствует выбранной марке');error.code='VIN_BRAND_MISMATCH';error.make=result.vehicle.make;throw error;}
+    return {...result,selectedBrand:brand.name};
   },
   listForUser(userId){return VinRequestRepository.listForUser(userId);},
   async getForUser(requestId,userId){const row=await VinRequestRepository.findForUser(id(requestId),userId);if(!row)throw new Error('VIN-запрос не найден');return row;},
