@@ -1,0 +1,15 @@
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS edit_revision INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS notified_edit_revision INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS edits_confirmed_at TIMESTAMP WITHOUT TIME ZONE;
+
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS edits_confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+INSERT INTO schema_migrations(version)
+VALUES ('048_add_order_edit_revisions')
+ON CONFLICT (version) DO NOTHING;

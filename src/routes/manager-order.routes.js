@@ -14,6 +14,7 @@ import {
   getManagerOrders,
   getManagerOrderSummary,
   updateManagerOrderTracking,
+  confirmManagerOrderEdits,
 } from "../controllers/manager-order.controller.js";
 
 import {
@@ -32,6 +33,11 @@ managerOrderRouter.use(
 managerOrderRouter.patch(
   "/:orderId/tracking",
   updateManagerOrderTracking
+);
+
+managerOrderRouter.patch(
+  "/:orderId/confirm-edits",
+  confirmManagerOrderEdits
 );
 
 managerOrderRouter.patch(

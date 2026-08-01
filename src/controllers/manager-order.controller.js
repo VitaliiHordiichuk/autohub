@@ -7,22 +7,18 @@ import { OrderWorkflowService } from "../services/OrderWorkflowService.js";
 import { OrderCompletionService } from "../services/OrderCompletionService.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { OrderTrackingService } from "../services/OrderTrackingService.js";
-import { NotificationRepository } from "../repositories/NotificationRepository.js";
-import { TelegramNotificationService } from "../services/TelegramNotificationService.js";
+import { OrderEditConfirmationService } from "../services/OrderEditConfirmationService.js";
 
-async function notifyCustomerAboutEdit(result) {
-  const userId = Number(result.order?.created_by || 0);
-  const orderId = Number(result.order?.id || 0);
-  if (!userId || !orderId) return;
-  await NotificationRepository.createForUser({
-    userId,
-    eventKey:`order:${orderId}:updated:${result.history?.id || Date.now()}`,
-    type:"ORDER_UPDATED",
-    orderId,
-    payload:{orderId},
-  });
-  void TelegramNotificationService.sendOrderUpdatedToUser({userId,orderId})
-    .catch((error)=>console.error("Ошибка Telegram-уведомления об изменении заказа:", error.message));
+export async function confirmManagerOrderEdits(req, res) {
+  try {
+    const order = await OrderEditConfirmationService.confirm({
+      orderId:req.params.orderId,
+      changedBy:req.auth.userId,
+    });
+    return res.json({success:true,order});
+  } catch (error) {
+    return res.status(400).json({success:false,error:error.message});
+  }
 }
 
 export async function updateManagerOrderTracking(req, res) {
@@ -123,7 +119,6 @@ export async function changeManagerOrderItemQuantity(
         changedBy: req.auth.userId,
         reason,
       });
-    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -164,7 +159,6 @@ export async function changeManagerOrderItemPrice(
         changedBy: req.auth.userId,
         reason,
       });
-    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -203,7 +197,6 @@ export async function removeManagerOrderItem(
         changedBy: req.auth.userId,
         reason,
       });
-    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -242,7 +235,6 @@ export async function restoreManagerOrderItem(
         changedBy: req.auth.userId,
         reason,
       });
-    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -286,7 +278,6 @@ export async function addManagerOrderItem(
         changedBy: req.auth.userId,
         reason,
       });
-    await notifyCustomerAboutEdit(result);
 
     return res.status(201).json({
       success: true,

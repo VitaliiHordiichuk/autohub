@@ -117,6 +117,8 @@ export const OrderRepository = {
       o.updated_at,
       o.tracking_number,
       o.tracking_updated_at,
+      o.edit_revision,
+      o.notified_edit_revision,
 
       c.company_name,
       c.customer_type,
@@ -131,6 +133,7 @@ export const OrderRepository = {
 
     LEFT JOIN order_items oi
       ON oi.order_id = o.id
+      AND oi.status = 'ACTIVE'
 
     WHERE ($1::varchar IS NULL OR o.status = $1)
 
@@ -184,6 +187,8 @@ async findByIdForManager(orderId, db = pool) {
       o.updated_at,
       o.tracking_number,
       o.tracking_updated_at,
+      o.edit_revision,
+      o.notified_edit_revision,
 
       c.company_name,
       c.customer_type,
@@ -381,6 +386,29 @@ async findByIdForUpdate(orderId, db = pool) {
 
   const result = await db.query(sql, [orderId]);
 
+  return result.rows[0] ?? null;
+},
+async markEditPending(orderId, db = pool) {
+  const result = await db.query(`
+    UPDATE orders
+    SET edit_revision = edit_revision + 1,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1
+    RETURNING *;
+  `, [orderId]);
+  return result.rows[0] ?? null;
+},
+
+async confirmPendingEdits(orderId, changedBy, db = pool) {
+  const result = await db.query(`
+    UPDATE orders
+    SET notified_edit_revision = edit_revision,
+        edits_confirmed_at = CURRENT_TIMESTAMP,
+        edits_confirmed_by = $2,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1 AND edit_revision > notified_edit_revision
+    RETURNING *;
+  `, [orderId, changedBy]);
   return result.rows[0] ?? null;
 },
 

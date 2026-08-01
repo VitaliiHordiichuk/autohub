@@ -134,20 +134,30 @@ export const TelegramNotificationService = {
 
   async sendOrderUpdatedToUser({ userId, orderId }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
-    const result = await db.query(`SELECT telegram_chat_id, preferred_locale FROM user_telegram_connections
-      WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]);
-    if (!result.rows[0]) return;
-    const locale = localeOf(result.rows[0].preferred_locale);
+    const [connectionResult, orderResult, itemsResult] = await Promise.all([
+      db.query(`SELECT telegram_chat_id, preferred_locale FROM user_telegram_connections
+        WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]),
+      db.query("SELECT total_amount FROM orders WHERE id=$1", [orderId]),
+      db.query(`SELECT p.article, p.name, oi.quantity, oi.price_at_purchase
+        FROM order_items oi JOIN products p ON p.id=oi.product_id
+        WHERE oi.order_id=$1 AND oi.status='ACTIVE' ORDER BY oi.id`, [orderId]),
+    ]);
+    if (!connectionResult.rows[0]) return;
+    const locale = localeOf(connectionResult.rows[0].preferred_locale);
     const copy = {
-      uk:{text:`✏️ <b>Замовлення №${Number(orderId)} оновлено</b>\nМенеджер змінив склад замовлення. Перевірте позиції та нову суму 💙`,open:"Переглянути замовлення"},
-      en:{text:`✏️ <b>Order №${Number(orderId)} was updated</b>\nThe manager changed the order contents. Please review the items and new total 💙`,open:"View order"},
-      ru:{text:`✏️ <b>Заказ №${Number(orderId)} обновлён</b>\nМенеджер изменил состав заказа. Проверьте позиции и новую сумму 💙`,open:"Посмотреть заказ"},
+      uk:{title:`✏️ <b>Замовлення №${Number(orderId)} оновлено</b>`,total:"Разом",open:"Переглянути замовлення"},
+      en:{title:`✏️ <b>Order №${Number(orderId)} was updated</b>`,total:"Total",open:"View order"},
+      ru:{title:`✏️ <b>Заказ №${Number(orderId)} обновлён</b>`,total:"Итого",open:"Посмотреть заказ"},
     }[locale];
+    const items = itemsResult.rows.map((item) =>
+      `• <b>${escapeHtml(item.article)}</b>${item.name ? ` — ${escapeHtml(item.name)}` : ""} × ${Number(item.quantity)} = <b>${escapeHtml(formatMoney(Number(item.quantity) * Number(item.price_at_purchase)))}</b>`
+    );
+    const message = [copy.title, "", ...items, "", `${copy.total}: <b>${escapeHtml(formatMoney(orderResult.rows[0]?.total_amount))}</b>`].join("\n");
     const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
     const orderUrl = `${frontendUrl}/${locale}/account/orders/${Number(orderId)}`;
     const canOpenOrder = /^https:\/\//i.test(frontendUrl);
-    await sendMessage(result.rows[0].telegram_chat_id, {
-      text:copy.text,
+    await sendMessage(connectionResult.rows[0].telegram_chat_id, {
+      text:message,
       ...(canOpenOrder ? { reply_markup:{inline_keyboard:[[{text:copy.open,url:orderUrl}]]} } : {}),
     });
   },

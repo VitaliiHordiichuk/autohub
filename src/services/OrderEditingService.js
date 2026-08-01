@@ -139,11 +139,11 @@ export const OrderEditingService = {
         db
       );
 
-      const updatedOrder =
-        await OrderRepository.recalculateTotal(
+      await OrderRepository.recalculateTotal(
           numericOrderId,
           db
         );
+      const updatedOrder = await OrderRepository.markEditPending(numericOrderId, db);
 
       const history =
         await OrderRepository.addItemHistory(
@@ -236,11 +236,11 @@ export const OrderEditingService = {
         db
       );
 
-    const updatedOrder =
-      await OrderRepository.recalculateTotal(
+    await OrderRepository.recalculateTotal(
         numericOrderId,
         db
       );
+    const updatedOrder = await OrderRepository.markEditPending(numericOrderId, db);
 
     const history =
       await OrderRepository.addItemHistory(
@@ -322,11 +322,11 @@ async removeItem({
     );
 
 
-    const updatedOrder =
-      await OrderRepository.recalculateTotal(
+    await OrderRepository.recalculateTotal(
         orderId,
         db
       );
+    const updatedOrder = await OrderRepository.markEditPending(orderId, db);
 
 
     const history =
@@ -411,11 +411,11 @@ async restoreItem({
     );
 
 
-    const updatedOrder =
-      await OrderRepository.recalculateTotal(
+    await OrderRepository.recalculateTotal(
         orderId,
         db
       );
+    const updatedOrder = await OrderRepository.markEditPending(orderId, db);
 
 
     const history =
@@ -640,11 +640,11 @@ if (existingItem) {
 }
 
 
-    const updatedOrder =
-      await OrderRepository.recalculateTotal(
+    await OrderRepository.recalculateTotal(
         numericOrderId,
         db
       );
+    const updatedOrder = await OrderRepository.markEditPending(numericOrderId, db);
 
 
     return {
