@@ -61,6 +61,7 @@ import { clientSearchHistoryRouter } from "./routes/client-search-history.routes
 import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
 import { telegramConnectionRouter } from "./routes/telegram-connection.routes.js";
+import { clientVinRequestRouter, managerVinRequestRouter } from "./routes/vin-request.routes.js";
 
 export const app = express();
 
@@ -102,6 +103,7 @@ app.use("/api/account/cart", clientCartRouter);
 app.use("/api/account/orders", clientOrderRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/account/telegram", telegramConnectionRouter);
+app.use("/api/account/vin-requests", clientVinRequestRouter);
 
 app.use(
   "/api/admin",
@@ -169,6 +171,7 @@ app.use("/api/catalog", catalogRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/checkout", checkoutRouter);
 app.use("/api/manager/orders", managerOrderRouter);
+app.use("/api/manager/vin-requests", managerVinRequestRouter);
 app.use("/api/management", customerManagementRouter);
 app.use("/api/admin/warehouses", adminWarehouseRouter);
 app.use("/api/admin/warehouses", adminWarehouseOfferRouter);

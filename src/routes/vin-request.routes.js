@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { requireAuth,requireRole } from "../middleware/auth.middleware.js";
+import { createVinRequest,listClientVinRequests,getClientVinRequest,listManagerVinRequests,getVinSummary,updateVinRequest } from "../controllers/vin-request.controller.js";
+export const clientVinRequestRouter=Router();
+clientVinRequestRouter.use(requireAuth);
+clientVinRequestRouter.get('/',listClientVinRequests);
+clientVinRequestRouter.post('/',createVinRequest);
+clientVinRequestRouter.get('/:requestId',getClientVinRequest);
+export const managerVinRequestRouter=Router();
+managerVinRequestRouter.use(requireAuth,requireRole('ADMIN','MANAGER'));
+managerVinRequestRouter.get('/',listManagerVinRequests);
+managerVinRequestRouter.get('/summary',getVinSummary);
+managerVinRequestRouter.patch('/:requestId',updateVinRequest);
