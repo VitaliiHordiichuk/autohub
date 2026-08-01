@@ -21,7 +21,7 @@ import {
   requireAuth,
   requireRole,
 } from "../middleware/auth.middleware.js";
-import { createOrderReturn, confirmOrderReturn } from "../controllers/manager-order-return.controller.js";
+import { createOrderReturn, confirmOrderReturn, getOrderReturns } from "../controllers/manager-order-return.controller.js";
 
 export const managerOrderRouter =
   Router();
@@ -36,6 +36,7 @@ managerOrderRouter.patch(
   updateManagerOrderTracking
 );
 
+managerOrderRouter.get("/returns", getOrderReturns);
 managerOrderRouter.post("/:orderId/returns", createOrderReturn);
 managerOrderRouter.patch("/:orderId/returns/:returnId/confirm", confirmOrderReturn);
 
