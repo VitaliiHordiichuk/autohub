@@ -115,6 +115,8 @@ export const OrderRepository = {
       o.created_by,
       o.created_at,
       o.updated_at,
+      o.tracking_number,
+      o.tracking_updated_at,
 
       c.company_name,
       c.customer_type,
@@ -180,6 +182,8 @@ async findByIdForManager(orderId, db = pool) {
       o.created_by,
       o.created_at,
       o.updated_at,
+      o.tracking_number,
+      o.tracking_updated_at,
 
       c.company_name,
       c.customer_type,
@@ -234,6 +238,8 @@ async findByIdForCustomerUser(orderId, userId, db = pool) {
       o.comment,
       o.created_at,
       o.updated_at
+      ,o.tracking_number
+      ,o.tracking_updated_at
     FROM orders o
     JOIN customers c ON c.id = o.customer_id
     WHERE o.id = $1 AND c.user_id = $2

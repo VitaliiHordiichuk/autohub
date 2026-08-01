@@ -1,0 +1,14 @@
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_number VARCHAR(40);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_updated_at TIMESTAMP WITHOUT TIME ZONE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS order_tracking_history (
+  id BIGSERIAL PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  old_tracking_number VARCHAR(40),
+  new_tracking_number VARCHAR(40) NOT NULL,
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO schema_migrations(version) VALUES ('046_add_order_tracking') ON CONFLICT (version) DO NOTHING;

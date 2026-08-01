@@ -6,6 +6,15 @@ import { OrderCancellationService } from "../services/OrderCancellationService.j
 import { OrderWorkflowService } from "../services/OrderWorkflowService.js";
 import { OrderCompletionService } from "../services/OrderCompletionService.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
+import { OrderTrackingService } from "../services/OrderTrackingService.js";
+
+export async function updateManagerOrderTracking(req, res) {
+  try {
+    const result = await OrderTrackingService.update({ orderId:req.params.orderId,
+      trackingNumber:req.body.trackingNumber, changedBy:req.auth.userId });
+    return res.json({ success:true, order:result.order, changed:result.changed });
+  } catch (error) { return res.status(400).json({ success:false, error:error.message }); }
+}
 
 export async function getManagerOrders(req, res) {
   try {

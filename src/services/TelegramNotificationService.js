@@ -106,4 +106,14 @@ export const TelegramNotificationService = {
       } : {}),
     });
   },
+
+  async sendTrackingToUser({ userId, orderId, trackingNumber }, db = pool) {
+    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
+    const result = await db.query(`SELECT telegram_chat_id FROM user_telegram_connections
+      WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]);
+    if (!result.rows[0]) return;
+    await sendMessage(result.rows[0].telegram_chat_id, {
+      text:`🚚 <b>Замовлення №${Number(orderId)} вже має ТТН</b>\nНова пошта: <code>${escapeHtml(trackingNumber)}</code>\n\nМожна копіювати номер і стежити за посилкою 💙`,
+    });
+  },
 };

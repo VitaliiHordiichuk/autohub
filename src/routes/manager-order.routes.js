@@ -13,6 +13,7 @@ import {
   getManagerOrder,
   getManagerOrders,
   getManagerOrderSummary,
+  updateManagerOrderTracking,
 } from "../controllers/manager-order.controller.js";
 
 import {
@@ -26,6 +27,11 @@ export const managerOrderRouter =
 managerOrderRouter.use(
   requireAuth,
   requireRole("ADMIN", "MANAGER")
+);
+
+managerOrderRouter.patch(
+  "/:orderId/tracking",
+  updateManagerOrderTracking
 );
 
 managerOrderRouter.patch(
