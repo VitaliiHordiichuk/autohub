@@ -63,11 +63,15 @@ export const TelegramNotificationService = {
 
   async sendOrderStatusToUser({ userId, orderId, status }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
-    const result = await db.query(`
-      SELECT telegram_chat_id
-      FROM user_telegram_connections
-      WHERE user_id = $1 AND notifications_enabled = TRUE`, [userId]);
-    if (!result.rows[0]) return;
+    const [connectionResult, orderResult, itemsResult] = await Promise.all([
+      db.query(`SELECT telegram_chat_id FROM user_telegram_connections
+        WHERE user_id = $1 AND notifications_enabled = TRUE`, [userId]),
+      db.query("SELECT total_amount FROM orders WHERE id = $1", [orderId]),
+      db.query(`SELECT p.article, p.name, oi.quantity
+        FROM order_items oi JOIN products p ON p.id = oi.product_id
+        WHERE oi.order_id = $1 AND oi.status = 'ACTIVE' ORDER BY oi.id`, [orderId]),
+    ]);
+    if (!connectionResult.rows[0]) return;
 
     const labels = {
       CONFIRMED: "✅ Ваше замовлення підтверджено",
@@ -80,8 +84,23 @@ export const TelegramNotificationService = {
     const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
     const canOpenOrder = /^https:\/\//i.test(frontendUrl);
     const orderUrl = `${frontendUrl}/uk/account/orders/${Number(orderId)}`;
-    await sendMessage(result.rows[0].telegram_chat_id, {
-      text: `${title}\nЗамовлення №${Number(orderId)}`,
+    const visibleItems = itemsResult.rows.slice(0, 20).map((item) => {
+      const name = String(item.name || "").trim();
+      const shortName = name.length > 70 ? `${name.slice(0, 67)}…` : name;
+      return `• <b>${escapeHtml(item.article)}</b>${shortName ? ` — ${escapeHtml(shortName)}` : ""} × ${Number(item.quantity)}`;
+    });
+    if (itemsResult.rows.length > 20) visibleItems.push(`…і ще ${itemsResult.rows.length - 20}`);
+    const text = [
+      title,
+      `Замовлення №${Number(orderId)}`,
+      "",
+      ...visibleItems,
+      "",
+      `Сума: <b>${escapeHtml(formatMoney(orderResult.rows[0]?.total_amount))}</b>`,
+    ].join("\n");
+
+    await sendMessage(connectionResult.rows[0].telegram_chat_id, {
+      text,
       ...(canOpenOrder ? {
         reply_markup: { inline_keyboard: [[{ text: "Переглянути замовлення", url: orderUrl }]] },
       } : {}),
