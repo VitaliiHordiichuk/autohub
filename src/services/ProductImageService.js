@@ -32,17 +32,27 @@ function positiveId(value, label) {
 }
 
 export const ProductImageService = {
-  async searchProducts(search = "", db = pool) {
+  async searchProducts({search="",filter="ALL",productId=null,page=1,limit=50} = {}, db = pool) {
     const query = String(search).trim();
-    if (query.length < 2) return [];
+    const safeFilter=["ALL","WITH","WITHOUT"].includes(String(filter).toUpperCase())?String(filter).toUpperCase():"ALL";
+    const safePage=Math.max(Number(page)||1,1);const safeLimit=Math.min(Math.max(Number(limit)||50,1),100);const offset=(safePage-1)*safeLimit;
+    const conditions=[];const values=[];
+    if(Number(productId)>0){values.push(Number(productId));conditions.push(`p.id=$${values.length}`);}
+    if(query){values.push(`%${query}%`);conditions.push(`(p.article ILIKE $${values.length} OR p.name ILIKE $${values.length})`);}
+    if(safeFilter==="WITH")conditions.push("EXISTS (SELECT 1 FROM product_images pi_filter WHERE pi_filter.product_id=p.id)");
+    if(safeFilter==="WITHOUT")conditions.push("NOT EXISTS (SELECT 1 FROM product_images pi_filter WHERE pi_filter.product_id=p.id)");
+    const where=conditions.length?`WHERE ${conditions.join(" AND ")}`:"";
+    const count=await db.query(`SELECT COUNT(*)::integer AS total FROM products p ${where}`,values);
+    values.push(safeLimit,offset);
     const result = await db.query(`
       SELECT p.id, p.article, p.name, b.name AS brand_name,
              (SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1) AS image_url,
              (SELECT COUNT(*)::integer FROM product_images pi WHERE pi.product_id=p.id) AS image_count
       FROM products p LEFT JOIN brands b ON b.id=p.brand_id
-      WHERE p.article ILIKE '%' || $1 || '%' OR p.name ILIKE '%' || $1 || '%'
-      ORDER BY CASE WHEN p.article ILIKE $1 || '%' THEN 0 ELSE 1 END,p.article LIMIT 30`, [query]);
-    return result.rows;
+      ${where}
+      ORDER BY ${query?`CASE WHEN p.article ILIKE $1 THEN 0 ELSE 1 END,`:""}p.article
+      LIMIT $${values.length-1} OFFSET $${values.length}`, values);
+    return {products:result.rows,pagination:{page:safePage,limit:safeLimit,total:Number(count.rows[0].total),pages:Math.max(1,Math.ceil(Number(count.rows[0].total)/safeLimit))}};
   },
 
   async list(productId, db = pool) {

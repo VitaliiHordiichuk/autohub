@@ -429,6 +429,9 @@ export const AdminWarehouseOfferRepository = {
 
             pm.name AS manufacturer_name,
 
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1) AS image_url,
+            (SELECT COUNT(*)::integer FROM product_images pi WHERE pi.product_id=p.id) AS image_count,
+
             w.name AS warehouse_name,
             w.city AS warehouse_city,
 

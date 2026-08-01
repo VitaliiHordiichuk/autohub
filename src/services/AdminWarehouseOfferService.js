@@ -291,6 +291,9 @@ function mapOffer(row) {
     manufacturer:
       row.manufacturer_name ?? null,
 
+    imageUrl: row.image_url ?? null,
+    imageCount: Number(row.image_count || 0),
+
     warehouse: {
       name:
         row.warehouse_name ?? null,
