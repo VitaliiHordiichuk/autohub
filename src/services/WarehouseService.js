@@ -319,6 +319,7 @@ export const WarehouseService = {
       pricingModel,
       retailMarkupPercent,
       minimumMarkupPercent,
+      returnableByDefault,
     }
   ) {
     const numericWarehouseId = validateId(
@@ -357,6 +358,9 @@ export const WarehouseService = {
       ? Number(currentWarehouse.retail_markup_percent) : normalizeMarkup(retailMarkupPercent, "Розничная наценка");
     const nextMinimumMarkup = minimumMarkupPercent === undefined
       ? Number(currentWarehouse.minimum_markup_percent) : normalizeMarkup(minimumMarkupPercent, "Минимальная наценка");
+    if (returnableByDefault !== undefined && typeof returnableByDefault !== "boolean") {
+      throw new Error("Поле возвратности склада должно быть true или false");
+    }
     if (nextRetailMarkup < nextMinimumMarkup && nextPricingModel === "SUPPLIER_MARKUP") {
       throw new Error("Розничная наценка не может быть меньше минимальной");
     }
@@ -412,6 +416,7 @@ export const WarehouseService = {
           pricingModel: nextPricingModel,
           retailMarkupPercent: nextRetailMarkup,
           minimumMarkupPercent: nextMinimumMarkup,
+          returnableByDefault,
         }
       );
 

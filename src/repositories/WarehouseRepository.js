@@ -204,6 +204,7 @@ export const WarehouseRepository = {
       pricingModel,
       retailMarkupPercent,
       minimumMarkupPercent,
+      returnableByDefault,
     },
     db = pool
   ) {
@@ -253,6 +254,7 @@ export const WarehouseRepository = {
         pricing_model = COALESCE($14, pricing_model),
         retail_markup_percent = COALESCE($15, retail_markup_percent),
         minimum_markup_percent = COALESCE($16, minimum_markup_percent),
+        returnable_by_default = COALESCE($17, returnable_by_default),
 
         updated_at =
           CURRENT_TIMESTAMP
@@ -288,6 +290,7 @@ export const WarehouseRepository = {
       pricingModel,
       retailMarkupPercent,
       minimumMarkupPercent,
+      returnableByDefault,
     ]);
 
     return result.rows[0] ?? null;

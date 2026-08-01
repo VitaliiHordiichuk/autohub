@@ -163,6 +163,9 @@ function mapOffer(offer, pricingContext) {
         offer.is_available
       ),
 
+    isReturnable:
+      offer.is_returnable !== false,
+
     warehousePriorityEnabled:
       offer
         .warehouse_priority_enabled ===

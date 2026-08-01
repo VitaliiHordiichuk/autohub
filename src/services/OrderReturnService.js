@@ -30,6 +30,9 @@ export const OrderReturnService = {
         const quantity = positiveQuantity(input.quantity);
         const item = byId.get(orderItemId);
         if (!item) throw new Error("Позиция не принадлежит этому заказу");
+        if (item.is_returnable === false) {
+          throw new Error(`${item.article}: эта позиция возврату не подлежит`);
+        }
         const alreadyReturned = await OrderReturnRepository.returnedQuantity(orderItemId,db);
         if (quantity + alreadyReturned > Number(item.quantity)) {
           throw new Error(`Для ${item.article} можно вернуть не больше ${Number(item.quantity)-alreadyReturned}`);

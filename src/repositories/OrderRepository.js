@@ -39,6 +39,7 @@ export const OrderRepository = {
       productOfferId,
       quantity,
       priceAtPurchase,
+      isReturnable = true,
     },
     db = pool
   ) {
@@ -48,9 +49,10 @@ export const OrderRepository = {
         product_id,
         product_offer_id,
         quantity,
-        price_at_purchase
+        price_at_purchase,
+        is_returnable
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
 
@@ -60,6 +62,7 @@ export const OrderRepository = {
       productOfferId,
       quantity,
       priceAtPurchase,
+      isReturnable,
     ]);
 
     return result.rows[0];
@@ -276,6 +279,7 @@ async findItemsByOrderId(orderId, db = pool) {
       po.delivery_days,
       po.source_type,
       po.is_available,
+      oi.is_returnable,
 
       w.id AS warehouse_id,
       w.name AS warehouse_name,

@@ -212,6 +212,8 @@ export const SubmitOrder = {
                   Number(
                     item.retail_price
                   ),
+                isReturnable:
+                  item.is_returnable !== false,
               },
               db
             );

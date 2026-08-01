@@ -259,6 +259,19 @@ export async function setOfferVisibility(
   }
 }
 
+export async function setOfferReturnability(req, res) {
+  try {
+    const result = await AdminWarehouseOfferService.setReturnability({
+      warehouseId: req.params.warehouseId,
+      offerId: req.params.offerId,
+      isReturnable: req.body.isReturnable,
+    });
+    return res.json({ success: true, message: "Правило возврата сохранено", ...result });
+  } catch (error) {
+    return sendError(res, error, "Ошибка сохранения правила возврата");
+  }
+}
+
 
 export async function getOfferPriceHistory(
   req,

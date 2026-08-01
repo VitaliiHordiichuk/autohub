@@ -218,7 +218,8 @@ export const CartRepository = {
         po.quantity
           AS available_quantity,
         po.source_type,
-        po.is_available
+        po.is_available,
+        COALESCE(po.is_returnable, w.returnable_by_default, TRUE) AS is_returnable
 
       FROM cart_items ci
 
@@ -228,6 +229,9 @@ export const CartRepository = {
 
       JOIN products p
         ON p.id = po.product_id
+
+      LEFT JOIN warehouses w
+        ON w.id = po.warehouse_id
 
       WHERE ci.cart_id = $1
 

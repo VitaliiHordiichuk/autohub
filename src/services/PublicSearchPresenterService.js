@@ -482,6 +482,9 @@ function mapPublicOffer(
     isAvailable:
       true,
 
+    isReturnable:
+      offer.isReturnable !== false,
+
     availabilityText:
       buildAvailabilityText(
         offer,

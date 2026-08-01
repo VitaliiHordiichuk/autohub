@@ -83,6 +83,7 @@ export const ProductRepository = {
         po.source_type,
         po.is_available,
         po.is_hidden,
+        COALESCE(po.is_returnable, w.returnable_by_default, TRUE) AS is_returnable,
 
         w.name AS warehouse_name,
         w.city AS warehouse_city,

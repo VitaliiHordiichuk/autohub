@@ -92,6 +92,7 @@ export const AdminWarehouseOfferRepository = {
           type,
           supplier_id,
           delivery_days,
+          returnable_by_default,
           is_active
         FROM warehouses
         WHERE id = $1
@@ -467,6 +468,10 @@ export const AdminWarehouseOfferRepository = {
             po.source_type,
             po.is_available,
             po.is_hidden,
+            po.is_returnable,
+            w.returnable_by_default,
+            COALESCE(po.is_returnable, w.returnable_by_default, TRUE)
+              AS effective_is_returnable,
 
             po.manual_price_updated_at,
             po.hidden_at,
@@ -570,6 +575,7 @@ export const AdminWarehouseOfferRepository = {
             p.article,
             p.article_normalized,
             p.name,
+            w.returnable_by_default,
 
             CASE
               WHEN
@@ -584,6 +590,9 @@ export const AdminWarehouseOfferRepository = {
 
           JOIN products p
             ON p.id = po.product_id
+
+          JOIN warehouses w
+            ON w.id = po.warehouse_id
 
           WHERE po.id = $1
             AND po.warehouse_id = $2
@@ -686,6 +695,17 @@ export const AdminWarehouseOfferRepository = {
         ]
       );
 
+    return result.rows[0] ?? null;
+  },
+
+  async setReturnability({ offerId, isReturnable }, db = pool) {
+    const result = await db.query(
+      `UPDATE product_offers
+       SET is_returnable = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *;`,
+      [offerId, isReturnable]
+    );
     return result.rows[0] ?? null;
   },
 

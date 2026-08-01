@@ -10,6 +10,7 @@ import {
   resetAutomaticOfferPrice,
   setManualOfferPrice,
   setOfferVisibility,
+  setOfferReturnability,
 } from "../controllers/admin-warehouse-offer.controller.js";
 
 
@@ -50,6 +51,11 @@ adminWarehouseOfferRouter.delete(
 adminWarehouseOfferRouter.patch(
   "/:warehouseId/offers/:offerId/visibility",
   setOfferVisibility
+);
+
+adminWarehouseOfferRouter.patch(
+  "/:warehouseId/offers/:offerId/returnability",
+  setOfferReturnability
 );
 
 

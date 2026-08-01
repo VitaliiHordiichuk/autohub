@@ -293,6 +293,14 @@ function mapOffer(row) {
 
     imageUrl: row.image_url ?? null,
     imageCount: Number(row.image_count || 0),
+    returnabilityOverride:
+      row.is_returnable === null || row.is_returnable === undefined
+        ? null
+        : Boolean(row.is_returnable),
+    isReturnable: Boolean(
+      row.effective_is_returnable ?? row.is_returnable ??
+      row.returnable_by_default ?? true
+    ),
 
     warehouse: {
       name:
@@ -1218,6 +1226,24 @@ export const AdminWarehouseOfferService = {
               : updated.retail_price,
         }),
       };
+    });
+  },
+
+  async setReturnability({ warehouseId, offerId, isReturnable }) {
+    const normalizedWarehouseId = parsePositiveInteger(warehouseId, "warehouseId");
+    const normalizedOfferId = parsePositiveInteger(offerId, "offerId");
+    if (isReturnable !== null && typeof isReturnable !== "boolean") {
+      throw createError("Поле isReturnable должно быть true, false или null");
+    }
+    return transaction(async (db) => {
+      await requireWarehouse(normalizedWarehouseId, db);
+      const oldOffer = await requireOfferForUpdate({ warehouseId: normalizedWarehouseId, offerId: normalizedOfferId }, db);
+      const updated = await AdminWarehouseOfferRepository.setReturnability({ offerId: normalizedOfferId, isReturnable }, db);
+      return { offer: mapOffer({
+        ...oldOffer,
+        ...updated,
+        effective_is_returnable: updated.is_returnable ?? oldOffer.returnable_by_default ?? true,
+      }) };
     });
   },
 
