@@ -3,9 +3,10 @@ import { transaction } from "../db/transaction.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
+import { CustomerPricingService } from "./CustomerPricingService.js";
 
 
-const EDITABLE_ORDER_STATUSES = new Set(["NEW"]);
+const EDITABLE_ORDER_STATUSES = new Set(["NEW", "CONFIRMED"]);
 
 function validateQuantity(quantity) {
   const numericQuantity = Number(quantity);
@@ -110,8 +111,12 @@ export const OrderEditingService = {
           db
         );
 
+      const ownIncludedInReserved =
+        reservation.cart_item_id === null
+          ? Number(reservation.quantity || 0)
+          : 0;
       const freeQuantity =
-        offer.quantity - reservedByOthers;
+        offer.quantity - reservedByOthers + ownIncludedInReserved;
 
       if (newQuantity > freeQuantity) {
         throw new Error(
@@ -440,7 +445,6 @@ async addItem({
   productId,
   productOfferId,
   quantity,
-  priceAtPurchase,
   changedBy = null,
   reason = null,
 }) {
@@ -448,7 +452,6 @@ async addItem({
   const numericProductId = Number(productId);
   const numericOfferId = Number(productOfferId);
   const newQuantity = validateQuantity(quantity);
-  const newPrice = Number(priceAtPurchase);
 
   if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
     throw new Error("Некорректный номер заказа");
@@ -461,11 +464,6 @@ async addItem({
   if (!Number.isInteger(numericOfferId) || numericOfferId <= 0) {
     throw new Error("Некорректное предложение товара");
   }
-
-  if (!Number.isFinite(newPrice) || newPrice <= 0) {
-    throw new Error("Цена должна быть больше нуля");
-  }
-
 
   return transaction(async (db) => {
 
@@ -499,6 +497,23 @@ async addItem({
       throw new Error(
         "Предложение товара недоступно"
       );
+    }
+
+    if (offer.productId !== numericProductId) {
+      throw new Error("Предложение не относится к выбранному товару");
+    }
+
+    const pricingContext = await CustomerPricingService.getContext(
+      order.created_by || null,
+      db
+    );
+    const calculatedPrice = CustomerPricingService.price({
+      retailPrice: offer.retailPrice,
+      minimumSalePrice: offer.minimumSalePrice,
+    }, pricingContext);
+    const newPrice = Number(calculatedPrice?.customerPrice);
+    if (!Number.isFinite(newPrice) || newPrice <= 0) {
+      throw new Error("Не удалось рассчитать цену клиента");
     }
 
 

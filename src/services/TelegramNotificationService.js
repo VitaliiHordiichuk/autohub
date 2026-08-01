@@ -131,4 +131,24 @@ export const TelegramNotificationService = {
     });
     return { sent:true, reason:null };
   },
+
+  async sendOrderUpdatedToUser({ userId, orderId }, db = pool) {
+    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
+    const result = await db.query(`SELECT telegram_chat_id, preferred_locale FROM user_telegram_connections
+      WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]);
+    if (!result.rows[0]) return;
+    const locale = localeOf(result.rows[0].preferred_locale);
+    const copy = {
+      uk:{text:`✏️ <b>Замовлення №${Number(orderId)} оновлено</b>\nМенеджер змінив склад замовлення. Перевірте позиції та нову суму 💙`,open:"Переглянути замовлення"},
+      en:{text:`✏️ <b>Order №${Number(orderId)} was updated</b>\nThe manager changed the order contents. Please review the items and new total 💙`,open:"View order"},
+      ru:{text:`✏️ <b>Заказ №${Number(orderId)} обновлён</b>\nМенеджер изменил состав заказа. Проверьте позиции и новую сумму 💙`,open:"Посмотреть заказ"},
+    }[locale];
+    const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
+    const orderUrl = `${frontendUrl}/${locale}/account/orders/${Number(orderId)}`;
+    const canOpenOrder = /^https:\/\//i.test(frontendUrl);
+    await sendMessage(result.rows[0].telegram_chat_id, {
+      text:copy.text,
+      ...(canOpenOrder ? { reply_markup:{inline_keyboard:[[{text:copy.open,url:orderUrl}]]} } : {}),
+    });
+  },
 };

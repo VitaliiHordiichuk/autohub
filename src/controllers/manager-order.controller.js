@@ -7,6 +7,23 @@ import { OrderWorkflowService } from "../services/OrderWorkflowService.js";
 import { OrderCompletionService } from "../services/OrderCompletionService.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { OrderTrackingService } from "../services/OrderTrackingService.js";
+import { NotificationRepository } from "../repositories/NotificationRepository.js";
+import { TelegramNotificationService } from "../services/TelegramNotificationService.js";
+
+async function notifyCustomerAboutEdit(result) {
+  const userId = Number(result.order?.created_by || 0);
+  const orderId = Number(result.order?.id || 0);
+  if (!userId || !orderId) return;
+  await NotificationRepository.createForUser({
+    userId,
+    eventKey:`order:${orderId}:updated:${result.history?.id || Date.now()}`,
+    type:"ORDER_UPDATED",
+    orderId,
+    payload:{orderId},
+  });
+  void TelegramNotificationService.sendOrderUpdatedToUser({userId,orderId})
+    .catch((error)=>console.error("Ошибка Telegram-уведомления об изменении заказа:", error.message));
+}
 
 export async function updateManagerOrderTracking(req, res) {
   try {
@@ -106,6 +123,7 @@ export async function changeManagerOrderItemQuantity(
         changedBy: req.auth.userId,
         reason,
       });
+    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -146,6 +164,7 @@ export async function changeManagerOrderItemPrice(
         changedBy: req.auth.userId,
         reason,
       });
+    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -184,6 +203,7 @@ export async function removeManagerOrderItem(
         changedBy: req.auth.userId,
         reason,
       });
+    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -222,6 +242,7 @@ export async function restoreManagerOrderItem(
         changedBy: req.auth.userId,
         reason,
       });
+    await notifyCustomerAboutEdit(result);
 
     return res.json({
       success: true,
@@ -253,7 +274,6 @@ export async function addManagerOrderItem(
       productId,
       productOfferId,
       quantity,
-      priceAtPurchase,
       reason = null,
     } = req.body;
 
@@ -263,10 +283,10 @@ export async function addManagerOrderItem(
         productId,
         productOfferId,
         quantity,
-        priceAtPurchase,
         changedBy: req.auth.userId,
         reason,
       });
+    await notifyCustomerAboutEdit(result);
 
     return res.status(201).json({
       success: true,
