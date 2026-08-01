@@ -1,7 +1,16 @@
 import { pool } from "../config/db.js";
 
 const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_name, u.last_name, u.phone AS user_phone,
-  CONCAT_WS(' ',u.first_name,u.last_name) AS customer_name
+  CONCAT_WS(' ',u.first_name,u.last_name) AS customer_name,
+  COALESCE((SELECT JSON_AGG(JSON_BUILD_OBJECT(
+    'id',m.id,'message',m.message,'created_at',m.created_at,
+    'sender_user_id',m.sender_user_id,'sender_role',COALESCE(m.sender_role,sr.name),
+    'sender_name',COALESCE(NULLIF(BTRIM(CONCAT_WS(' ',su.first_name,su.last_name)),''),su.email,'Сотрудник')
+  ) ORDER BY m.created_at,m.id)
+  FROM vin_request_messages m
+  LEFT JOIN users su ON su.id=m.sender_user_id
+  LEFT JOIN roles sr ON sr.id=su.role_id
+  WHERE m.vin_request_id=vr.id),'[]'::json) AS messages
   FROM vin_requests vr JOIN users u ON u.id=vr.user_id LEFT JOIN vehicle_brands vb ON vb.id=vr.vehicle_brand_id`;
 
 export const VinRequestRepository = {
@@ -27,11 +36,16 @@ export const VinRequestRepository = {
     const result=await db.query(`${select} WHERE vr.id=$1 LIMIT 1`,[id]);
     return result.rows[0]??null;
   },
-  async update({id,status,response,answeredBy},db=pool){
+  async update({id,status,response,answeredBy,messageAdded=false},db=pool){
     const result=await db.query(`UPDATE vin_requests SET status=$2,manager_response=$3,
-      answered_by=CASE WHEN $3::text IS NOT NULL AND BTRIM($3)<>'' THEN $4 ELSE answered_by END,
-      answered_at=CASE WHEN $3::text IS NOT NULL AND BTRIM($3)<>'' THEN CURRENT_TIMESTAMP ELSE answered_at END,
-      updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING *`,[id,status,response,answeredBy]);
+      answered_by=CASE WHEN $5 THEN $4 ELSE answered_by END,
+      answered_at=CASE WHEN $5 THEN CURRENT_TIMESTAMP ELSE answered_at END,
+      updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING *`,[id,status,response,answeredBy,messageAdded]);
+    return result.rows[0]??null;
+  },
+  async addMessage({requestId,senderUserId,message},db=pool){
+    const result=await db.query(`INSERT INTO vin_request_messages(vin_request_id,sender_user_id,sender_role,message)
+      SELECT $1,$2,r.name,$3 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=$2 RETURNING *`,[requestId,senderUserId,message]);
     return result.rows[0]??null;
   },
   async summary(db=pool){

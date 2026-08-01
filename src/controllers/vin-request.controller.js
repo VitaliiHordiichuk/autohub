@@ -6,7 +6,7 @@ export async function listClientVinRequests(req,res){try{return res.json({succes
 export async function getClientVinRequest(req,res){try{return res.json({success:true,request:await VinRequestService.getForUser(req.params.requestId,req.auth.userId)});}catch(e){return fail(res,e);}}
 export async function listManagerVinRequests(req,res){try{return res.json({success:true,requests:await VinRequestService.listForStaff({status:req.query.status})});}catch(e){return fail(res,e);}}
 export async function getVinSummary(req,res){try{return res.json({success:true,counts:await VinRequestService.summary()});}catch(e){return fail(res,e);}}
-export async function updateVinRequest(req,res){try{return res.json({success:true,request:await VinRequestService.update({requestId:req.params.requestId,status:req.body.status,response:req.body.response,changedBy:req.auth.userId})});}catch(e){return fail(res,e);}}
+export async function updateVinRequest(req,res){try{return res.json({success:true,request:await VinRequestService.update({requestId:req.params.requestId,status:req.body.status,message:req.body.message,response:req.body.response,changedBy:req.auth.userId})});}catch(e){return fail(res,e);}}
 export async function listSupportedVinBrands(req,res){try{return res.json({success:true,brands:await VinRequestService.supportedBrands()});}catch(e){return fail(res,e);}}
 export async function listAdminVinBrands(req,res){try{return res.json({success:true,brands:await VinRequestService.allBrands()});}catch(e){return fail(res,e);}}
 export async function addAdminVinBrand(req,res){try{return res.status(201).json({success:true,brand:await VinRequestService.addBrand(req.body.name)});}catch(e){return fail(res,e);}}
