@@ -12,8 +12,11 @@ export const VinDecoderService={
       const data=await response.json();
       const item=data?.Results?.[0];
       if(!item)throw new Error("Не удалось получить данные автомобиля");
-      const vehicle={make:clean(item.Make),model:clean(item.Model),year:clean(item.ModelYear),bodyClass:clean(item.BodyClass),engine:clean(item.EngineModel)||clean(item.DisplacementL),fuel:clean(item.FuelTypePrimary),plantCountry:clean(item.PlantCountry)};
-      return {vin,recognized:Boolean(vehicle.make||vehicle.model||vehicle.year),vehicle,source:"NHTSA vPIC"};
+      const errorCode=String(item.ErrorCode??"").trim();
+      const cleanDecode=errorCode===""||errorCode==="0";
+      const vehicle={make:clean(item.Make),model:clean(item.Model),year:cleanDecode?clean(item.ModelYear):null,bodyClass:clean(item.BodyClass),engine:clean(item.EngineModel)||clean(item.DisplacementL),fuel:clean(item.FuelTypePrimary),plantCountry:clean(item.PlantCountry)};
+      const recognized=Boolean(vehicle.model||vehicle.bodyClass||vehicle.engine);
+      return {vin,recognized,partial:!cleanDecode||!recognized,vehicle,source:"NHTSA vPIC"};
     }catch(error){
       if(error?.name==="AbortError")throw new Error("VIN-сервис отвечает слишком долго. Попробуйте ещё раз");
       throw error;
