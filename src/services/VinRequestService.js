@@ -7,8 +7,9 @@ function normalizeVin(value){const vin=String(value||'').toUpperCase().replace(/
 function text(value){const v=String(value||'').trim();if(v.length<5)throw new Error('Опишите, какая деталь вам нужна');if(v.length>3000)throw new Error('Описание слишком длинное');return v;}
 
 export const VinRequestService={
-  async create({userId,vin,requestText,contactPhone}){
-    const row=await VinRequestRepository.create({userId,vin:normalizeVin(vin),requestText:text(requestText),contactPhone:String(contactPhone||'').trim()||null});
+  async create({userId,vehicleBrandId,vin,requestText,contactPhone}){
+    const brandId=id(vehicleBrandId);const brand=await VinRequestRepository.supportedBrand(brandId);if(!brand)throw new Error('Извините, этой маркой мы пока не занимаемся');
+    const row=await VinRequestRepository.create({userId,vehicleBrandId:brandId,vin:normalizeVin(vin),requestText:text(requestText),contactPhone:String(contactPhone||'').trim()||null});
     await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin}});
     return row;
   },
@@ -26,4 +27,8 @@ export const VinRequestService={
     }
     return VinRequestRepository.findById(numericId);
   },
+  supportedBrands(){return VinRequestRepository.supportedBrands();},
+  allBrands(){return VinRequestRepository.allBrands();},
+  async addBrand(name){const clean=String(name||'').trim();if(clean.length<2||clean.length>80)throw new Error('Укажите название марки');return VinRequestRepository.addBrand(clean);},
+  async toggleBrand(brandId,enabled){if(typeof enabled!=='boolean')throw new Error('Поле enabled должно быть true или false');const row=await VinRequestRepository.toggleBrand(id(brandId),enabled);if(!row)throw new Error('Марка не найдена');return row;},
 };

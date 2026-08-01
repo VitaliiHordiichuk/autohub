@@ -61,7 +61,7 @@ import { clientSearchHistoryRouter } from "./routes/client-search-history.routes
 import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
 import { telegramConnectionRouter } from "./routes/telegram-connection.routes.js";
-import { clientVinRequestRouter, managerVinRequestRouter } from "./routes/vin-request.routes.js";
+import { clientVinRequestRouter, managerVinRequestRouter,publicVinBrandRouter,adminVinBrandRouter } from "./routes/vin-request.routes.js";
 
 export const app = express();
 
@@ -104,6 +104,7 @@ app.use("/api/account/orders", clientOrderRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/account/telegram", telegramConnectionRouter);
 app.use("/api/account/vin-requests", clientVinRequestRouter);
+app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
 
 app.use(
   "/api/admin",
@@ -181,6 +182,7 @@ app.use("/api/admin/search-analytics", adminSearchAnalyticsRouter);
 app.use("/api/admin/article-numbers", adminArticleNumberRouter);
 app.use("/api/admin/employees", adminEmployeeRouter);
 app.use("/api/admin/product-images", adminProductImageRouter);
+app.use("/api/admin/vin-vehicle-brands",adminVinBrandRouter);
 app.use("/api/admin", adminImportSettingsRouter);
 app.use("/api/admin/import", adminImportRouter);
 app.use("/api/admin/email-import", adminEmailImportRouter);
