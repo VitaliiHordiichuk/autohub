@@ -28,9 +28,19 @@ export const OrderTrackingService = {
       }, db);
       return { order:updated.rows[0], changed:true };
     });
-    if (result.changed && customerUserId) void TelegramNotificationService.sendTrackingToUser({
-      userId:customerUserId, orderId:numericOrderId, trackingNumber:normalized,
-    }).catch((error)=>console.error("Ошибка Telegram-уведомления ТТН:",error.message));
-    return result;
+    let telegram = { sent:false, reason:customerUserId ? "CUSTOMER_NOT_CONNECTED" : "CUSTOMER_NOT_REGISTERED" };
+    if (result.changed && customerUserId) {
+      try {
+        telegram = await TelegramNotificationService.sendTrackingToUser({
+          userId:customerUserId, orderId:numericOrderId, trackingNumber:normalized,
+        });
+      } catch (error) {
+        console.error("Ошибка Telegram-уведомления ТТН:", error.message);
+        telegram = { sent:false, reason:"SEND_FAILED" };
+      }
+    } else if (!result.changed) {
+      telegram = { sent:false, reason:"NOT_CHANGED" };
+    }
+    return { ...result, telegram };
   },
 };

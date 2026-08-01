@@ -108,12 +108,15 @@ export const TelegramNotificationService = {
   },
 
   async sendTrackingToUser({ userId, orderId, trackingNumber }, db = pool) {
-    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
+    if (process.env.NODE_ENV === "test") return { sent:false, reason:"TEST" };
+    if (!process.env.TELEGRAM_BOT_TOKEN) return { sent:false, reason:"BOT_NOT_CONFIGURED" };
+    if (!userId) return { sent:false, reason:"CUSTOMER_NOT_REGISTERED" };
     const result = await db.query(`SELECT telegram_chat_id FROM user_telegram_connections
       WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]);
-    if (!result.rows[0]) return;
+    if (!result.rows[0]) return { sent:false, reason:"CUSTOMER_NOT_CONNECTED" };
     await sendMessage(result.rows[0].telegram_chat_id, {
       text:`🚚 <b>Замовлення №${Number(orderId)} вже має ТТН</b>\nНова пошта: <code>${escapeHtml(trackingNumber)}</code>\n\nМожна копіювати номер і стежити за посилкою 💙`,
     });
+    return { sent:true, reason:null };
   },
 };
