@@ -11,6 +11,26 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
   LEFT JOIN users su ON su.id=m.sender_user_id
   LEFT JOIN roles sr ON sr.id=su.role_id
   WHERE m.vin_request_id=vr.id),'[]'::json) AS messages
+  ,COALESCE((SELECT JSON_AGG(JSON_BUILD_OBJECT(
+    'id',rec.id,'created_at',rec.created_at,'product_id',p.id,'product_offer_id',po.id,
+    'article',p.article,'name',p.name,
+    'image_url',(SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1),
+    'retail_price',CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL THEN po.manual_retail_price ELSE po.retail_price END,
+    'minimum_sale_price',po.minimum_sale_price,'delivery_days',po.delivery_days,
+    'quantity',GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0),
+    'is_available',(p.is_active=TRUE AND po.is_available=TRUE AND po.is_hidden=FALSE
+      AND (w.id IS NULL OR w.is_active=TRUE) AND (s.id IS NULL OR s.is_active=TRUE)
+      AND GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)>0),
+    'source_label',COALESCE(w.name,s.name,'AutoHub')
+  ) ORDER BY rec.created_at,rec.id)
+  FROM vin_request_recommendations rec
+  JOIN products p ON p.id=rec.product_id
+  JOIN product_offers po ON po.id=rec.product_offer_id
+  LEFT JOIN warehouses w ON w.id=po.warehouse_id
+  LEFT JOIN suppliers s ON s.id=COALESCE(po.supplier_id,w.supplier_id)
+  LEFT JOIN LATERAL (SELECT COALESCE(SUM(sr.quantity),0) AS reserved_quantity FROM stock_reservations sr
+    WHERE sr.product_offer_id=po.id AND (sr.status='ORDER_PENDING' OR (sr.status='ACTIVE' AND (sr.order_id IS NOT NULL OR sr.reserved_until IS NULL OR sr.reserved_until>CURRENT_TIMESTAMP)))) reservations ON TRUE
+  WHERE rec.vin_request_id=vr.id),'[]'::json) AS recommendations
   FROM vin_requests vr JOIN users u ON u.id=vr.user_id LEFT JOIN vehicle_brands vb ON vb.id=vr.vehicle_brand_id`;
 
 export const VinRequestRepository = {
@@ -46,6 +66,32 @@ export const VinRequestRepository = {
   async addMessage({requestId,senderUserId,message},db=pool){
     const result=await db.query(`INSERT INTO vin_request_messages(vin_request_id,sender_user_id,sender_role,message)
       SELECT $1,$2,r.name,$3 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=$2 RETURNING *`,[requestId,senderUserId,message]);
+    return result.rows[0]??null;
+  },
+  async addRecommendation({requestId,productId,productOfferId,addedBy},db=pool){
+    const result=await db.query(`INSERT INTO vin_request_recommendations(vin_request_id,product_id,product_offer_id,added_by)
+      SELECT $1,p.id,po.id,$4
+      FROM products p
+      JOIN product_offers po ON po.product_id=p.id
+      LEFT JOIN warehouses w ON w.id=po.warehouse_id
+      LEFT JOIN suppliers s ON s.id=COALESCE(po.supplier_id,w.supplier_id)
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(sr.quantity),0) AS reserved_quantity
+        FROM stock_reservations sr
+        WHERE sr.product_offer_id=po.id
+          AND (sr.status='ORDER_PENDING' OR (sr.status='ACTIVE'
+            AND (sr.order_id IS NOT NULL OR sr.reserved_until IS NULL OR sr.reserved_until>CURRENT_TIMESTAMP)))
+      ) reservations ON TRUE
+      WHERE p.id=$2 AND po.id=$3 AND p.is_active=TRUE
+        AND po.is_available=TRUE AND po.is_hidden=FALSE
+        AND (w.id IS NULL OR w.is_active=TRUE)
+        AND (s.id IS NULL OR s.is_active=TRUE)
+        AND GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)>0
+      ON CONFLICT(vin_request_id,product_offer_id) DO NOTHING RETURNING *`,[requestId,productId,productOfferId,addedBy]);
+    return result.rows[0]??null;
+  },
+  async removeRecommendation({requestId,recommendationId},db=pool){
+    const result=await db.query(`DELETE FROM vin_request_recommendations WHERE id=$1 AND vin_request_id=$2 RETURNING *`,[recommendationId,requestId]);
     return result.rows[0]??null;
   },
   async summary(db=pool){
