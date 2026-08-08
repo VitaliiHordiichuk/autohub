@@ -11,9 +11,22 @@ export const PublicCatalogService = {
   async getTree(locale = "uk", db = pool) {
     const result = await db.query(`
       SELECT c.id, c.parent_id, c.slug, c.name, c.name_uk, c.name_ru, c.name_en,
-             c.sort_order, COUNT(DISTINCT pc.product_id)::integer AS direct_product_count
+             c.sort_order, COUNT(DISTINCT catalog_product.id)::integer AS direct_product_count
       FROM categories c
-      LEFT JOIN product_categories pc ON pc.category_id = c.id
+      LEFT JOIN product_categories pc
+        ON pc.category_id = c.id
+        AND (
+          pc.assignment_source = 'MANUAL'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_pc
+            WHERE manual_pc.product_id = pc.product_id
+              AND manual_pc.assignment_source = 'MANUAL'
+          )
+        )
+      LEFT JOIN products catalog_product
+        ON catalog_product.id = pc.product_id
+        AND catalog_product.is_active = TRUE
       WHERE c.is_active = TRUE
       GROUP BY c.id
       ORDER BY c.sort_order, c.id`);
@@ -47,7 +60,16 @@ export const PublicCatalogService = {
     const countResult = await db.query(`
       SELECT COUNT(*)::integer AS count FROM product_categories pc
       JOIN products p ON p.id = pc.product_id AND p.is_active = TRUE
-      WHERE pc.category_id = $1`, [row.id]);
+      WHERE pc.category_id = $1
+        AND (
+          pc.assignment_source = 'MANUAL'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_pc
+            WHERE manual_pc.product_id = pc.product_id
+              AND manual_pc.assignment_source = 'MANUAL'
+          )
+        )`, [row.id]);
     const productResult = await db.query(`
       SELECT p.id, p.article, p.name, b.name AS brand_name,
              pm.name AS manufacturer,
@@ -58,7 +80,22 @@ export const PublicCatalogService = {
       LEFT JOIN brands b ON b.id = p.brand_id
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
       WHERE pc.category_id = $1
-      ORDER BY p.name, p.article
+        AND (
+          pc.assignment_source = 'MANUAL'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_pc
+            WHERE manual_pc.product_id = pc.product_id
+              AND manual_pc.assignment_source = 'MANUAL'
+          )
+        )
+      ORDER BY
+        CASE WHEN EXISTS (
+          SELECT 1 FROM product_images pi_order
+          WHERE pi_order.product_id = p.id
+        ) THEN 0 ELSE 1 END,
+        p.name,
+        p.article
       LIMIT $2 OFFSET $3`, [row.id, limit, (normalizedPage - 1) * limit]);
     const products = await Promise.all(productResult.rows.map(async (product) => ({
       ...product,

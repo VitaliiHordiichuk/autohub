@@ -5,6 +5,7 @@ import {
   logout,
   me,
   register,
+  updateProfile,
 } from "../controllers/auth.controller.js";
 
 import {
@@ -17,3 +18,4 @@ authRouter.post("/register", register);
 authRouter.post("/login", login);
 authRouter.post("/logout", logout);
 authRouter.get("/me", requireAuth, me);
+authRouter.patch("/profile", requireAuth, updateProfile);

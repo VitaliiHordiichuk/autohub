@@ -35,6 +35,23 @@ function normalizePhone(value) {
     .replace(/[^\d+]/g, "");
 }
 
+function normalizeUkrainianPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  let normalized = digits;
+
+  if (/^0\d{9}$/.test(digits)) {
+    normalized = `38${digits}`;
+  } else if (/^\d{9}$/.test(digits)) {
+    normalized = `380${digits}`;
+  }
+
+  if (!/^380\d{9}$/.test(normalized)) {
+    throw createError("Укажите украинский номер в формате +380 XX XXX XX XX");
+  }
+
+  return `+${normalized}`;
+}
+
 function createError(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -90,6 +107,24 @@ function validateRegistration({
 
   if (password.length > 200) {
     throw createError("Пароль слишком длинный");
+  }
+}
+
+function validateProfile({ firstName, lastName, phone, email }) {
+  if (!firstName) {
+    throw createError("Имя обязательно");
+  }
+
+  if (firstName.length > 100 || lastName.length > 100) {
+    throw createError("Имя или фамилия слишком длинные");
+  }
+
+  if (!phone) {
+    throw createError("Телефон обязателен");
+  }
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw createError("Некорректный email");
   }
 }
 
@@ -436,6 +471,90 @@ export const AuthService = {
     }
 
     return mapAuthResult(authUser);
+  },
+
+  async updateProfile(userId, input) {
+    const firstName = normalizeText(input.firstName);
+    const lastName = normalizeText(input.lastName);
+    const phone = normalizeUkrainianPhone(input.phone);
+    const email = normalizeEmail(input.email);
+
+    validateProfile({ firstName, lastName, phone, email });
+
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const current = await findAuthUserById(userId, client);
+
+      if (!current || !current.is_active) {
+        throw createError("Пользователь не найден или заблокирован", 401);
+      }
+
+      const duplicate = await client.query(
+        `SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) AND id<>$2 LIMIT 1`,
+        [email, userId]
+      );
+
+      if (duplicate.rows.length) {
+        throw createError("Пользователь с таким email уже существует", 409);
+      }
+
+      const phoneChanged =
+        String(current.phone || "").replace(/\D/g, "") !== phone.replace(/\D/g, "");
+
+      await client.query(
+        `UPDATE users SET
+          first_name=$2,
+          last_name=$3,
+          phone=$4,
+          email=$5,
+          phone_verified_at=CASE WHEN $6 THEN NULL ELSE phone_verified_at END,
+          phone_verified_value=CASE WHEN $6 THEN NULL ELSE phone_verified_value END
+        WHERE id=$1`,
+        [userId, firstName, lastName || null, phone, email, phoneChanged]
+      );
+
+      await client.query(
+        `UPDATE user_delivery_profiles SET
+          recipient_first_name=CASE WHEN recipient_first_name IS NOT DISTINCT FROM $2 THEN $6 ELSE recipient_first_name END,
+          recipient_last_name=CASE WHEN recipient_last_name IS NOT DISTINCT FROM $3 THEN $7 ELSE recipient_last_name END,
+          recipient_phone=CASE WHEN recipient_phone IS NOT DISTINCT FROM $4 THEN $8 ELSE recipient_phone END,
+          recipient_email=CASE WHEN recipient_email IS NOT DISTINCT FROM $5 THEN $9 ELSE recipient_email END,
+          updated_at=CURRENT_TIMESTAMP
+        WHERE user_id=$1`,
+        [
+          userId,
+          current.first_name,
+          current.last_name,
+          current.phone,
+          current.email,
+          firstName,
+          lastName || null,
+          phone,
+          email,
+        ]
+      );
+
+      const updated = await findAuthUserById(userId, client);
+      await client.query("COMMIT");
+
+      return {
+        ...mapAuthResult(updated),
+        phoneVerificationReset: phoneChanged,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      if (error.code === "23505") {
+        throw createError("Пользователь с таким email уже существует", 409);
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 
   verifyToken(token) {

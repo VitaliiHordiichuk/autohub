@@ -110,3 +110,18 @@ export async function me(req, res) {
     return sendError(res, error);
   }
 }
+
+export async function updateProfile(req, res) {
+  try {
+    const result = await AuthService.updateProfile(req.auth.userId, req.body);
+
+    return res.json({
+      success: true,
+      user: result.user,
+      customer: result.customer,
+      phoneVerificationReset: result.phoneVerificationReset,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}

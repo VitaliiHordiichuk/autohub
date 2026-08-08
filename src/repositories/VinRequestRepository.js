@@ -1,6 +1,8 @@
 import { pool } from "../config/db.js";
 
 const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_name, u.last_name, u.phone AS user_phone,
+  (u.vin_chat_blocked_at IS NOT NULL) AS vin_chat_blocked,
+  u.vin_chat_blocked_at, u.vin_chat_block_reason,
   CONCAT_WS(' ',u.first_name,u.last_name) AS customer_name,
   COALESCE((SELECT JSON_AGG(JSON_BUILD_OBJECT(
     'id',m.id,'message',m.message,'created_at',m.created_at,
@@ -12,7 +14,8 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
   LEFT JOIN roles sr ON sr.id=su.role_id
   WHERE m.vin_request_id=vr.id),'[]'::json) AS messages
   ,COALESCE((SELECT JSON_AGG(JSON_BUILD_OBJECT(
-    'id',rec.id,'created_at',rec.created_at,'product_id',p.id,'product_offer_id',po.id,
+    'id',rec.id,'created_at',rec.created_at,'dismissed_at',rec.dismissed_at,
+    'product_id',p.id,'product_offer_id',po.id,
     'article',p.article,'name',p.name,
     'image_url',(SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1),
     'retail_price',CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL THEN po.manual_retail_price ELSE po.retail_price END,
@@ -68,6 +71,57 @@ export const VinRequestRepository = {
       SELECT $1,$2,r.name,$3 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=$2 RETURNING *`,[requestId,senderUserId,message]);
     return result.rows[0]??null;
   },
+  async clientMessageStats({requestId,userId,message},db=pool){
+    const result=await db.query(`SELECT
+      MAX(created_at) AS last_created_at,
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '1 hour')::integer AS hour_count,
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '24 hours')::integer AS day_count,
+      COUNT(*) FILTER(WHERE vin_request_id=$1 AND created_at>CURRENT_TIMESTAMP-INTERVAL '5 minutes' AND LOWER(BTRIM(message))=LOWER(BTRIM($3)))::integer AS duplicate_count
+      FROM vin_request_messages
+      WHERE sender_user_id=$2`,[requestId,userId,message]);
+    return result.rows[0];
+  },
+  async createStats({userId,vin,requestText},db=pool){
+    const result=await db.query(`SELECT
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '1 hour')::integer AS hour_count,
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '24 hours')::integer AS day_count,
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '15 minutes'
+        AND vin=$2 AND LOWER(BTRIM(request_text))=LOWER(BTRIM($3)))::integer AS duplicate_count
+      FROM vin_requests WHERE user_id=$1`,[userId,vin,requestText]);
+    return result.rows[0];
+  },
+  async phoneVerificationStatus(userId,db=pool){
+    const result=await db.query(`SELECT u.phone, r.name AS role_name,
+      (u.vin_chat_blocked_at IS NOT NULL) AS vin_chat_blocked,
+      (u.phone_verified_at IS NOT NULL AND REGEXP_REPLACE(COALESCE(u.phone_verified_value,''),'[^0-9]','','g')=REGEXP_REPLACE(COALESCE(u.phone,''),'[^0-9]','','g')) AS verified,
+      EXISTS(SELECT 1 FROM user_telegram_connections c WHERE c.user_id=u.id) AS telegram_connected,
+      (SELECT COUNT(*)::integer FROM vin_requests recent
+        WHERE recent.user_id=u.id AND recent.created_at>CURRENT_TIMESTAMP-INTERVAL '24 hours') AS recent_request_count
+      FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=$1 AND u.is_active=TRUE`,[userId]);
+    return result.rows[0]??null;
+  },
+  async setClientBlock({userId,blocked,changedBy,reason=null},db=pool){
+    const result=await db.query(`UPDATE users u SET
+      vin_chat_blocked_at=CASE WHEN $2::boolean THEN CURRENT_TIMESTAMP ELSE NULL END,
+      vin_chat_blocked_by=CASE WHEN $2::boolean THEN $3::integer ELSE NULL::integer END,
+      vin_chat_block_reason=CASE WHEN $2::boolean THEN NULLIF(BTRIM($4::text),'') ELSE NULL::text END
+      FROM roles r
+      WHERE u.id=$1 AND r.id=u.role_id AND r.name='CLIENT'
+      RETURNING u.id,u.email,u.first_name,u.last_name,u.phone,
+        (u.vin_chat_blocked_at IS NOT NULL) AS vin_chat_blocked,
+        u.vin_chat_blocked_at,u.vin_chat_block_reason`,[userId,blocked,changedBy,reason]);
+    return result.rows[0]??null;
+  },
+  async closeOpenForUser(userId,db=pool){
+    const result=await db.query(`UPDATE vin_requests SET status='CLOSED',updated_at=CURRENT_TIMESTAMP
+      WHERE user_id=$1 AND status<>'CLOSED' RETURNING id`,[userId]);
+    return result.rows;
+  },
+  async touchAfterClientMessage(requestId,db=pool){
+    const result=await db.query(`UPDATE vin_requests SET status='IN_PROGRESS',updated_at=CURRENT_TIMESTAMP
+      WHERE id=$1 AND status<>'CLOSED' RETURNING *`,[requestId]);
+    return result.rows[0]??null;
+  },
   async addRecommendation({requestId,productId,productOfferId,addedBy},db=pool){
     const result=await db.query(`INSERT INTO vin_request_recommendations(vin_request_id,product_id,product_offer_id,added_by)
       SELECT $1,p.id,po.id,$4
@@ -93,6 +147,25 @@ export const VinRequestRepository = {
   async removeRecommendation({requestId,recommendationId},db=pool){
     const result=await db.query(`DELETE FROM vin_request_recommendations WHERE id=$1 AND vin_request_id=$2 RETURNING *`,[recommendationId,requestId]);
     return result.rows[0]??null;
+  },
+  async dismissRecommendationForUser({requestId,recommendationId,userId},db=pool){
+    const result=await db.query(`UPDATE vin_request_recommendations rec SET
+      dismissed_at=COALESCE(rec.dismissed_at,CURRENT_TIMESTAMP),
+      dismissed_by_user_id=COALESCE(rec.dismissed_by_user_id,$3)
+      FROM vin_requests vr
+      WHERE rec.id=$1 AND rec.vin_request_id=$2
+        AND vr.id=rec.vin_request_id AND vr.user_id=$3
+      RETURNING rec.*`,[recommendationId,requestId,userId]);
+    return result.rows[0]??null;
+  },
+  async settings(db=pool){
+    const result=await db.query(`SELECT mode,updated_by,updated_at FROM vin_request_settings WHERE id=1`);
+    return result.rows[0]??{mode:'CHAT',updated_by:null,updated_at:null};
+  },
+  async updateSettings({mode,updatedBy},db=pool){
+    const result=await db.query(`UPDATE vin_request_settings SET mode=$1,updated_by=$2,
+      updated_at=CURRENT_TIMESTAMP WHERE id=1 RETURNING mode,updated_by,updated_at`,[mode,updatedBy]);
+    return result.rows[0];
   },
   async summary(db=pool){
     const result=await db.query(`SELECT COUNT(*) FILTER(WHERE status='NEW')::integer AS new_count,

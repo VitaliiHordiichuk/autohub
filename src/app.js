@@ -57,11 +57,12 @@ import adminAutomaticTranslationRoutes
 import { customerManagementRouter } from "./routes/customer-management.routes.js";
 import { adminEmployeeRouter } from "./routes/admin-employee.routes.js";
 import { adminProductImageRouter } from "./routes/admin-product-image.routes.js";
+import { adminCatalogCategoryRouter } from "./routes/admin-catalog-category.routes.js";
 import { clientSearchHistoryRouter } from "./routes/client-search-history.routes.js";
 import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
 import { telegramConnectionRouter } from "./routes/telegram-connection.routes.js";
-import { clientVinRequestRouter, managerVinRequestRouter,publicVinBrandRouter,adminVinBrandRouter } from "./routes/vin-request.routes.js";
+import { clientVinRequestRouter, managerVinRequestRouter,publicVinBrandRouter,adminVinBrandRouter,adminVinSettingsRouter } from "./routes/vin-request.routes.js";
 
 export const app = express();
 
@@ -182,7 +183,9 @@ app.use("/api/admin/search-analytics", adminSearchAnalyticsRouter);
 app.use("/api/admin/article-numbers", adminArticleNumberRouter);
 app.use("/api/admin/employees", adminEmployeeRouter);
 app.use("/api/admin/product-images", adminProductImageRouter);
+app.use("/api/admin/catalog", adminCatalogCategoryRouter);
 app.use("/api/admin/vin-vehicle-brands",adminVinBrandRouter);
+app.use("/api/admin/vin-settings",adminVinSettingsRouter);
 app.use("/api/admin", adminImportSettingsRouter);
 app.use("/api/admin/import", adminImportRouter);
 app.use("/api/admin/email-import", adminEmailImportRouter);
