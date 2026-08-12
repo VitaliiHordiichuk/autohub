@@ -12,7 +12,7 @@ function getJwtSecret() {
 
   if (!secret || secret.length < 32) {
     throw new Error(
-      "AUTH_JWT_SECRET отсутствует или короче 32 символов"
+      "AUTH_JWT_SECRET відсутній або коротший за 32 символи"
     );
   }
 
@@ -46,7 +46,7 @@ function normalizeUkrainianPhone(value) {
   }
 
   if (!/^380\d{9}$/.test(normalized)) {
-    throw createError("Укажите украинский номер в формате +380 XX XXX XX XX");
+    throw createError("Вкажіть український номер у форматі +380 XX XXX XX XX");
   }
 
   return `+${normalized}`;
@@ -66,65 +66,65 @@ function validateRegistration({
   password,
 }) {
   if (!firstName) {
-    throw createError("Имя обязательно");
+    throw createError("Ім’я є обов’язковим");
   }
 
   if (firstName.length > 100) {
     throw createError(
-      "Имя не должно быть длиннее 100 символов"
+      "Ім’я не повинно бути довшим за 100 символів"
     );
   }
 
   if (lastName.length > 100) {
     throw createError(
-      "Фамилия не должна быть длиннее 100 символов"
+      "Прізвище не повинно бути довшим за 100 символів"
     );
   }
 
   if (!phone) {
-    throw createError("Телефон обязателен");
+    throw createError("Телефон є обов’язковим");
   }
 
   if (!/^\+?\d{7,20}$/.test(phone)) {
-    throw createError("Некорректный номер телефона");
+    throw createError("Некоректний номер телефону");
   }
 
   if (!email) {
-    throw createError("Email обязателен");
+    throw createError("Email є обов’язковим");
   }
 
   if (
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   ) {
-    throw createError("Некорректный email");
+    throw createError("Некоректний email");
   }
 
   if (password.length < 8) {
     throw createError(
-      "Пароль должен содержать минимум 8 символов"
+      "Пароль повинен містити щонайменше 8 символів"
     );
   }
 
   if (password.length > 200) {
-    throw createError("Пароль слишком длинный");
+    throw createError("Пароль надто довгий");
   }
 }
 
 function validateProfile({ firstName, lastName, phone, email }) {
   if (!firstName) {
-    throw createError("Имя обязательно");
+    throw createError("Ім’я є обов’язковим");
   }
 
   if (firstName.length > 100 || lastName.length > 100) {
-    throw createError("Имя или фамилия слишком длинные");
+    throw createError("Ім’я або прізвище надто довгі");
   }
 
   if (!phone) {
-    throw createError("Телефон обязателен");
+    throw createError("Телефон є обов’язковим");
   }
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw createError("Некорректный email");
+    throw createError("Некоректний email");
   }
 }
 
@@ -269,7 +269,7 @@ export const AuthService = {
 
       if (existingUser) {
         throw createError(
-          "Пользователь с таким email уже существует",
+          "Користувач із таким email уже існує",
           409
         );
       }
@@ -287,7 +287,7 @@ export const AuthService = {
 
       if (!roleId) {
         throw createError(
-          "Роль CLIENT не найдена",
+          "Роль CLIENT не знайдено",
           500
         );
       }
@@ -307,7 +307,7 @@ export const AuthService = {
 
       if (!priceGroupId) {
         throw createError(
-          "Ценовая группа Registered не найдена",
+          "Цінову групу Registered не знайдено",
           500
         );
       }
@@ -397,7 +397,7 @@ export const AuthService = {
 
       if (error.code === "23505") {
         throw createError(
-          "Пользователь с таким email уже существует",
+          "Користувач із таким email уже існує",
           409
         );
       }
@@ -414,7 +414,7 @@ export const AuthService = {
 
     if (!email || !password) {
       throw createError(
-        "Email и пароль обязательны"
+        "Email і пароль є обов’язковими"
       );
     }
 
@@ -423,14 +423,14 @@ export const AuthService = {
 
     if (!authUser) {
       throw createError(
-        "Неверный email или пароль",
+        "Неправильний email або пароль",
         401
       );
     }
 
     if (!authUser.is_active) {
       throw createError(
-        "Пользователь заблокирован",
+        "Користувача заблоковано",
         403
       );
     }
@@ -443,7 +443,7 @@ export const AuthService = {
 
     if (!passwordMatches) {
       throw createError(
-        "Неверный email или пароль",
+        "Неправильний email або пароль",
         401
       );
     }
@@ -465,7 +465,7 @@ export const AuthService = {
 
     if (!authUser || !authUser.is_active) {
       throw createError(
-        "Пользователь не найден или заблокирован",
+        "Користувача не знайдено або заблоковано",
         401
       );
     }
@@ -489,7 +489,7 @@ export const AuthService = {
       const current = await findAuthUserById(userId, client);
 
       if (!current || !current.is_active) {
-        throw createError("Пользователь не найден или заблокирован", 401);
+        throw createError("Користувача не знайдено або заблоковано", 401);
       }
 
       const duplicate = await client.query(
@@ -498,7 +498,7 @@ export const AuthService = {
       );
 
       if (duplicate.rows.length) {
-        throw createError("Пользователь с таким email уже существует", 409);
+        throw createError("Користувач із таким email уже існує", 409);
       }
 
       const phoneChanged =
@@ -548,7 +548,7 @@ export const AuthService = {
       await client.query("ROLLBACK");
 
       if (error.code === "23505") {
-        throw createError("Пользователь с таким email уже существует", 409);
+        throw createError("Користувач із таким email уже існує", 409);
       }
 
       throw error;

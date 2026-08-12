@@ -1,5 +1,6 @@
 import {
   mkdtemp,
+  readFile,
   readdir,
   rm,
 } from "node:fs/promises";
@@ -237,6 +238,81 @@ async function collectTestFiles(
   await walk(absoluteDirectory);
 
   return result;
+}
+
+
+async function applyPendingMigrations() {
+  const pool = new Pool({
+    host:
+      databaseConfig.host,
+    port:
+      databaseConfig.port,
+    database:
+      testDatabase,
+    user:
+      databaseConfig.user,
+    password:
+      databaseConfig.password,
+  });
+
+  try {
+    const appliedResult =
+      await pool.query(
+        "SELECT version FROM schema_migrations"
+      );
+
+    const applied = new Set(
+      appliedResult.rows.map(
+        (row) => row.version
+      )
+    );
+
+    const migrationDirectory =
+      path.join(
+        projectRoot,
+        "migrations"
+      );
+
+    const migrationFiles =
+      (await readdir(migrationDirectory))
+        .filter((fileName) =>
+          fileName.endsWith(".sql")
+        )
+        .sort();
+
+    for (const fileName of migrationFiles) {
+      const version =
+        fileName.slice(0, -4);
+
+      const legacyVersion =
+        version.split("_", 1)[0];
+
+      if (
+        applied.has(version) ||
+        applied.has(legacyVersion)
+      ) {
+        continue;
+      }
+
+      console.log(
+        `Применяю миграцию к тестовой базе: ${version}`
+      );
+
+      const sql =
+        await readFile(
+          path.join(
+            migrationDirectory,
+            fileName
+          ),
+          "utf8"
+        );
+
+      await pool.query(sql);
+      applied.add(version);
+    }
+  } finally {
+    await pool.end();
+  }
 }
 
 
@@ -735,6 +811,8 @@ async function main() {
         env: postgresEnv,
       }
     );
+
+    await applyPendingMigrations();
 
     await seedSearchFixture();
 

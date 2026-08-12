@@ -24,12 +24,12 @@ function createExpirationDate() {
 function validateCart(cart, items) {
   if (!cart) {
     throw new Error(
-      "Активная корзина не найдена"
+      "Активний кошик не знайдено"
     );
   }
 
   if (!items.length) {
-    throw new Error("Корзина пустая");
+    throw new Error("Кошик порожній");
   }
 }
 
@@ -48,7 +48,7 @@ export function selectCheckoutItems(allItems, itemIds = null) {
 
   if (items.length !== selectedIds.size) {
     const error = new Error(
-      "Одна или несколько выбранных позиций корзины не найдены"
+      "Одну або кілька вибраних позицій кошика не знайдено"
     );
     error.statusCode = 400;
     throw error;
@@ -79,7 +79,7 @@ async function lockAndValidateItems(
 
     if (!offer || !offer.isAvailable) {
       throw new Error(
-        `Товар ${item.article} сейчас недоступен`
+        `Товар ${item.article} зараз недоступний`
       );
     }
 
@@ -103,7 +103,7 @@ async function lockAndValidateItems(
       requestedQuantity > freeQuantity
     ) {
       throw new Error(
-        `Недостаточно товара ${item.article}. ` +
+        `Недостатньо товару ${item.article}. ` +
         `Доступно: ${freeQuantity}`
       );
     }
@@ -127,7 +127,7 @@ export const CheckoutService = {
     guestToken = null,
   }) {
     if (!cartId) {
-      throw new Error("cartId обязателен");
+      throw new Error("cartId є обов’язковим");
     }
 
     return transaction(async (db) => {

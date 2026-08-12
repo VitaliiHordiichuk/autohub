@@ -26,7 +26,7 @@ function optionalText(value, maxLength = null) {
     normalized.length > maxLength
   ) {
     throw createError(
-      `Значение не должно быть длиннее ${maxLength} символов`
+      `Значення не повинно бути довшим за ${maxLength} символів`
     );
   }
 
@@ -42,7 +42,7 @@ function requiredText(
     optionalText(value, maxLength);
 
   if (!normalized) {
-    throw createError(`${fieldName} обязательно`);
+    throw createError(`${fieldName} є обов’язковим`);
   }
 
   return normalized;
@@ -63,7 +63,7 @@ function normalizePhone(value) {
     !phoneNumber.isValid()
   ) {
     throw createError(
-      "Введите корректный номер телефона"
+      "Введіть коректний номер телефону"
     );
   }
 
@@ -84,7 +84,7 @@ function normalizeEmail(value) {
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   ) {
     throw createError(
-      "Некорректный email получателя"
+      "Некоректний email отримувача"
     );
   }
 
@@ -110,7 +110,7 @@ function normalizePositiveId(
     number <= 0
   ) {
     throw createError(
-      `${fieldName} должно быть положительным числом`
+      `${fieldName} має бути додатним числом`
     );
   }
 
@@ -120,7 +120,7 @@ function normalizePositiveId(
 export function normalizeOrderDelivery(input) {
   if (!input || typeof input !== "object") {
     throw createError(
-      "Данные получения заказа обязательны"
+      "Дані отримання замовлення є обов’язковими"
     );
   }
 
@@ -131,18 +131,23 @@ export function normalizeOrderDelivery(input) {
 
   if (!DELIVERY_METHODS.has(deliveryMethod)) {
     throw createError(
-      "Некорректный способ получения"
+      "Некоректний спосіб отримання"
     );
   }
 
   const delivery = {
     recipientFirstName: requiredText(
       input.recipientFirstName,
-      "Имя получателя",
+      "Ім’я отримувача",
       100
     ),
-    recipientLastName: optionalText(
+    recipientLastName: requiredText(
       input.recipientLastName,
+      "Прізвище отримувача",
+      100
+    ),
+    recipientMiddleName: optionalText(
+      input.recipientMiddleName,
       100
     ),
     recipientPhone: normalizePhone(
@@ -182,14 +187,14 @@ export function normalizeOrderDelivery(input) {
   delivery.novaPoshtaCityRef =
     requiredText(
       novaPoshta.cityRef,
-      "Идентификатор города Новой почты",
+      "Ідентифікатор міста Нової пошти",
       100
     );
 
   delivery.novaPoshtaCityName =
     requiredText(
       novaPoshta.cityName,
-      "Город Новой почты",
+      "Місто Нової пошти",
       200
     );
 
@@ -203,7 +208,7 @@ export function normalizeOrderDelivery(input) {
 
     if (!POINT_TYPES.has(pointType)) {
       throw createError(
-        "Нужно выбрать отделение или почтомат"
+        "Потрібно вибрати відділення або поштомат"
       );
     }
 
@@ -213,7 +218,7 @@ export function normalizeOrderDelivery(input) {
     delivery.novaPoshtaPointRef =
       requiredText(
         novaPoshta.pointRef,
-        "Идентификатор отделения или почтомата",
+        "Ідентифікатор відділення або поштомата",
         100
       );
 
@@ -226,7 +231,7 @@ export function normalizeOrderDelivery(input) {
     delivery.novaPoshtaPointName =
       requiredText(
         novaPoshta.pointName,
-        "Название отделения или почтомата",
+        "Назва відділення або поштомата",
         255
       );
 
@@ -247,14 +252,14 @@ export function normalizeOrderDelivery(input) {
   delivery.novaPoshtaStreetName =
     requiredText(
       novaPoshta.streetName,
-      "Улица",
+      "Вулиця",
       200
     );
 
   delivery.novaPoshtaBuilding =
     requiredText(
       novaPoshta.building,
-      "Дом",
+      "Будинок",
       50
     );
 
@@ -284,6 +289,8 @@ export function deliveryInputFromProfileRow(
       row.recipient_first_name,
     recipientLastName:
       row.recipient_last_name,
+    recipientMiddleName:
+      row.recipient_middle_name,
     recipientPhone:
       row.recipient_phone,
     recipientEmail:

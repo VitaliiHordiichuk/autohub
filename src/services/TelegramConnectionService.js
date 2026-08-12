@@ -3,7 +3,7 @@ import { pool } from "../config/db.js";
 import { transaction } from "../db/transaction.js";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
-const normalizeLocale = (value) => ["uk", "en", "ru"].includes(value) ? value : "uk";
+const normalizeLocale = (value) => value === "en" ? "en" : "uk";
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   if (/^0\d{9}$/.test(digits)) return `+38${digits}`;

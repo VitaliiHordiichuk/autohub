@@ -19,6 +19,26 @@ import {
 } from "../services/SearchAnalyticsService.js";
 import { ArticleNumberRepository } from "../repositories/ArticleNumberRepository.js";
 import { CustomerPricingService } from "../services/CustomerPricingService.js";
+import { PublicSearchSuggestionRepository } from "../repositories/PublicSearchSuggestionRepository.js";
+
+
+export async function searchSuggestions(req, res) {
+  try {
+    const suggestions = await PublicSearchSuggestionRepository.list({
+      query: req.query.q,
+      locale: req.query.locale,
+      limit: req.query.limit,
+    });
+
+    return res.json({ success: true, suggestions });
+  } catch (error) {
+    console.error("Помилка підказок пошуку:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Не вдалося завантажити підказки пошуку",
+    });
+  }
+}
 
 
 export async function searchByArticle(
@@ -39,7 +59,7 @@ export async function searchByArticle(
           success: false,
 
           error:
-            "Параметр article обязателен",
+            "Параметр article є обов’язковим",
         });
     }
 
@@ -72,7 +92,7 @@ export async function searchByArticle(
             searchResult.normalized,
 
           message:
-            "Товар не найден",
+            "Товар не знайдено",
         });
     }
 
@@ -197,7 +217,7 @@ export async function searchByArticle(
         success: false,
 
         error:
-          "Внутренняя ошибка сервера",
+          "Внутрішня помилка сервера",
       });
   }
 }

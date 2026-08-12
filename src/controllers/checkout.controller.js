@@ -79,7 +79,7 @@ export async function submitOrder(
     return res.status(201).json({
       success: true,
       message:
-        "Заказ отправлен менеджеру",
+        "Замовлення надіслано менеджеру",
       order: result.order,
       items: result.orderItems,
       delivery: result.delivery,

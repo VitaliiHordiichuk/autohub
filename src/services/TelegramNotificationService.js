@@ -16,7 +16,7 @@ function formatMoney(value) {
 }
 
 function localeOf(value) {
-  return ["uk", "en", "ru"].includes(value) ? value : "uk";
+  return value === "en" ? "en" : "uk";
 }
 
 async function sendMessage(chatId, payload) {
@@ -31,6 +31,65 @@ async function sendMessage(chatId, payload) {
 }
 
 export const TelegramNotificationService = {
+  async sendVinActivityToStaff({ requestId, event, message = "" }, db = pool) {
+    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN) return;
+    const [connections, requestResult] = await Promise.all([
+      db.query(`
+        SELECT DISTINCT c.telegram_chat_id
+        FROM user_telegram_connections c
+        JOIN users u ON u.id = c.user_id
+        JOIN roles r ON r.id = u.role_id
+        WHERE c.notifications_enabled = TRUE
+          AND u.is_active = TRUE
+          AND r.name IN ('ADMIN', 'MANAGER')`),
+      db.query(`
+        SELECT vr.id, vr.vin, vr.request_text, u.first_name, u.last_name, u.email
+        FROM vin_requests vr
+        JOIN users u ON u.id = vr.user_id
+        WHERE vr.id = $1`, [Number(requestId)]),
+    ]);
+    if (!connections.rows.length || !requestResult.rows[0]) return;
+
+    const request = requestResult.rows[0];
+    const customerName = [request.first_name, request.last_name].filter(Boolean).join(" ")
+      || request.email
+      || "Не вказано";
+    const isMessage = event === "CLIENT_MESSAGE";
+    const body = String(isMessage ? message : request.request_text).trim();
+    const shortened = body.length > 700 ? `${body.slice(0, 697)}…` : body;
+    const text = [
+      isMessage
+        ? `💬 <b>Нове повідомлення у VIN-запиті №${Number(request.id)}</b>`
+        : `🔎 <b>Новий VIN-запит №${Number(request.id)}</b>`,
+      `Клієнт: ${escapeHtml(customerName)}`,
+      `VIN: <code>${escapeHtml(request.vin)}</code>`,
+      "",
+      escapeHtml(shortened || "Без тексту"),
+    ].join("\n");
+    const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
+    const canOpen = /^https:\/\//i.test(frontendUrl);
+    const requestUrl = `${frontendUrl}/uk/admin/vin-requests?request=${Number(request.id)}`;
+    const deliveries = await Promise.allSettled(connections.rows.map((row) => sendMessage(
+      row.telegram_chat_id,
+      {
+        text,
+        ...(canOpen ? {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Відкрити VIN-запит", url: requestUrl }]],
+          },
+        } : {}),
+      }
+    )));
+    deliveries.forEach((delivery) => {
+      if (delivery.status === "rejected") {
+        console.error(
+          "Не вдалося надіслати Telegram-сповіщення про VIN-запит:",
+          delivery.reason?.message || delivery.reason
+        );
+      }
+    });
+  },
+
   async sendNewOrder({ orderId, customerName, totalAmount, itemsCount }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN) return;
     const result = await db.query(`

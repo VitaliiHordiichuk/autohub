@@ -13,6 +13,8 @@ function mapDelivery(row) {
       row.recipient_first_name,
     recipientLastName:
       row.recipient_last_name,
+    recipientMiddleName:
+      row.recipient_middle_name,
     recipientPhone:
       row.recipient_phone,
     recipientEmail:
@@ -65,6 +67,7 @@ export const OrderDeliveryRepository = {
         delivery_method,
         recipient_first_name,
         recipient_last_name,
+        recipient_middle_name,
         recipient_phone,
         recipient_email,
         pickup_warehouse_id,
@@ -82,9 +85,9 @@ export const OrderDeliveryRepository = {
         courier_comment
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13,
-        $14, $15, $16, $17, $18, $19
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18, $19, $20
       )
       RETURNING *;
     `;
@@ -94,6 +97,7 @@ export const OrderDeliveryRepository = {
       delivery.deliveryMethod,
       delivery.recipientFirstName,
       delivery.recipientLastName,
+      delivery.recipientMiddleName,
       delivery.recipientPhone,
       delivery.recipientEmail,
       delivery.pickupWarehouseId,

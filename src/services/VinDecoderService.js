@@ -7,8 +7,8 @@ export const VinDecoderService={
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),8000);
     try{
-      const response=await fetch(`${API_URL}/${encodeURIComponent(vin)}?format=json`,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"AutoHub/1.0"}});
-      if(!response.ok)throw new Error("VIN-сервис временно недоступен");
+      const response=await fetch(`${API_URL}/${encodeURIComponent(vin)}?format=json`,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"makahub/1.0"}});
+      if(!response.ok)throw new Error("VIN-сервіс тимчасово недоступний");
       const data=await response.json();
       const item=data?.Results?.[0];
       if(!item)throw new Error("Не удалось получить данные автомобиля");
@@ -18,7 +18,7 @@ export const VinDecoderService={
       const recognized=Boolean(vehicle.model||vehicle.bodyClass||vehicle.engine);
       return {vin,recognized,partial:!cleanDecode||!recognized,vehicle,source:"NHTSA vPIC"};
     }catch(error){
-      if(error?.name==="AbortError")throw new Error("VIN-сервис отвечает слишком долго. Попробуйте ещё раз");
+      if(error?.name==="AbortError")throw new Error("VIN-сервіс відповідає надто довго. Спробуйте ще раз");
       throw error;
     }finally{clearTimeout(timer);}
   }

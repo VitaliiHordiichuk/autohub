@@ -4,6 +4,7 @@ import {
 
 const LANGUAGE_CODE_PATTERN =
   /^[a-z]{2,5}$/;
+const SITE_LANGUAGE_CODES = new Set(["uk", "en"]);
 
 function normalizeCode(value) {
   const code = String(value || "")
@@ -95,6 +96,13 @@ export class SiteLanguageService {
   ) {
     const code =
       normalizeCode(rawCode);
+
+    if (
+      !SITE_LANGUAGE_CODES.has(code) &&
+      (body.isPublicEnabled === true || body.isAdminEnabled === true || body.isDefault === true)
+    ) {
+      throw new Error("На сайті доступні лише українська та англійська мови");
+    }
 
     const current =
       await SiteLanguageRepository

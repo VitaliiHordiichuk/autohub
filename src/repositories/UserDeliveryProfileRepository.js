@@ -27,6 +27,7 @@ export const UserDeliveryProfileRepository = {
         user_id,
         recipient_first_name,
         recipient_last_name,
+        recipient_middle_name,
         recipient_phone,
         recipient_email,
         delivery_method,
@@ -47,12 +48,13 @@ export const UserDeliveryProfileRepository = {
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9,
         $10, $11, $12, $13, $14, $15, $16,
-        $17, $18, $19
+        $17, $18, $19, $20
       )
       ON CONFLICT (user_id)
       DO UPDATE SET
         recipient_first_name = EXCLUDED.recipient_first_name,
         recipient_last_name = EXCLUDED.recipient_last_name,
+        recipient_middle_name = EXCLUDED.recipient_middle_name,
         recipient_phone = EXCLUDED.recipient_phone,
         recipient_email = EXCLUDED.recipient_email,
         delivery_method = EXCLUDED.delivery_method,
@@ -77,6 +79,7 @@ export const UserDeliveryProfileRepository = {
       data.userId,
       data.recipientFirstName,
       data.recipientLastName,
+      data.recipientMiddleName,
       data.recipientPhone,
       data.recipientEmail,
       data.deliveryMethod,

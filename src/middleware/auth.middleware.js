@@ -45,7 +45,7 @@ export function optionalAuth(req, res, next) {
     return res.status(401).json({
       success: false,
       error:
-        "Сессия недействительна или истекла",
+        "Сесія недійсна або завершилася",
     });
   }
 }
@@ -79,7 +79,7 @@ export function requireAuth(req, res, next) {
   if (!token) {
     return res.status(401).json({
       success: false,
-      error: "Требуется авторизация",
+      error: "Потрібна авторизація",
     });
   }
 
@@ -90,7 +90,7 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({
       success: false,
       error:
-        "Сессия недействительна или истекла",
+        "Сесія недійсна або завершилася",
     });
   }
 }
@@ -107,7 +107,7 @@ export function requireRole(...allowedRoles) {
     ) {
       return res.status(403).json({
         success: false,
-        error: "Недостаточно прав",
+        error: "Недостатньо прав",
       });
     }
 

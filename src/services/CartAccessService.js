@@ -14,7 +14,7 @@ function normalizeCartId(value) {
   const cartId = Number(value);
 
   if (!Number.isInteger(cartId) || cartId <= 0) {
-    throw createError("Некорректный cartId");
+    throw createError("Некоректний cartId");
   }
 
   return cartId;
@@ -105,7 +105,7 @@ export const CartAccessService = {
 
       if (!cart) {
         throw createError(
-          "Корзина не найдена или нет доступа",
+          "Кошик не знайдено або немає доступу",
           404
         );
       }
@@ -115,7 +115,7 @@ export const CartAccessService = {
 
     if (!guestToken) {
       throw createError(
-        "Для гостевой корзины нужен X-Cart-Token",
+        "Для гостьового кошика потрібен X-Cart-Token",
         401
       );
     }
@@ -130,7 +130,7 @@ export const CartAccessService = {
 
     if (!cart) {
       throw createError(
-        "Корзина не найдена или нет доступа",
+        "Кошик не знайдено або немає доступу",
         404
       );
     }

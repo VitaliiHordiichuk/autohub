@@ -7,7 +7,7 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
   COALESCE((SELECT JSON_AGG(JSON_BUILD_OBJECT(
     'id',m.id,'message',m.message,'created_at',m.created_at,
     'sender_user_id',m.sender_user_id,'sender_role',COALESCE(m.sender_role,sr.name),
-    'sender_name',COALESCE(NULLIF(BTRIM(CONCAT_WS(' ',su.first_name,su.last_name)),''),su.email,'Сотрудник')
+    'sender_name',COALESCE(NULLIF(BTRIM(CONCAT_WS(' ',su.first_name,su.last_name)),''),su.email,'Співробітник')
   ) ORDER BY m.created_at,m.id)
   FROM vin_request_messages m
   LEFT JOIN users su ON su.id=m.sender_user_id
@@ -24,7 +24,7 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
     'is_available',(p.is_active=TRUE AND po.is_available=TRUE AND po.is_hidden=FALSE
       AND (w.id IS NULL OR w.is_active=TRUE) AND (s.id IS NULL OR s.is_active=TRUE)
       AND GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)>0),
-    'source_label',COALESCE(w.name,s.name,'AutoHub')
+    'source_label',COALESCE(w.name,s.name,'makahub')
   ) ORDER BY rec.created_at,rec.id)
   FROM vin_request_recommendations rec
   JOIN products p ON p.id=rec.product_id

@@ -57,21 +57,47 @@ function formatPriority(value) {
 }
 
 
-function buildAvailabilityText(offer) {
+const OFFER_TEXT = {
+  uk: {
+    ownStock: "Наш склад",
+    partnerStock: "Доступно під замовлення",
+    unavailable: "Немає в наявності",
+    availableToday: "Є сьогодні",
+    onOrder: "Під замовлення",
+    delivery: (days) => `Доставка ${days} дн.`,
+    available: "В наявності",
+  },
+  en: {
+    ownStock: "Our stock",
+    partnerStock: "Available to order",
+    unavailable: "Out of stock",
+    availableToday: "Available today",
+    onOrder: "On order",
+    delivery: (days) => `Delivery in ${days} days`,
+    available: "In stock",
+  },
+};
+
+
+function buildAvailabilityText(offer, locale = "uk") {
   const quantity =
     formatQuantity(
       offer.quantity
     );
+
+  const text =
+    OFFER_TEXT[locale] ||
+    OFFER_TEXT.uk;
 
   if (
     offer.source_type ===
     "OWN_STOCK"
   ) {
     if (quantity <= 0) {
-      return "Нет в наличии";
+      return text.unavailable;
     }
 
-    return "Есть сегодня";
+    return text.availableToday;
   }
 
   if (
@@ -79,7 +105,7 @@ function buildAvailabilityText(offer) {
     "SUPPLIER"
   ) {
     if (quantity <= 0) {
-      return "Нет в наличии";
+      return text.unavailable;
     }
 
     const deliveryDays =
@@ -88,21 +114,19 @@ function buildAvailabilityText(offer) {
       ) || 0;
 
     if (deliveryDays <= 0) {
-      return "Под заказ";
+      return text.onOrder;
     }
 
-    return (
-      `Доставка ${deliveryDays} дн.`
-    );
+    return text.delivery(deliveryDays);
   }
 
   return quantity > 0
-    ? "В наличии"
-    : "Нет в наличии";
+    ? text.available
+    : text.unavailable;
 }
 
 
-function mapOffer(offer, pricingContext) {
+function mapOffer(offer, pricingContext, locale) {
   const quantity =
     formatQuantity(
       offer.quantity
@@ -213,12 +237,17 @@ function mapOffer(offer, pricingContext) {
   return {
     ...mappedOffer,
 
+    sourceLabel:
+      sourceType === "OWN_STOCK"
+        ? (OFFER_TEXT[locale] || OFFER_TEXT.uk).ownStock
+        : (OFFER_TEXT[locale] || OFFER_TEXT.uk).partnerStock,
+
     availabilityText:
       buildAvailabilityText({
         ...offer,
         source_type:
           sourceType,
-      }),
+      }, locale),
   };
 }
 
@@ -328,7 +357,8 @@ function applyWarehousePriorities(
 export const OfferService = {
   async getOffersByProductId(
     productId,
-    pricingContext = null
+    pricingContext = null,
+    locale = "uk"
   ) {
     const offers =
       await ProductRepository
@@ -337,7 +367,7 @@ export const OfferService = {
         );
 
     const mappedOffers =
-      offers.map((offer) => mapOffer(offer, pricingContext));
+      offers.map((offer) => mapOffer(offer, pricingContext, locale));
 
     return applyWarehousePriorities(
       mappedOffers

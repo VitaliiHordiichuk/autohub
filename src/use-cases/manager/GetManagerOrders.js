@@ -64,6 +64,8 @@ export const GetManagerOrders = {
                 delivery.recipientFirstName,
               recipientLastName:
                 delivery.recipientLastName,
+              recipientMiddleName:
+                delivery.recipientMiddleName,
               recipientPhone:
                 delivery.recipientPhone,
               cityName:

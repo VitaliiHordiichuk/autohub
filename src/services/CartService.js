@@ -25,7 +25,7 @@ function normalizePositiveNumber(
     number <= 0
   ) {
     throw createError(
-      `${label} должно быть больше нуля`
+      `${label} має бути більшим за нуль`
     );
   }
 
@@ -40,7 +40,7 @@ function normalizeItemId(value) {
     itemId <= 0
   ) {
     throw createError(
-      "Некорректный itemId"
+      "Некоректний itemId"
     );
   }
 
@@ -182,7 +182,7 @@ export const CartService = {
     const numericQuantity =
       normalizePositiveNumber(
         quantity,
-        "Количество"
+        "Кількість"
       );
 
     const access =
@@ -203,14 +203,14 @@ export const CartService = {
 
     if (!offer) {
       throw createError(
-        "Предложение не найдено",
+        "Пропозицію не знайдено",
         404
       );
     }
 
     if (!offer.isAvailable) {
       throw createError(
-        "Товар недоступен"
+        "Товар недоступний"
       );
     }
 
@@ -236,7 +236,7 @@ export const CartService = {
       Number(offer.quantity)
     ) {
       throw createError(
-        `Недостаточно товара. ` +
+        `Недостатньо товару. ` +
         `Доступно: ${offer.quantity}`
       );
     }
@@ -283,7 +283,7 @@ export const CartService = {
     const numericQuantity =
       normalizePositiveNumber(
         quantity,
-        "Количество"
+        "Кількість"
       );
 
     const cart =
@@ -303,7 +303,7 @@ export const CartService = {
 
     if (!item) {
       throw createError(
-        "Позиция корзины не найдена",
+        "Позицію кошика не знайдено",
         404
       );
     }
@@ -316,14 +316,14 @@ export const CartService = {
 
     if (!offer) {
       throw createError(
-        "Предложение не найдено",
+        "Пропозицію не знайдено",
         404
       );
     }
 
     if (!offer.isAvailable) {
       throw createError(
-        "Товар сейчас недоступен"
+        "Товар зараз недоступний"
       );
     }
 
@@ -332,7 +332,7 @@ export const CartService = {
       Number(offer.quantity)
     ) {
       throw createError(
-        `Недостаточно товара. ` +
+        `Недостатньо товару. ` +
         `Доступно: ${offer.quantity}`
       );
     }
@@ -372,7 +372,7 @@ export const CartService = {
 
     if (!deleted) {
       throw createError(
-        "Позиция корзины не найдена",
+        "Позицію кошика не знайдено",
         404
       );
     }

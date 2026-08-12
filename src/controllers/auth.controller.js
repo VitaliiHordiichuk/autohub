@@ -36,7 +36,7 @@ function sendError(res, error) {
     success: false,
     error:
       statusCode >= 500
-        ? "Внутренняя ошибка сервера"
+        ? "Внутрішня помилка сервера"
         : error.message,
   });
 }

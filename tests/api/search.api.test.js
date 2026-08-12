@@ -327,6 +327,47 @@ test(
 
 
 test(
+  "API возвращает живые подсказки по части артикула",
+  async () => {
+    const prefix =
+      SEARCH_FIXTURE.originalArticle.slice(0, 7);
+
+    const response =
+      await fetch(
+        `${baseUrl}/api/search/suggestions?q=${prefix}&locale=uk&limit=5`
+      );
+
+    assert.equal(
+      response.status,
+      200
+    );
+
+    const body =
+      await response.json();
+
+    assert.equal(
+      body.success,
+      true
+    );
+
+    assert.equal(
+      Array.isArray(body.suggestions),
+      true
+    );
+
+    assert.equal(
+      body.suggestions.some(
+        (suggestion) =>
+          suggestion.article ===
+          SEARCH_FIXTURE.originalArticle
+      ),
+      true
+    );
+  }
+);
+
+
+test(
   "API возвращает 404 для неизвестного артикула",
   async () => {
     const response =
@@ -349,7 +390,7 @@ test(
 
     assert.equal(
       body.message,
-      "Товар не найден"
+      "Товар не знайдено"
     );
   }
 );
@@ -378,7 +419,7 @@ test(
 
     assert.equal(
       body.error,
-      "Параметр article обязателен"
+      "Параметр article є обов’язковим"
     );
   }
 );

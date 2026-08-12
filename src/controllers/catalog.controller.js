@@ -7,7 +7,7 @@ export async function getCatalogTree(req, res) {
     return res.json({ success: true, categories });
   } catch (error) {
     console.error("Ошибка каталога:", error);
-    return res.status(500).json({ success: false, error: "Не удалось загрузить каталог" });
+    return res.status(500).json({ success: false, error: "Не вдалося завантажити каталог" });
   }
 }
 
@@ -17,10 +17,10 @@ export async function getCategoryProducts(req, res) {
     const result = await PublicCatalogService.getCategoryProducts({
       slug: req.params.slug, locale: req.query.locale, page: req.query.page, pricingContext,
     });
-    if (!result) return res.status(404).json({ success: false, error: "Категория не найдена" });
+    if (!result) return res.status(404).json({ success: false, error: "Категорію не знайдено" });
     return res.json({ success: true, ...result });
   } catch (error) {
     console.error("Ошибка товаров категории:", error);
-    return res.status(500).json({ success: false, error: "Не удалось загрузить товары" });
+    return res.status(500).json({ success: false, error: "Не вдалося завантажити товари" });
   }
 }

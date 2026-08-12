@@ -2,13 +2,17 @@ import { pool } from "../config/db.js";
 import { OfferService } from "./OfferService.js";
 
 function localizedName(row, locale) {
-  if (locale === "ru") return row.name_ru || row.name;
   if (locale === "en") return row.name_en || row.name;
   return row.name_uk || row.name;
 }
 
+function publicLocale(value) {
+  return String(value || "").toLowerCase() === "en" ? "en" : "uk";
+}
+
 export const PublicCatalogService = {
   async getTree(locale = "uk", db = pool) {
+    locale = publicLocale(locale);
     const result = await db.query(`
       SELECT c.id, c.parent_id, c.slug, c.name, c.name_uk, c.name_ru, c.name_en,
              c.sort_order, COUNT(DISTINCT catalog_product.id)::integer AS direct_product_count
@@ -48,6 +52,7 @@ export const PublicCatalogService = {
   },
 
   async getCategoryProducts({ slug, locale = "uk", page = 1, pricingContext = null }, db = pool) {
+    locale = publicLocale(locale);
     const categoryResult = await db.query(`
       SELECT c.*, p.slug AS parent_slug, p.name AS parent_name, p.name_uk AS parent_name_uk,
              p.name_ru AS parent_name_ru, p.name_en AS parent_name_en
@@ -99,7 +104,7 @@ export const PublicCatalogService = {
       LIMIT $2 OFFSET $3`, [row.id, limit, (normalizedPage - 1) * limit]);
     const products = await Promise.all(productResult.rows.map(async (product) => ({
       ...product,
-      offers: await OfferService.getOffersByProductId(product.id, pricingContext),
+      offers: await OfferService.getOffersByProductId(product.id, pricingContext, locale),
     })));
     return {
       category: {

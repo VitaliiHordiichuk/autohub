@@ -154,7 +154,7 @@ test(
 
     assert.equal(
       offer.availabilityText,
-      "Есть сегодня"
+      "Є сьогодні"
     );
 
     assert.ok(offer.warehouse);

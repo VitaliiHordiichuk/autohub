@@ -8,7 +8,7 @@ export const StartCheckout = {
     guestToken = null,
   }) {
     if (!cartId) {
-      throw new Error("cartId обязателен");
+      throw new Error("cartId є обов’язковим");
     }
 
     const result =

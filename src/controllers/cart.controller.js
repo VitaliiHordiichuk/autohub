@@ -30,7 +30,7 @@ export async function addCartItem(req, res) {
       return res.status(400).json({
         success: false,
         error:
-          "productOfferId и quantity обязательны",
+          "productOfferId і quantity є обов’язковими",
       });
     }
 
@@ -86,7 +86,7 @@ export async function updateCartItem(
     if (quantity === undefined) {
       return res.status(400).json({
         success: false,
-        error: "quantity обязателен",
+        error: "quantity є обов’язковим",
       });
     }
 

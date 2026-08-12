@@ -108,6 +108,8 @@ function mapProfile(row) {
       row.recipient_last_name ??
       row.account_last_name ??
       "",
+    recipientMiddleName:
+      row.recipient_middle_name ?? "",
     recipientPhone:
       row.recipient_phone ??
       row.account_phone ??
@@ -159,8 +161,13 @@ function normalizeInput(input) {
       "Имя получателя",
       100
     ),
-    recipientLastName: optionalText(
+    recipientLastName: requiredText(
       input.recipientLastName,
+      "Фамилия получателя",
+      100
+    ),
+    recipientMiddleName: optionalText(
+      input.recipientMiddleName,
       100
     ),
     recipientPhone: normalizePhone(

@@ -60,7 +60,7 @@ async function resolveDelivery({
 
   if (!userId) {
     throw new Error(
-      "Гостю необходимо указать данные получения"
+      "Гостю потрібно вказати дані отримання"
     );
   }
 
@@ -70,7 +70,7 @@ async function resolveDelivery({
 
   if (!profileRow) {
     throw new Error(
-      "Профиль доставки не найден"
+      "Профіль доставки не знайдено"
     );
   }
 
@@ -92,7 +92,7 @@ export const SubmitOrder = {
   }) {
     if (!checkoutId) {
       throw new Error(
-        "checkoutId обязателен"
+        "checkoutId є обов’язковим"
       );
     }
 
@@ -106,7 +106,7 @@ export const SubmitOrder = {
 
       if (!checkout) {
         throw new Error(
-          "Сессия оформления не найдена или срок резерва истёк"
+          "Сесію оформлення не знайдено або строк резерву минув"
         );
       }
 
@@ -136,7 +136,7 @@ export const SubmitOrder = {
       const items = selectReservedCartItems(allItems, reservations);
 
       if (!items.length) {
-        throw new Error("В оформлении нет выбранных товаров");
+        throw new Error("В оформленні немає вибраних товарів");
       }
 
       const pricingContext = await CustomerPricingService.getContext(userId, db);
@@ -151,7 +151,7 @@ export const SubmitOrder = {
         items.length
       ) {
         throw new Error(
-          "Не все позиции корзины имеют активный резерв"
+          "Не всі позиції кошика мають активний резерв"
         );
       }
 
@@ -294,6 +294,7 @@ export const SubmitOrder = {
           totalAmount: Number(totalAmount),
           customerName: [
             normalizedDelivery.recipientFirstName,
+            normalizedDelivery.recipientMiddleName,
             normalizedDelivery.recipientLastName,
           ].filter(Boolean).join(" "),
         },
@@ -311,6 +312,7 @@ export const SubmitOrder = {
       orderId: result.order.id,
       customerName: [
         result.delivery.recipientFirstName,
+        result.delivery.recipientMiddleName,
         result.delivery.recipientLastName,
       ].filter(Boolean).join(" "),
       totalAmount: result.order.total_amount,

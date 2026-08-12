@@ -63,6 +63,12 @@ import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
 import { telegramConnectionRouter } from "./routes/telegram-connection.routes.js";
 import { clientVinRequestRouter, managerVinRequestRouter,publicVinBrandRouter,adminVinBrandRouter,adminVinSettingsRouter } from "./routes/vin-request.routes.js";
+import {
+  adminHomepageRouter,
+  publicHomepageRouter,
+} from "./routes/homepage-content.routes.js";
+import { optionalAuthSilent } from "./middleware/auth.middleware.js";
+import { enforceApiErrorLanguage } from "./middleware/api-error-language.middleware.js";
 
 export const app = express();
 
@@ -96,6 +102,7 @@ app.use(
 
 app.use(express.json());
 app.use(cookieParser());
+app.use(enforceApiErrorLanguage);
 
 app.use("/api/auth", authRouter);
 app.use("/api/account", deliveryProfileRouter);
@@ -106,6 +113,7 @@ app.use("/api/notifications", notificationRouter);
 app.use("/api/account/telegram", telegramConnectionRouter);
 app.use("/api/account/vin-requests", clientVinRequestRouter);
 app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
+app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 
 app.use(
   "/api/admin",
@@ -141,7 +149,7 @@ app.use(
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
-    message: "AutoHub server works",
+    message: "makahub server works",
   });
 });
 
@@ -186,6 +194,7 @@ app.use("/api/admin/product-images", adminProductImageRouter);
 app.use("/api/admin/catalog", adminCatalogCategoryRouter);
 app.use("/api/admin/vin-vehicle-brands",adminVinBrandRouter);
 app.use("/api/admin/vin-settings",adminVinSettingsRouter);
+app.use("/api/admin/homepage", adminHomepageRouter);
 app.use("/api/admin", adminImportSettingsRouter);
 app.use("/api/admin/import", adminImportRouter);
 app.use("/api/admin/email-import", adminEmailImportRouter);
