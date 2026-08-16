@@ -2,7 +2,8 @@ import { pool } from "../config/db.js";
 import { normalizeArticle } from "../services/articleEngine/normalize.js";
 
 function publicLocale(value) {
-  return String(value || "").toLowerCase() === "en" ? "en" : "uk";
+  const locale = String(value || "").toLowerCase();
+  return ["uk", "en", "ru"].includes(locale) ? locale : "uk";
 }
 
 export const PublicSearchSuggestionRepository = {

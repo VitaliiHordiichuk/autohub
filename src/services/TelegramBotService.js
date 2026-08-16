@@ -89,6 +89,13 @@ async function poll() {
 }
 
 export function startTelegramBot() {
+  const pollingEnabled = !["false", "0", "no", "off"].includes(
+    String(process.env.TELEGRAM_BOT_POLLING_ENABLED ?? "true").trim().toLowerCase()
+  );
+  if (!pollingEnabled) {
+    console.log("ℹ️ Telegram-бот не запущен: polling отключён настройкой");
+    return;
+  }
   if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_BOT_USERNAME || timer) {
     if (!process.env.TELEGRAM_BOT_TOKEN) console.log("ℹ️ Telegram-бот не запущен: TELEGRAM_BOT_TOKEN не задан");
     return;

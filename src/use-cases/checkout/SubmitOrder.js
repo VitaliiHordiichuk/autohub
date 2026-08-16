@@ -47,6 +47,25 @@ export function cartHasRemainingItems(allItems, orderedItems) {
   return allItems.length > orderedItems.length;
 }
 
+export function buildOrderComment({
+  comment = null,
+  vinCheckRequested = false,
+  vin = null,
+}) {
+  const customerComment = String(comment || "").trim();
+  if (!vinCheckRequested) return customerComment || null;
+  const normalizedVin = String(vin || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(normalizedVin)) {
+    throw new Error("VIN має містити 17 символів без I, O та Q");
+  }
+  const vinNotice = [
+    "⚠️ ПЕРЕВІРИТИ ЗА VIN ДО ПІДТВЕРДЖЕННЯ",
+    `VIN: ${normalizedVin}`,
+    "Клієнт просить перевірити сумісність усіх позицій замовлення.",
+  ].join("\n");
+  return customerComment ? `${vinNotice}\n\n${customerComment}` : vinNotice;
+}
+
 async function resolveDelivery({
   delivery,
   userId,
@@ -87,6 +106,8 @@ export const SubmitOrder = {
     userId = null,
     guestToken = null,
     comment = null,
+    vinCheckRequested = false,
+    vin = null,
     delivery = null,
     saveDeliveryProfile = false,
   }) {
@@ -95,6 +116,11 @@ export const SubmitOrder = {
         "checkoutId є обов’язковим"
       );
     }
+
+    const orderComment = buildOrderComment({ comment, vinCheckRequested, vin });
+    const normalizedVin = vinCheckRequested
+      ? String(vin || "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+      : null;
 
     const result = await transaction(async (db) => {
       const checkout =
@@ -188,7 +214,8 @@ export const SubmitOrder = {
                 customer?.id ?? null,
               createdBy:
                 customerUserId,
-              comment,
+              comment:
+                orderComment,
               totalAmount,
             },
             db
@@ -292,6 +319,8 @@ export const SubmitOrder = {
         payload: {
           orderId: Number(order.id),
           totalAmount: Number(totalAmount),
+          vinCheckRequested: Boolean(vinCheckRequested),
+          vin: normalizedVin,
           customerName: [
             normalizedDelivery.recipientFirstName,
             normalizedDelivery.recipientMiddleName,
@@ -317,6 +346,8 @@ export const SubmitOrder = {
       ].filter(Boolean).join(" "),
       totalAmount: result.order.total_amount,
       itemsCount: result.orderItems.length,
+      vinCheckRequested: Boolean(vinCheckRequested),
+      vin: normalizedVin,
     }).catch((error) => {
       console.error("Ошибка отправки нового заказа в Telegram:", error.message);
     });

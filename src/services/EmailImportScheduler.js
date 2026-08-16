@@ -36,6 +36,13 @@ async function runSafely(source) {
 
 
 export function startEmailImportScheduler() {
+  const enabled = !["false", "0", "no", "off"].includes(
+    String(process.env.EMAIL_IMPORT_SCHEDULER_ENABLED ?? "true").trim().toLowerCase()
+  );
+  if (!enabled) {
+    console.log("ℹ️ EMAIL-импорт: автоматическая проверка отключена настройкой");
+    return;
+  }
   if (intervalTimer || startupTimer) {
     return;
   }

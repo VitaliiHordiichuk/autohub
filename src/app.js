@@ -69,6 +69,7 @@ import {
 } from "./routes/homepage-content.routes.js";
 import { optionalAuthSilent } from "./middleware/auth.middleware.js";
 import { enforceApiErrorLanguage } from "./middleware/api-error-language.middleware.js";
+import { seoRouter } from "./routes/seo.routes.js";
 
 export const app = express();
 
@@ -114,6 +115,7 @@ app.use("/api/account/telegram", telegramConnectionRouter);
 app.use("/api/account/vin-requests", clientVinRequestRouter);
 app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
 app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
+app.use("/api/seo", seoRouter);
 
 app.use(
   "/api/admin",

@@ -59,6 +59,8 @@ export async function submitOrder(
     const {
       checkoutId,
       comment = null,
+      vinCheckRequested = false,
+      vin = null,
       delivery = null,
       saveDeliveryProfile = false,
     } = req.body;
@@ -71,6 +73,9 @@ export async function submitOrder(
         guestToken:
           guestTokenFromRequest(req),
         comment,
+        vinCheckRequested:
+          Boolean(vinCheckRequested),
+        vin,
         delivery,
         saveDeliveryProfile:
           Boolean(saveDeliveryProfile),

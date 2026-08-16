@@ -9,6 +9,7 @@ import {
   startEmailImportScheduler,
 } from "./services/EmailImportScheduler.js";
 import { startTelegramBot } from "./services/TelegramBotService.js";
+import { startProductImageProcessingScheduler } from "./services/ProductImageProcessingScheduler.js";
 
 
 const PORT =
@@ -23,4 +24,5 @@ app.listen(PORT, () => {
   startEmailImportScheduler();
 startAutomaticTranslationScheduler();
   startTelegramBot();
+  startProductImageProcessingScheduler();
 });

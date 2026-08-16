@@ -90,7 +90,14 @@ export const TelegramNotificationService = {
     });
   },
 
-  async sendNewOrder({ orderId, customerName, totalAmount, itemsCount }, db = pool) {
+  async sendNewOrder({
+    orderId,
+    customerName,
+    totalAmount,
+    itemsCount,
+    vinCheckRequested = false,
+    vin = null,
+  }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN) return;
     const result = await db.query(`
       SELECT DISTINCT c.telegram_chat_id
@@ -109,6 +116,11 @@ export const TelegramNotificationService = {
       `Клієнт: ${escapeHtml(customerName || "Не вказано")}`,
       `Позицій: ${Number(itemsCount || 0)}`,
       `Сума: <b>${escapeHtml(formatMoney(totalAmount))}</b>`,
+      ...(vinCheckRequested ? [
+        "",
+        "⚠️ <b>ПЕРЕВІРИТИ СУМІСНІСТЬ ДО ПІДТВЕРДЖЕННЯ</b>",
+        `VIN: <code>${escapeHtml(vin)}</code>`,
+      ] : []),
     ].join("\n");
 
     const deliveries = await Promise.allSettled(result.rows.map((row) =>

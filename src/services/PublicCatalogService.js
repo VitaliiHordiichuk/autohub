@@ -3,11 +3,13 @@ import { OfferService } from "./OfferService.js";
 
 function localizedName(row, locale) {
   if (locale === "en") return row.name_en || row.name;
+  if (locale === "ru") return row.name_ru || row.name;
   return row.name_uk || row.name;
 }
 
 function publicLocale(value) {
-  return String(value || "").toLowerCase() === "en" ? "en" : "uk";
+  const locale = String(value || "").toLowerCase();
+  return ["uk", "en", "ru"].includes(locale) ? locale : "uk";
 }
 
 export const PublicCatalogService = {
@@ -76,7 +78,9 @@ export const PublicCatalogService = {
           )
         )`, [row.id]);
     const productResult = await db.query(`
-      SELECT p.id, p.article, p.name, b.name AS brand_name,
+      SELECT p.id, p.article,
+             COALESCE(requested_translation.name, default_translation.name, p.name) AS name,
+             b.name AS brand_name,
              pm.name AS manufacturer,
              (SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id
                ORDER BY pi.priority,pi.id LIMIT 1) AS image_url
@@ -84,6 +88,19 @@ export const PublicCatalogService = {
       JOIN products p ON p.id = pc.product_id AND p.is_active = TRUE
       LEFT JOIN brands b ON b.id = p.brand_id
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
+      LEFT JOIN product_translations requested_translation
+        ON requested_translation.product_id = p.id
+        AND requested_translation.language_code = $4
+      LEFT JOIN LATERAL (
+        SELECT sl.code
+        FROM site_languages sl
+        WHERE sl.is_public_enabled = TRUE AND sl.is_default = TRUE
+        ORDER BY sl.sort_order, sl.code
+        LIMIT 1
+      ) default_language ON TRUE
+      LEFT JOIN product_translations default_translation
+        ON default_translation.product_id = p.id
+        AND default_translation.language_code = default_language.code
       WHERE pc.category_id = $1
         AND (
           pc.assignment_source = 'MANUAL'
@@ -101,7 +118,7 @@ export const PublicCatalogService = {
         ) THEN 0 ELSE 1 END,
         p.name,
         p.article
-      LIMIT $2 OFFSET $3`, [row.id, limit, (normalizedPage - 1) * limit]);
+      LIMIT $2 OFFSET $3`, [row.id, limit, (normalizedPage - 1) * limit, locale]);
     const products = await Promise.all(productResult.rows.map(async (product) => ({
       ...product,
       offers: await OfferService.getOffersByProductId(product.id, pricingContext, locale),

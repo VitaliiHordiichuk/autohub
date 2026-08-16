@@ -37,6 +37,23 @@ const PUBLIC_TEXT = {
     unavailable:
       "Out of stock",
   },
+
+  ru: {
+    ownStock:
+      "Наш склад",
+
+    partnerStock:
+      "Доступно под заказ",
+
+    ownAvailable:
+      "Есть сегодня",
+
+    orderAvailable:
+      "Под заказ",
+
+    unavailable:
+      "Нет в наличии",
+  },
 };
 
 
@@ -360,6 +377,26 @@ function formatUkrainianDays(
 }
 
 
+function formatRussianDays(days) {
+  const lastTwo = days % 100;
+  const last = days % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) {
+    return `${days} дней`;
+  }
+
+  if (last === 1) {
+    return `${days} день`;
+  }
+
+  if (last >= 2 && last <= 4) {
+    return `${days} дня`;
+  }
+
+  return `${days} дней`;
+}
+
+
 function buildAvailabilityText(
   offer,
   locale
@@ -397,6 +434,15 @@ function buildAvailabilityText(
     return deliveryDays === 1
       ? "Delivery in 1 day"
       : `Delivery in ${deliveryDays} days`;
+  }
+
+  if (locale === "ru") {
+    return (
+      "Доставка " +
+      formatRussianDays(
+        deliveryDays
+      )
+    );
   }
 
   return (

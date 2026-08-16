@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { selectCheckoutItems } from "./CheckoutService.js";
 import {
+  buildOrderComment,
   cartHasRemainingItems,
   selectReservedCartItems,
 } from "../use-cases/checkout/SubmitOrder.js";
@@ -45,4 +46,23 @@ test("после частичного заказа оставляет неотм
 
 test("закрывает корзину, если заказаны все позиции", () => {
   assert.equal(cartHasRemainingItems(cartItems, cartItems), false);
+});
+
+test("добавляет VIN и просьбу о проверке в комментарий заказа", () => {
+  const comment = buildOrderComment({
+    comment: "Позвонить перед отправкой",
+    vinCheckRequested: true,
+    vin: "WDB12345678901234",
+  });
+
+  assert.match(comment, /ПЕРЕВІРИТИ ЗА VIN/);
+  assert.match(comment, /VIN: WDB12345678901234/);
+  assert.match(comment, /Позвонить перед отправкой/);
+});
+
+test("не создаёт заказ с некорректным VIN для проверки", () => {
+  assert.throws(
+    () => buildOrderComment({ vinCheckRequested: true, vin: "SHORT" }),
+    /VIN має містити 17 символів/
+  );
 });

@@ -76,6 +76,15 @@ const OFFER_TEXT = {
     delivery: (days) => `Delivery in ${days} days`,
     available: "In stock",
   },
+  ru: {
+    ownStock: "Наш склад",
+    partnerStock: "Доступно под заказ",
+    unavailable: "Нет в наличии",
+    availableToday: "Есть сегодня",
+    onOrder: "Под заказ",
+    delivery: (days) => `Доставка ${days} дн.`,
+    available: "В наличии",
+  },
 };
 
 

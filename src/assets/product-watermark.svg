@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 260">
+  <g fill="none" stroke="#a8782d" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="132" cy="150" r="88" stroke-width="5"/>
+    <path d="M238 135c51-39 111-48 184-37l63 2c58-46 120-69 187-70 83-1 143 34 210 73 14 8 28 17 41 26-50-13-94-18-140-18-66 0-125 7-184 22H412c-57-19-114-18-174 2Z" stroke-width="5"/>
+    <path d="M489 100c51 3 101 3 151 0 50-3 97-6 145 6M519 93c39-35 88-51 145-52 64-1 112 22 158 57M230 141c43-20 87-27 132-23 27 2 48 8 66 18M207 220h703" stroke-width="3"/>
+  </g>
+  <path d="M28 154c87-10 173-10 260 0-87 12-173 12-260 0Z" fill="#a8782d"/>
+  <text x="132" y="190" text-anchor="middle" fill="#555" font-family="Georgia,serif" font-size="118" font-weight="700">M</text>
+  <text x="260" y="200" fill="#a8782d" font-family="Arial,sans-serif" font-size="112" font-weight="900" letter-spacing="20">MAKA</text>
+  <text x="676" y="199" fill="#555" font-family="Arial,sans-serif" font-size="63" font-weight="600">.com.ua</text>
+</svg>

@@ -10,6 +10,7 @@ import { CustomerPricingService } from "./CustomerPricingService.js";
 import { OfferService } from "./OfferService.js";
 
 const IMAGE_FIELDS = ["desktop", "tablet", "mobile"];
+const HOMEPAGE_TIME_ZONE = "Europe/Kyiv";
 const MIME_EXTENSIONS = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -25,7 +26,23 @@ function positiveId(value, label = "ідентифікатор") {
 }
 
 function normalizeLocale(value) {
-  return String(value || "").toLowerCase() === "en" ? "en" : "uk";
+  const locale = String(value || "").toLowerCase();
+  return ["uk", "en", "ru"].includes(locale) ? locale : "uk";
+}
+
+export function homepageDateInKyiv(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Некоректна дата головної сторінки");
+  }
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: HOMEPAGE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function cleanText(value, label, maxLength) {
@@ -122,11 +139,20 @@ function filesBySlot(files = []) {
 function presentBanner(row, locale) {
   if (!row) return null;
   const english = locale === "en";
+  const russian = locale === "ru";
   return {
     id: Number(row.id),
     scheduledDate: row.scheduled_date || null,
-    title: english ? row.title_en : row.title_uk,
-    description: english ? row.description_en : row.description_uk,
+    title: english
+      ? row.title_en
+      : russian
+        ? row.title_ru || row.title_uk
+        : row.title_uk,
+    description: english
+      ? row.description_en
+      : russian
+        ? row.description_ru || row.description_uk
+        : row.description_uk,
     images: {
       desktop: row.desktop_image_url,
       tablet: row.tablet_image_url,
@@ -143,6 +169,8 @@ function presentAdminBanner(row) {
     descriptionUk: row.description_uk,
     titleEn: row.title_en,
     descriptionEn: row.description_en,
+    titleRu: row.title_ru || row.title_uk,
+    descriptionRu: row.description_ru || row.description_uk,
     images: {
       desktop: row.desktop_image_url,
       tablet: row.tablet_image_url,
@@ -171,6 +199,12 @@ function bannerValues(data, current = null) {
     descriptionEn: data.descriptionEn === undefined
       ? current?.description_en
       : cleanText(data.descriptionEn, "Опис англійською", 1200),
+    titleRu: data.titleRu === undefined
+      ? current?.title_ru || current?.title_uk
+      : cleanText(data.titleRu, "Заголовок російською", 180),
+    descriptionRu: data.descriptionRu === undefined
+      ? current?.description_ru || current?.description_uk
+      : cleanText(data.descriptionRu, "Опис російською", 1200),
     isActive: optionalBoolean(data.isActive, current ? Boolean(current.is_active) : true),
   };
 }
@@ -204,8 +238,8 @@ function featureValues(data, current = null) {
   const discount = rawDiscount === null || rawDiscount === undefined || rawDiscount === ""
     ? null
     : Number(rawDiscount);
-  if (featureType === "PROMOTION" && (!Number.isFinite(discount) || discount <= 0 || discount >= 100)) {
-    throw new Error("Для акції вкажіть знижку від 0,01% до 99,99%");
+  if (discount !== null && (!Number.isFinite(discount) || discount <= 0 || discount >= 100)) {
+    throw new Error("Знижка має бути від 0,01% до 99,99%");
   }
   const sortOrder = Number(data.sortOrder ?? current?.sort_order ?? 100);
   if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 100000) {
@@ -213,7 +247,7 @@ function featureValues(data, current = null) {
   }
   return {
     featureType,
-    discountPercent: featureType === "PROMOTION" ? Number(discount.toFixed(2)) : null,
+    discountPercent: featureType === "PROMOTION" ? discount : null,
     startsOn: data.startsOn === undefined
       ? current?.starts_on ?? null
       : optionalDate(data.startsOn, "Початок показу"),
@@ -249,6 +283,8 @@ async function listFeatureRows(where, values, db = pool) {
        WHERE pt.product_id = p.id AND pt.language_code = 'uk' LIMIT 1) AS name_uk,
       (SELECT pt.name FROM product_translations pt
        WHERE pt.product_id = p.id AND pt.language_code = 'en' LIMIT 1) AS name_en,
+      (SELECT pt.name FROM product_translations pt
+       WHERE pt.product_id = p.id AND pt.language_code = 'ru' LIMIT 1) AS name_ru,
       (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id
        ORDER BY pi.priority, pi.id LIMIT 1) AS image_url
     FROM homepage_product_features f
@@ -261,7 +297,7 @@ async function listFeatureRows(where, values, db = pool) {
 export const HomepageContentService = {
   async getPublic({ locale: requestedLocale, userId = null, date = null } = {}, db = pool) {
     const locale = normalizeLocale(requestedLocale);
-    const displayDate = optionalDate(date, "Дата") || new Date().toISOString().slice(0, 10);
+    const displayDate = optionalDate(date, "Дата") || homepageDateInKyiv();
     const [bannerResult, featureRows, pricingContext] = await Promise.all([
       db.query(`
         SELECT * FROM homepage_banners
@@ -323,13 +359,15 @@ export const HomepageContentService = {
       const result = await db.query(`
         INSERT INTO homepage_banners(
           scheduled_date, title_uk, description_uk, title_en, description_en,
+          title_ru, description_ru,
           desktop_image_url, tablet_image_url, mobile_image_url,
           desktop_storage_key, tablet_storage_key, mobile_storage_key,
           is_active, created_by, updated_by
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15)
         RETURNING *`, [
         values.scheduledDate, values.titleUk, values.descriptionUk,
         values.titleEn, values.descriptionEn,
+        values.titleRu, values.descriptionRu,
         uploaded.desktop.url, uploaded.tablet.url, uploaded.mobile.url,
         uploaded.desktop.storageKey, uploaded.tablet.storageKey, uploaded.mobile.storageKey,
         values.isActive, positiveId(userId, "користувач"),
@@ -357,12 +395,14 @@ export const HomepageContentService = {
         UPDATE homepage_banners SET
           scheduled_date=$2, title_uk=$3, description_uk=$4,
           title_en=$5, description_en=$6,
-          desktop_image_url=$7, tablet_image_url=$8, mobile_image_url=$9,
-          desktop_storage_key=$10, tablet_storage_key=$11, mobile_storage_key=$12,
-          is_active=$13, updated_by=$14, updated_at=CURRENT_TIMESTAMP
+          title_ru=$7, description_ru=$8,
+          desktop_image_url=$9, tablet_image_url=$10, mobile_image_url=$11,
+          desktop_storage_key=$12, tablet_storage_key=$13, mobile_storage_key=$14,
+          is_active=$15, updated_by=$16, updated_at=CURRENT_TIMESTAMP
         WHERE id=$1 RETURNING *`, [
         id, values.scheduledDate, values.titleUk, values.descriptionUk,
         values.titleEn, values.descriptionEn,
+        values.titleRu, values.descriptionRu,
         uploaded.desktop?.url || current.desktop_image_url,
         uploaded.tablet?.url || current.tablet_image_url,
         uploaded.mobile?.url || current.mobile_image_url,
