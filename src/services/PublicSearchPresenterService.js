@@ -1,6 +1,7 @@
 import {
   pool,
 } from "../config/db.js";
+import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 
 
 const PUBLIC_TEXT = {
@@ -284,6 +285,15 @@ function localizeProduct(
       Number(product.id)
     );
 
+  const image =
+    ProductPlaceholderService
+      .getProductImage({
+        ...product,
+        imageUrls:
+          localized?.imageUrls ??
+          [],
+      });
+
   return {
     ...product,
 
@@ -295,13 +305,7 @@ function localizeProduct(
       localized?.translationLocale ??
       null,
 
-    imageUrl:
-      localized?.imageUrls?.[0] ??
-      null,
-
-    imageUrls:
-      localized?.imageUrls ??
-      [],
+    ...image,
   };
 }
 

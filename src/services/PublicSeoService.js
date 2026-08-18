@@ -4,6 +4,7 @@ import { CustomerPricingService } from "./CustomerPricingService.js";
 import { OfferService } from "./OfferService.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
+import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 
 const PUBLIC_LOCALES = new Set(["uk", "en", "ru"]);
 
@@ -257,6 +258,8 @@ export const PublicSeoService = {
           } : null,
         } : null,
         images: publicCard.product.imageUrls || [],
+        placeholderImageUrl: ProductPlaceholderService.productPlaceholderUrl(publicCard.product),
+        hasRealImage: publicCard.product.hasRealImage === true,
         alternateNames: [...new Set(
           translations
             .map((item) => item.name)
@@ -395,11 +398,17 @@ export const PublicSeoService = {
       const offer = offers
         .filter((item) => item.isAvailable && Number.isFinite(Number(item.retailPrice)))
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0];
+      const image = ProductPlaceholderService.getProductImage({
+        ...product,
+        imageUrl: product.image_url,
+      });
       return {
         id: Number(product.id),
         article: product.article,
         name: product.name,
-        imageUrl: product.image_url || null,
+        imageUrl: image.imageUrl,
+        hasRealImage: image.hasRealImage,
+        isPlaceholder: image.isPlaceholder,
         offer: offer ? mapPublicOffer(offer) : null,
       };
     }));

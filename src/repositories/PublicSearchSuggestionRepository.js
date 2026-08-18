@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { normalizeArticle } from "../services/articleEngine/normalize.js";
+import { ProductPlaceholderService } from "../services/ProductPlaceholderService.js";
 
 function publicLocale(value) {
   const locale = String(value || "").toLowerCase();
@@ -77,13 +78,21 @@ export const PublicSearchSuggestionRepository = {
       LIMIT $4
     `, [articleQuery, rawQuery, safeLocale, safeLimit]);
 
-    return result.rows.map((row) => ({
-      id: Number(row.id),
-      article: row.article,
-      normalized: row.article_normalized,
-      name: row.name,
-      manufacturer: row.manufacturer || null,
-      imageUrl: row.image_url || null,
-    }));
+    return result.rows.map((row) => {
+      const image = ProductPlaceholderService.getProductImage({
+        ...row,
+        imageUrl: row.image_url,
+      });
+      return {
+        id: Number(row.id),
+        article: row.article,
+        normalized: row.article_normalized,
+        name: row.name,
+        manufacturer: row.manufacturer || null,
+        imageUrl: image.imageUrl,
+        hasRealImage: image.hasRealImage,
+        isPlaceholder: image.isPlaceholder,
+      };
+    });
   },
 };

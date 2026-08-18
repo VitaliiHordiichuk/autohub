@@ -201,6 +201,38 @@ export const ProductImageService = {
     return this.list(product, db);
   },
 
+  async downloadProcessed(productId, imageUrl, db = pool) {
+    const product = positiveId(productId, "productId");
+    const requestedUrl = String(imageUrl || "").trim();
+    if (!requestedUrl) throw new Error("Не вказано фото для завантаження");
+
+    const result = await db.query(`SELECT p.article,pi.processed_storage_key_1600
+      FROM product_images pi
+      JOIN products p ON p.id=pi.product_id
+      WHERE pi.product_id=$1
+        AND (pi.url=$2 OR pi.original_url=$2 OR pi.processed_url_1600=$2
+          OR pi.processed_url_1200=$2 OR pi.processed_url_800=$2 OR pi.processed_url_400=$2)
+      ORDER BY pi.priority,pi.id LIMIT 1`, [product, requestedUrl]);
+    const row = result.rows[0];
+    if (!row) throw new Error("Фото товару не знайдено");
+    if (!row.processed_storage_key_1600) throw new Error("Оброблене фото ще не готове");
+
+    const config = storageConfig();
+    const source = await client(config).send(new GetObjectCommand({
+      Bucket: config.bucket,
+      Key: row.processed_storage_key_1600,
+    }));
+    const safeArticle = String(row.article || product)
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/^-+|-+$/g, "") || String(product);
+
+    return {
+      buffer: await bodyToBuffer(source.Body),
+      contentType: source.ContentType || "image/webp",
+      fileName: `${safeArticle}-maka.webp`,
+    };
+  },
+
   async recoverPending(db = pool) {
     const result = await db.query(`SELECT id FROM product_images
       WHERE processing_status='PROCESSING' ORDER BY id LIMIT 20`);

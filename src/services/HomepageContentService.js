@@ -8,6 +8,7 @@ import {
 import { pool } from "../config/db.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { OfferService } from "./OfferService.js";
+import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 
 const IMAGE_FIELDS = ["desktop", "tablet", "mobile"];
 const HOMEPAGE_TIME_ZONE = "Europe/Kyiv";
@@ -278,7 +279,8 @@ function presentAdminFeature(row) {
 
 async function listFeatureRows(where, values, db = pool) {
   const result = await db.query(`
-    SELECT f.*, p.article, p.name,
+    SELECT f.*, p.article, p.article_normalized, p.name,
+      COALESCE(b.name, pm.name) AS brand,
       (SELECT pt.name FROM product_translations pt
        WHERE pt.product_id = p.id AND pt.language_code = 'uk' LIMIT 1) AS name_uk,
       (SELECT pt.name FROM product_translations pt
@@ -289,6 +291,8 @@ async function listFeatureRows(where, values, db = pool) {
        ORDER BY pi.priority, pi.id LIMIT 1) AS image_url
     FROM homepage_product_features f
     JOIN products p ON p.id = f.product_id
+    LEFT JOIN brands b ON b.id = p.brand_id
+    LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
     ${where}
     ORDER BY f.sort_order, f.id`, values);
   return result.rows;
@@ -318,6 +322,12 @@ export const HomepageContentService = {
       const offer = offers
         .filter((item) => item.isAvailable && item.retailPrice !== null)
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0] || null;
+      const name = row[`name_${locale}`] || row.name_uk || row.name;
+      const image = ProductPlaceholderService.getProductImage({
+        ...row,
+        name,
+        imageUrl: row.image_url,
+      });
       return {
         id: Number(row.id),
         featureType: row.feature_type,
@@ -325,8 +335,10 @@ export const HomepageContentService = {
         product: {
           id: Number(row.product_id),
           article: row.article,
-          name: row[`name_${locale}`] || row.name_uk || row.name,
-          imageUrl: row.image_url || "/landing/product-placeholder.svg",
+          name,
+          imageUrl: image.imageUrl,
+          hasRealImage: image.hasRealImage,
+          isPlaceholder: image.isPlaceholder,
         },
         offer: offer ? {
           id: offer.id,

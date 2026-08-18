@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { OfferService } from "./OfferService.js";
+import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 
 function localizedName(row, locale) {
   if (locale === "en") return row.name_en || row.name;
@@ -78,7 +79,7 @@ export const PublicCatalogService = {
           )
         )`, [row.id]);
     const productResult = await db.query(`
-      SELECT p.id, p.article,
+      SELECT p.id, p.article, p.article_normalized,
              COALESCE(requested_translation.name, default_translation.name, p.name) AS name,
              b.name AS brand_name,
              pm.name AS manufacturer,
@@ -119,10 +120,20 @@ export const PublicCatalogService = {
         p.name,
         p.article
       LIMIT $2 OFFSET $3`, [row.id, limit, (normalizedPage - 1) * limit, locale]);
-    const products = await Promise.all(productResult.rows.map(async (product) => ({
-      ...product,
-      offers: await OfferService.getOffersByProductId(product.id, pricingContext, locale),
-    })));
+    const products = await Promise.all(productResult.rows.map(async (product) => {
+      const image = ProductPlaceholderService.getProductImage({
+        ...product,
+        category: localizedName(row, locale),
+        imageUrl: product.image_url,
+      });
+      return {
+        ...product,
+        image_url: image.imageUrl,
+        hasRealImage: image.hasRealImage,
+        isPlaceholder: image.isPlaceholder,
+        offers: await OfferService.getOffersByProductId(product.id, pricingContext, locale),
+      };
+    }));
     return {
       category: {
         id: Number(row.id), slug: row.slug, name: localizedName(row, locale),
