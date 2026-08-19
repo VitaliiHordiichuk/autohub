@@ -1,9 +1,12 @@
-import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 import { pool } from "../config/db.js";
+import { logCustomerActivity } from "./CustomerActivityService.js";
+import {
+  hashPassword,
+  verifyPassword,
+} from "./PasswordSecurityService.js";
 
-const PASSWORD_SALT_ROUNDS = 12;
 const TOKEN_EXPIRES_IN =
   process.env.AUTH_TOKEN_EXPIRES_IN || "7d";
 
@@ -133,6 +136,8 @@ function createToken(user) {
     {
       sub: String(user.id),
       role: user.roleName,
+      authVersion: Number(user.authVersion || 0),
+      mustChangePassword: Boolean(user.mustChangePassword),
     },
     getJwtSecret(),
     {
@@ -153,10 +158,14 @@ function mapAuthResult(row) {
       email: row.email,
       role: row.role_name,
       isActive: row.is_active,
+      staffNumber: row.staff_number || null,
+      mustChangePassword: Boolean(row.must_change_password),
+      lastLoginAt: row.last_login_at || null,
     },
     customer: row.customer_id
       ? {
           id: row.customer_id,
+          customerNumber: row.customer_number,
           customerType: row.customer_type,
           priceGroupId: row.price_group_id,
           priceGroupName: row.price_group_name,
@@ -182,8 +191,13 @@ async function findAuthUserByEmail(
       u.email,
       u.password_hash,
       u.is_active,
+      u.staff_number,
+      u.must_change_password,
+      u.last_login_at,
+      u.auth_version,
       r.name AS role_name,
       c.id AS customer_id,
+      c.customer_number,
       c.customer_type,
       c.price_group_id,
       pg.name AS price_group_name,
@@ -217,8 +231,13 @@ async function findAuthUserById(
       u.email,
       u.password_hash,
       u.is_active,
+      u.staff_number,
+      u.must_change_password,
+      u.last_login_at,
+      u.auth_version,
       r.name AS role_name,
       c.id AS customer_id,
+      c.customer_number,
       c.customer_type,
       c.price_group_id,
       pg.name AS price_group_name,
@@ -312,10 +331,7 @@ export const AuthService = {
         );
       }
 
-      const passwordHash = await bcrypt.hash(
-        password,
-        PASSWORD_SALT_ROUNDS
-      );
+      const passwordHash = await hashPassword(password);
 
       const userResult = await client.query(
         `
@@ -343,7 +359,7 @@ export const AuthService = {
 
       const userId = userResult.rows[0].id;
 
-      await client.query(
+      const customerResult = await client.query(
         `
           INSERT INTO customers (
             user_id,
@@ -351,10 +367,21 @@ export const AuthService = {
             price_group_id,
             is_active
           )
-          VALUES ($1, 'REGISTERED', $2, TRUE);
+          VALUES ($1, 'REGISTERED', $2, TRUE)
+          RETURNING id, customer_number;
         `,
         [userId, priceGroupId]
       );
+
+      await logCustomerActivity(client, {
+        customerId: customerResult.rows[0].id,
+        type: "REGISTERED",
+        description: "Клієнт зареєструвався на сайті",
+        actorUserId: userId,
+        metadata: {
+          customerNumber: customerResult.rows[0].customer_number,
+        },
+      });
 
       await client.query(
         `
@@ -390,6 +417,8 @@ export const AuthService = {
         token: createToken({
           id: authUser.id,
           roleName: authUser.role_name,
+          authVersion: authUser.auth_version,
+          mustChangePassword: authUser.must_change_password,
         }),
       };
     } catch (error) {
@@ -418,45 +447,58 @@ export const AuthService = {
       );
     }
 
-    const authUser =
-      await findAuthUserByEmail(email);
+    const client = await pool.connect();
 
-    if (!authUser) {
-      throw createError(
-        "Неправильний email або пароль",
-        401
-      );
-    }
+    try {
+      await client.query("BEGIN");
+      const authUser = await findAuthUserByEmail(email, client);
 
-    if (!authUser.is_active) {
-      throw createError(
-        "Користувача заблоковано",
-        403
-      );
-    }
+      if (!authUser) {
+        throw createError("Неправильний email або пароль", 401);
+      }
 
-    const passwordMatches =
-      await bcrypt.compare(
+      if (!authUser.is_active) {
+        throw createError("Користувача заблоковано", 403);
+      }
+
+      const passwordMatches = await verifyPassword(
         password,
         authUser.password_hash
       );
 
-    if (!passwordMatches) {
-      throw createError(
-        "Неправильний email або пароль",
-        401
+      if (!passwordMatches) {
+        throw createError("Неправильний email або пароль", 401);
+      }
+
+      await client.query(
+        `UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [authUser.id]
       );
+      await logCustomerActivity(client, {
+        customerId: authUser.customer_id,
+        type: "LOGIN",
+        description: "Клієнт увійшов до акаунта",
+        actorUserId: authUser.id,
+      });
+      const refreshed = await findAuthUserById(authUser.id, client);
+      await client.query("COMMIT");
+      const result = mapAuthResult(refreshed);
+
+      return {
+        ...result,
+        token: createToken({
+          id: refreshed.id,
+          roleName: refreshed.role_name,
+          authVersion: refreshed.auth_version,
+          mustChangePassword: refreshed.must_change_password,
+        }),
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
-
-    const result = mapAuthResult(authUser);
-
-    return {
-      ...result,
-      token: createToken({
-        id: authUser.id,
-        roleName: authUser.role_name,
-      }),
-    };
   },
 
   async getCurrentUser(userId) {
@@ -562,5 +604,65 @@ export const AuthService = {
       issuer: "autohub-backend",
       audience: "autohub-client",
     });
+  },
+
+  async verifySessionToken(token) {
+    const payload = this.verifyToken(token);
+    const userId = Number(payload.sub);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw createError("Сесія недійсна", 401);
+    }
+
+    const result = await pool.query(
+      `
+        SELECT
+          u.id,
+          u.is_active,
+          u.auth_version,
+          u.must_change_password,
+          r.name AS role_name
+        FROM users u
+        JOIN roles r ON r.id = u.role_id
+        WHERE u.id = $1
+        LIMIT 1;
+      `,
+      [userId]
+    );
+    const user = result.rows[0];
+    const tokenVersion = Number(payload.authVersion || 0);
+
+    if (
+      !user ||
+      !user.is_active ||
+      Number(user.auth_version || 0) !== tokenVersion
+    ) {
+      throw createError("Сесія недійсна або завершилася", 401);
+    }
+
+    return {
+      userId: Number(user.id),
+      role: user.role_name,
+      authVersion: Number(user.auth_version || 0),
+      mustChangePassword: Boolean(user.must_change_password),
+    };
+  },
+
+  async createSessionForUser(userId) {
+    const authUser = await findAuthUserById(userId);
+
+    if (!authUser || !authUser.is_active) {
+      throw createError("Користувача не знайдено або заблоковано", 401);
+    }
+
+    return {
+      ...mapAuthResult(authUser),
+      token: createToken({
+        id: authUser.id,
+        roleName: authUser.role_name,
+        authVersion: authUser.auth_version,
+        mustChangePassword: authUser.must_change_password,
+      }),
+    };
   },
 };

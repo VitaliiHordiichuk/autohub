@@ -1,4 +1,5 @@
 import { AuthService } from "../services/AuthService.js";
+import { PasswordResetService } from "../services/PasswordResetService.js";
 
 const COOKIE_NAME = "autohub_token";
 const COOKIE_MAX_AGE =
@@ -120,6 +121,59 @@ export async function updateProfile(req, res) {
       user: result.user,
       customer: result.customer,
       phoneVerificationReset: result.phoneVerificationReset,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+export async function forgotPassword(req, res) {
+  try {
+    await PasswordResetService.requestReset({
+      identifier: req.body?.identifier,
+      locale: req.body?.locale,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      message:
+        "Якщо акаунт знайдено, ми надіслали інструкцію на його email",
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+export async function resetPassword(req, res) {
+  try {
+    await PasswordResetService.resetWithToken({
+      token: req.body?.token,
+      password: req.body?.password,
+      ipAddress: req.ip,
+    });
+
+    res.clearCookie(COOKIE_NAME, clearCookieOptions());
+    return res.json({ success: true });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+export async function changePassword(req, res) {
+  try {
+    await PasswordResetService.changeForcedPassword({
+      userId: req.auth.userId,
+      password: req.body?.password,
+      ipAddress: req.ip,
+    });
+    const result = await AuthService.createSessionForUser(req.auth.userId);
+
+    res.cookie(COOKIE_NAME, result.token, cookieOptions());
+    return res.json({
+      success: true,
+      user: result.user,
+      customer: result.customer,
     });
   } catch (error) {
     return sendError(res, error);

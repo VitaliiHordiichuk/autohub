@@ -74,6 +74,11 @@ import { productPlaceholderRouter } from "./routes/product-placeholder.routes.js
 
 export const app = express();
 
+app.set(
+  "trust proxy",
+  process.env.TRUST_PROXY === "false" ? false : 1
+);
+
 const allowedOrigins = (
   process.env.CORS_ORIGINS ||
   "http://localhost:3000"

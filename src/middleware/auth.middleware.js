@@ -20,17 +20,19 @@ function getToken(req) {
   );
 }
 
-function attachAuth(req, token) {
-  const payload =
-    AuthService.verifyToken(token);
-
-  req.auth = {
-    userId: Number(payload.sub),
-    role: payload.role,
-  };
+async function attachAuth(req, token) {
+  req.auth = await AuthService.verifySessionToken(token);
 }
 
-export function optionalAuth(req, res, next) {
+function isPasswordChangeRoute(req) {
+  return [
+    "/api/auth/me",
+    "/api/auth/change-password",
+    "/api/auth/logout",
+  ].some((path) => req.originalUrl?.split("?")[0] === path);
+}
+
+export async function optionalAuth(req, res, next) {
   const token = getToken(req);
 
   if (!token) {
@@ -39,7 +41,7 @@ export function optionalAuth(req, res, next) {
   }
 
   try {
-    attachAuth(req, token);
+    await attachAuth(req, token);
     return next();
   } catch {
     return res.status(401).json({
@@ -51,7 +53,7 @@ export function optionalAuth(req, res, next) {
 }
 
 
-export function optionalAuthSilent(
+export async function optionalAuthSilent(
   req,
   res,
   next
@@ -65,7 +67,7 @@ export function optionalAuthSilent(
   }
 
   try {
-    attachAuth(req, token);
+    await attachAuth(req, token);
   } catch {
     req.auth = null;
   }
@@ -73,7 +75,7 @@ export function optionalAuthSilent(
   return next();
 }
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const token = getToken(req);
 
   if (!token) {
@@ -84,7 +86,19 @@ export function requireAuth(req, res, next) {
   }
 
   try {
-    attachAuth(req, token);
+    await attachAuth(req, token);
+
+    if (
+      req.auth.mustChangePassword &&
+      !isPasswordChangeRoute(req)
+    ) {
+      return res.status(403).json({
+        success: false,
+        code: "PASSWORD_CHANGE_REQUIRED",
+        error: "Потрібно створити новий пароль",
+      });
+    }
+
     return next();
   } catch {
     return res.status(401).json({
