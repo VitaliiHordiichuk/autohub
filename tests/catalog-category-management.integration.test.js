@@ -80,6 +80,12 @@ test("администратор создаёт основную группу и
   assert.equal(storedChild?.parent?.id, rootCategoryId);
 });
 
+test("аксессуары отображаются первой основной группой каталога", async () => {
+  const tree = await PublicCatalogService.getTree("ru");
+
+  assert.equal(tree[0]?.slug, "accessories");
+});
+
 test("товар без подходящего правила автоматически попадает в группу Остальное", async () => {
   const article = `OTHER${Date.now()}`;
   const inserted = await pool.query(`
