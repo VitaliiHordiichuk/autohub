@@ -102,6 +102,39 @@ export const PublicCatalogService = {
       LEFT JOIN product_translations default_translation
         ON default_translation.product_id = p.id
         AND default_translation.language_code = default_language.code
+      LEFT JOIN LATERAL (
+        SELECT TRUE AS has_available_offer
+        FROM product_offers po
+        LEFT JOIN warehouses w ON w.id = po.warehouse_id
+        LEFT JOIN suppliers s
+          ON s.id = COALESCE(po.supplier_id, w.supplier_id)
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(SUM(sr.quantity), 0) AS reserved_quantity
+          FROM stock_reservations sr
+          WHERE sr.product_offer_id = po.id
+            AND (
+              sr.status = 'ORDER_PENDING'
+              OR (
+                sr.status = 'ACTIVE'
+                AND (
+                  sr.order_id IS NOT NULL
+                  OR sr.reserved_until IS NULL
+                  OR sr.reserved_until > CURRENT_TIMESTAMP
+                )
+              )
+            )
+        ) reservations ON TRUE
+        WHERE po.product_id = p.id
+          AND po.is_available = TRUE
+          AND po.is_hidden = FALSE
+          AND GREATEST(
+            po.quantity - COALESCE(reservations.reserved_quantity, 0),
+            0
+          ) > 0
+          AND (w.id IS NULL OR w.is_active = TRUE)
+          AND (s.id IS NULL OR s.is_active = TRUE)
+        LIMIT 1
+      ) availability ON TRUE
       WHERE pc.category_id = $1
         AND (
           pc.assignment_source = 'MANUAL'
@@ -113,10 +146,14 @@ export const PublicCatalogService = {
           )
         )
       ORDER BY
-        CASE WHEN EXISTS (
-          SELECT 1 FROM product_images pi_order
-          WHERE pi_order.product_id = p.id
-        ) THEN 0 ELSE 1 END,
+        CASE
+          WHEN availability.has_available_offer IS TRUE THEN 0
+          WHEN EXISTS (
+            SELECT 1 FROM product_images pi_order
+            WHERE pi_order.product_id = p.id
+          ) THEN 1
+          ELSE 2
+        END,
         p.name,
         p.article
       LIMIT $2 OFFSET $3`, [row.id, limit, (normalizedPage - 1) * limit, locale]);

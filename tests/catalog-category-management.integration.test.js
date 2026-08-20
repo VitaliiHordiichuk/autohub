@@ -8,9 +8,12 @@ import { PublicCatalogService } from "../src/services/PublicCatalogService.js";
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 let rootCategoryId;
 let childCategoryId;
+let childCategorySlug;
 let fixtureProductId;
 let accessoryProductId;
 let inactiveAccessoryProductId;
+let fallbackProductId;
+const sortingProductIds = [];
 
 before(async () => {
   const product = await pool.query(`
@@ -23,6 +26,16 @@ before(async () => {
 });
 
 after(async () => {
+  if (sortingProductIds.length) {
+    await pool.query("DELETE FROM product_offers WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
+    await pool.query("DELETE FROM product_images WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
+    await pool.query("DELETE FROM product_categories WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
+    await pool.query("DELETE FROM products WHERE id = ANY($1::integer[])", [sortingProductIds]);
+  }
+  if (fallbackProductId) {
+    await pool.query("DELETE FROM product_categories WHERE product_id = $1", [fallbackProductId]);
+    await pool.query("DELETE FROM products WHERE id = $1", [fallbackProductId]);
+  }
   if (accessoryProductId) {
     await pool.query("DELETE FROM product_categories WHERE product_id = $1", [accessoryProductId]);
     await pool.query("DELETE FROM products WHERE id = $1", [accessoryProductId]);
@@ -56,6 +69,7 @@ test("администратор создаёт основную группу и
     nameEn: `Test subgroup ${suffix}`,
   });
   childCategoryId = child.id;
+  childCategorySlug = child.slug;
 
   const categories = await AdminCatalogCategoryService.listCategories();
   const storedRoot = categories.find((category) => category.id === rootCategoryId);
@@ -64,6 +78,28 @@ test("администратор создаёт основную группу и
   assert.equal(storedRoot.parent, null);
   assert.equal(storedRoot.hasChildren, true);
   assert.equal(storedChild?.parent?.id, rootCategoryId);
+});
+
+test("товар без подходящего правила автоматически попадает в группу Остальное", async () => {
+  const article = `OTHER${Date.now()}`;
+  const inserted = await pool.query(`
+    INSERT INTO products(article, article_normalized, name, is_active)
+    VALUES($1, $1, 'Уникальная тестовая позиция', TRUE)
+    RETURNING id
+  `, [article]);
+  fallbackProductId = Number(inserted.rows[0].id);
+
+  const assigned = await pool.query(`
+    SELECT c.slug, pc.assignment_source, pc.confidence
+    FROM product_categories pc
+    JOIN categories c ON c.id = pc.category_id
+    WHERE pc.product_id = $1
+  `, [fallbackProductId]);
+
+  assert.equal(assigned.rowCount, 1);
+  assert.equal(assigned.rows[0].slug, "other");
+  assert.equal(assigned.rows[0].assignment_source, "AUTO_RULE");
+  assert.equal(Number(assigned.rows[0].confidence), 0);
 });
 
 test("товар получает выбранную вручную подгруппу", async () => {
@@ -144,4 +180,61 @@ test("неактивный товар не увеличивает публичн
   const after = afterTree.find((category) => category.slug === "accessories");
   assert.equal(after?.directProductCount, before.directProductCount);
   assert.equal(after?.productCount, before.productCount);
+});
+
+test("каталог показывает сначала наличие, затем фото без наличия, затем остальные позиции", async () => {
+  const articleSuffix = `${Date.now()}${Math.random().toString(16).slice(2, 8)}`;
+  const fixtures = [
+    { key: "availableWithoutPhoto", article: `SORTA${articleSuffix}`, name: "Я Товар в наличии" },
+    { key: "unavailableWithPhoto", article: `SORTB${articleSuffix}`, name: "А Товар без наличия с фото" },
+    { key: "unavailableWithoutPhoto", article: `SORTC${articleSuffix}`, name: "Б Товар без наличия и фото" },
+  ];
+
+  const ids = {};
+  for (const fixture of fixtures) {
+    const inserted = await pool.query(`
+      INSERT INTO products(article, article_normalized, name, is_active)
+      VALUES($1, $1, $2, TRUE)
+      RETURNING id
+    `, [fixture.article, fixture.name]);
+    const productId = Number(inserted.rows[0].id);
+    ids[fixture.key] = productId;
+    sortingProductIds.push(productId);
+
+    await pool.query("DELETE FROM product_categories WHERE product_id = $1", [productId]);
+    await pool.query(`
+      INSERT INTO product_categories(product_id, category_id, assignment_source, confidence)
+      VALUES($1, $2, 'MANUAL', 100)
+    `, [productId, childCategoryId]);
+  }
+
+  await pool.query(`
+    INSERT INTO product_offers(
+      product_id, quantity, purchase_price, retail_price,
+      source_type, is_available, is_hidden
+    )
+    VALUES($1, 5, 10, 20, 'OWN_STOCK', TRUE, FALSE)
+  `, [ids.availableWithoutPhoto]);
+
+  await pool.query(`
+    INSERT INTO product_images(product_id, url, priority)
+    VALUES($1, $2, 0)
+  `, [ids.unavailableWithPhoto, `https://example.com/${articleSuffix}.webp`]);
+
+  const result = await PublicCatalogService.getCategoryProducts({
+    slug: childCategorySlug,
+    locale: "ru",
+  });
+
+  assert.deepEqual(
+    result.products.map((product) => Number(product.id)),
+    [
+      ids.availableWithoutPhoto,
+      ids.unavailableWithPhoto,
+      ids.unavailableWithoutPhoto,
+    ],
+  );
+  assert.equal(result.products[0].offers.length, 1);
+  assert.equal(result.products[1].hasRealImage, true);
+  assert.equal(result.products[2].hasRealImage, false);
 });
