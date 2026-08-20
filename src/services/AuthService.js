@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 
 import { pool } from "../config/db.js";
 import { logCustomerActivity } from "./CustomerActivityService.js";
@@ -36,6 +37,19 @@ function normalizePhone(value) {
   return String(value || "")
     .trim()
     .replace(/[^\d+]/g, "");
+}
+
+function normalizeRegistrationPhone(value) {
+  const raw = String(value || "").trim();
+  const phoneNumber = raw.startsWith("+")
+    ? parsePhoneNumberFromString(raw)
+    : parsePhoneNumberFromString(raw, "UA");
+
+  if (!phoneNumber || !phoneNumber.isValid()) {
+    throw createError("Некоректний номер телефону");
+  }
+
+  return phoneNumber.number;
 }
 
 function normalizeUkrainianPhone(value) {
@@ -266,7 +280,7 @@ export const AuthService = {
     const lastName = normalizeText(
       input.lastName
     );
-    const phone = normalizePhone(input.phone);
+    const phone = normalizeRegistrationPhone(input.phone);
     const email = normalizeEmail(input.email);
     const password = String(input.password || "");
 

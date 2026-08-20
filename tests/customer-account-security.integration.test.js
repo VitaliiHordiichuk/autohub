@@ -30,7 +30,7 @@ test("реєстрація автоматично створює унікаль�
   const registered = await AuthService.register({
     firstName: "Security",
     lastName: "Test",
-    phone: "+380671230001",
+    phone: "067 123 00 01",
     email: `security-register-${suffix}@autohub.local`,
     password: "InitialPassword42",
   });
@@ -38,6 +38,7 @@ test("реєстрація автоматично створює унікаль�
   createdCustomerIds.push(Number(registered.customer.id));
 
   assert.match(registered.customer.customerNumber, /^MAKA-[0-9]{6}$/);
+  assert.equal(registered.user.phone, "+380671230001");
   assert.ok(Number(registered.customer.customerNumber.slice(5)) >= 1358);
 });
 
