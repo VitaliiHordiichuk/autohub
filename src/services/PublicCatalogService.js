@@ -84,7 +84,13 @@ export const PublicCatalogService = {
              b.name AS brand_name,
              pm.name AS manufacturer,
              (SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id
-               ORDER BY pi.priority,pi.id LIMIT 1) AS image_url
+               ORDER BY pi.priority,pi.id LIMIT 1) AS image_url,
+             ARRAY(
+               SELECT pi.url
+               FROM product_images pi
+               WHERE pi.product_id = p.id
+               ORDER BY pi.priority, pi.id
+             ) AS image_urls
       FROM product_categories pc
       JOIN products p ON p.id = pc.product_id AND p.is_active = TRUE
       LEFT JOIN brands b ON b.id = p.brand_id
@@ -162,10 +168,12 @@ export const PublicCatalogService = {
         ...product,
         category: localizedName(row, locale),
         imageUrl: product.image_url,
+        imageUrls: product.image_urls,
       });
       return {
         ...product,
         image_url: image.imageUrl,
+        image_urls: image.imageUrls,
         hasRealImage: image.hasRealImage,
         isPlaceholder: image.isPlaceholder,
         offers: await OfferService.getOffersByProductId(product.id, pricingContext, locale),

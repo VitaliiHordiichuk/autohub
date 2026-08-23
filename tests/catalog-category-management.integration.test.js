@@ -224,8 +224,12 @@ test("каталог показывает сначала наличие, зат�
 
   await pool.query(`
     INSERT INTO product_images(product_id, url, priority)
-    VALUES($1, $2, 0)
-  `, [ids.unavailableWithPhoto, `https://example.com/${articleSuffix}.webp`]);
+    VALUES($1, $2, 0), ($1, $3, 1)
+  `, [
+    ids.unavailableWithPhoto,
+    `https://example.com/${articleSuffix}-primary.webp`,
+    `https://example.com/${articleSuffix}-secondary.webp`,
+  ]);
 
   const result = await PublicCatalogService.getCategoryProducts({
     slug: childCategorySlug,
@@ -242,5 +246,9 @@ test("каталог показывает сначала наличие, зат�
   );
   assert.equal(result.products[0].offers.length, 1);
   assert.equal(result.products[1].hasRealImage, true);
+  assert.deepEqual(result.products[1].image_urls, [
+    `https://example.com/${articleSuffix}-primary.webp`,
+    `https://example.com/${articleSuffix}-secondary.webp`,
+  ]);
   assert.equal(result.products[2].hasRealImage, false);
 });
