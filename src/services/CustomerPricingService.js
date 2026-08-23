@@ -1,6 +1,32 @@
 import { pool } from "../config/db.js";
 import { WarehousePricingService } from "./WarehousePricingService.js";
 
+function normalizeRetailPrice(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return null;
+  }
+
+  const price = Number(value);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function normalizeMinimumSalePrice(value, retailPrice) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return retailPrice;
+  }
+
+  const price = Number(value);
+  return Number.isFinite(price) && price >= 0 ? price : null;
+}
+
 export const CustomerPricingService = {
   async getContext(userId, db = pool) {
     if (!userId) {
@@ -33,7 +59,14 @@ export const CustomerPricingService = {
         ? (await db.query(`
             SELECT id, name, discount_percent, pricing_mode
             FROM price_groups
-            ORDER BY discount_percent, id
+            ORDER BY
+              CASE UPPER(name)
+                WHEN 'REGISTERED' THEN 1
+                WHEN 'GOLD' THEN 2
+                WHEN 'VIP' THEN 3
+                ELSE 4
+              END,
+              id
           `)).rows.map((group) => ({
             id: Number(group.id),
             name: group.name,
@@ -67,10 +100,14 @@ export const CustomerPricingService = {
   },
 
   price({ retailPrice, minimumSalePrice }, context) {
-    if (retailPrice === null || retailPrice === undefined) return null;
-    const minimum = minimumSalePrice ?? retailPrice;
+    const retail = normalizeRetailPrice(retailPrice);
+    if (retail === null) return null;
+
+    const minimum = normalizeMinimumSalePrice(minimumSalePrice, retail);
+    if (minimum === null) return null;
+
     return WarehousePricingService.calculateCustomerPrice({
-      retailPrice,
+      retailPrice: retail,
       minimumSalePrice: minimum,
       discountPercent: context?.discountPercent ?? 0,
       isVip: context?.isVip === true,
@@ -80,16 +117,13 @@ export const CustomerPricingService = {
   priceMatrix({ retailPrice, minimumSalePrice }, context) {
     if (context?.showAllPrices !== true) return null;
 
-    const retail = Number(retailPrice);
-    const minimum = Number(minimumSalePrice ?? retailPrice);
+    const retail = normalizeRetailPrice(retailPrice);
+    if (retail === null) return null;
 
-    if (!Number.isFinite(retail) || !Number.isFinite(minimum)) return null;
+    const minimum = normalizeMinimumSalePrice(minimumSalePrice, retail);
+    if (minimum === null) return null;
 
-    const rows = [{
-      key: "RETAIL",
-      name: "Розница",
-      price: Number(retail.toFixed(2)),
-    }];
+    const rows = [];
 
     for (const group of context.priceGroups || []) {
       if (
