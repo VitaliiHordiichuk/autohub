@@ -57,6 +57,7 @@ import adminAutomaticTranslationRoutes
 import { customerManagementRouter } from "./routes/customer-management.routes.js";
 import { adminEmployeeRouter } from "./routes/admin-employee.routes.js";
 import { adminProductImageRouter } from "./routes/admin-product-image.routes.js";
+import { adminProductRouter } from "./routes/admin-product.routes.js";
 import { adminCatalogCategoryRouter } from "./routes/admin-catalog-category.routes.js";
 import { clientSearchHistoryRouter } from "./routes/client-search-history.routes.js";
 import { clientOrderRouter } from "./routes/client-order.routes.js";
@@ -123,6 +124,7 @@ app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
 app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 app.use("/api/seo", seoRouter);
 app.use("/api/products", productPlaceholderRouter);
+app.use("/api/admin/products", adminProductRouter);
 
 app.use(
   "/api/admin",

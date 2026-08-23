@@ -34,7 +34,9 @@ before(async () => {
       SELECT DISTINCT ON (r.name) u.id, u.auth_version, r.name AS role
       FROM users u
       JOIN roles r ON r.id = u.role_id
-      WHERE r.name IN ('ADMIN', 'MANAGER') AND u.is_active = TRUE
+      WHERE r.name IN ('ADMIN', 'MANAGER')
+        AND u.is_active = TRUE
+        AND u.must_change_password = FALSE
       ORDER BY r.name, u.id;
     `
   );
@@ -90,4 +92,66 @@ test("администратор получает группы каталога"
   const body = await response.json();
   assert.equal(body.success, true);
   assert.ok(Array.isArray(body.categories));
+});
+
+test("менеджер навсегда скрывает товар без наличия, сохраняя журнал", async () => {
+  const brand = await pool.query(
+    "SELECT id FROM brands ORDER BY id LIMIT 1"
+  );
+  const article = `REMOVE${Date.now()}`;
+  const product = await pool.query(
+    `
+      INSERT INTO products(
+        brand_id,
+        article,
+        article_normalized,
+        name
+      )
+      VALUES($1, $2, $2, 'Remove test product')
+      RETURNING id
+    `,
+    [brand.rows[0].id, article]
+  );
+  const productId = Number(product.rows[0].id);
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/admin/products/${productId}/permanent`,
+      {
+        method: "DELETE",
+        headers: {
+          Cookie: `autohub_token=${tokenFor("MANAGER")}`,
+        },
+      }
+    );
+
+    assert.equal(response.status, 200);
+
+    const state = await pool.query(
+      `
+        SELECT
+          p.is_active,
+          EXISTS(
+            SELECT 1
+            FROM product_removal_log log
+            WHERE log.product_id = p.id
+          ) AS was_logged
+        FROM products p
+        WHERE p.id = $1
+      `,
+      [productId]
+    );
+
+    assert.equal(state.rows[0].is_active, false);
+    assert.equal(state.rows[0].was_logged, true);
+  } finally {
+    await pool.query(
+      "DELETE FROM product_removal_log WHERE product_id = $1",
+      [productId]
+    );
+    await pool.query(
+      "DELETE FROM products WHERE id = $1",
+      [productId]
+    );
+  }
 });
