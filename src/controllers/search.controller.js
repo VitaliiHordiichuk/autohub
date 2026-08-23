@@ -161,6 +161,10 @@ export async function searchByArticle(
         article,
         searchResult,
         publicResult,
+        analyticsResult: {
+          productCard,
+          family: familyCards,
+        },
         requestedLocale,
       });
 

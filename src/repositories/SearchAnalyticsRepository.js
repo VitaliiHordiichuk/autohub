@@ -85,11 +85,14 @@ export const SearchAnalyticsRepository = {
               retail_price,
               quantity,
               source_type,
+              supplier_name,
+              warehouse_name,
               sort_position
             )
             VALUES (
               $1, $2, $3, $4, $5,
-              $6, $7, $8, $9, $10
+              $6, $7, $8, $9, $10,
+              $11, $12
             );
           `,
           [
@@ -102,6 +105,8 @@ export const SearchAnalyticsRepository = {
             result.retailPrice,
             result.quantity,
             result.sourceType,
+            result.supplierName,
+            result.warehouseName,
             result.sortPosition,
           ]
         );

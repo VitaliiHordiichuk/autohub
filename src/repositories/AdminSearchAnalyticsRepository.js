@@ -7,20 +7,35 @@ function buildFilterValues({
   days,
   status,
   search,
+  date,
 }) {
   return [
     days,
     status,
     search || null,
+    date || null,
   ];
 }
 
 
 const FILTER_SQL = `
   se.event_type = 'SEARCH'
-  AND se.created_at >=
-    CURRENT_TIMESTAMP -
-    ($1::integer * INTERVAL '1 day')
+  AND (
+    (
+      $4::date IS NULL
+      AND se.created_at >=
+        CURRENT_TIMESTAMP -
+        ($1::integer * INTERVAL '1 day')
+    )
+    OR (
+      $4::date IS NOT NULL
+      AND (
+        se.created_at
+          AT TIME ZONE 'UTC'
+          AT TIME ZONE 'Europe/Kyiv'
+      )::date = $4::date
+    )
+  )
   AND (
     $2::text = 'ALL'
     OR (
@@ -136,6 +151,12 @@ function mapResult(row) {
     sourceType:
       row.source_type,
 
+    supplierName:
+      row.supplier_name,
+
+    warehouseName:
+      row.warehouse_name,
+
     sortPosition:
       numeric(row.sort_position),
   };
@@ -228,6 +249,7 @@ export const AdminSearchAnalyticsRepository = {
     days,
     status,
     search,
+    date,
     page,
     limit,
   }) {
@@ -239,6 +261,7 @@ export const AdminSearchAnalyticsRepository = {
         days,
         status,
         search,
+        date,
       });
 
     const offset =
@@ -609,6 +632,10 @@ export const AdminSearchAnalyticsRepository = {
                       ser.quantity,
                     'source_type',
                       ser.source_type,
+                    'supplier_name',
+                      ser.supplier_name,
+                    'warehouse_name',
+                      ser.warehouse_name,
                     'sort_position',
                       ser.sort_position
                   )
@@ -631,8 +658,8 @@ export const AdminSearchAnalyticsRepository = {
               se.created_at DESC,
               se.id DESC
 
-            LIMIT $4
-            OFFSET $5;
+            LIMIT $5
+            OFFSET $6;
           `,
           [
             ...filterValues,

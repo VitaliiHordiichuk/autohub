@@ -21,6 +21,7 @@ test(
         days: 90,
         status: "NOT_FOUND",
         search: "A271",
+        date: "",
         page: 3,
         limit: 50,
       }
@@ -43,9 +44,30 @@ test(
         days: 30,
         status: "ALL",
         search: "",
+        date: "",
         page: 1,
         limit: 25,
       }
+    );
+  }
+);
+
+
+test(
+  "принимает только реальную календарную дату",
+  () => {
+    assert.equal(
+      normalizeAnalyticsQuery({
+        date: "2026-08-21",
+      }).date,
+      "2026-08-21"
+    );
+
+    assert.equal(
+      normalizeAnalyticsQuery({
+        date: "2026-02-31",
+      }).date,
+      ""
     );
   }
 );

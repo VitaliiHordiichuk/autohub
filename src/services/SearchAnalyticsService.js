@@ -2,6 +2,8 @@ import {
   createHash,
 } from "node:crypto";
 
+import geoip from "geoip-lite";
+
 import {
   SearchAnalyticsRepository,
 } from "../repositories/SearchAnalyticsRepository.js";
@@ -94,6 +96,7 @@ function resolveCity(req) {
       ]
     ) ||
     decodeHeader(
+      headers["cf-ipcity"] ||
       headers.cfipcity
     ) ||
     decodeHeader(
@@ -116,6 +119,9 @@ function resolveCountryCode(req) {
     ] ||
       headers.cfipcountry ||
       headers[
+        "cf-ipcountry"
+      ] ||
+      headers[
         "x-client-country"
       ],
     10
@@ -126,6 +132,33 @@ function resolveCountryCode(req) {
 function resolveClientIp(req) {
   const headers =
     requestHeaders(req);
+
+  for (const headerName of [
+    "cf-connecting-ip",
+    "true-client-ip",
+    "x-real-ip",
+  ]) {
+    const value = cleanText(
+      firstHeaderValue(
+        headers[headerName]
+      ),
+      100
+    );
+
+    if (value) {
+      return value;
+    }
+  }
+
+  const proxyResolved =
+    cleanText(
+      req?.ip,
+      100
+    );
+
+  if (proxyResolved) {
+    return proxyResolved;
+  }
 
   const forwarded =
     cleanText(
@@ -146,6 +179,69 @@ function resolveClientIp(req) {
     req?.socket?.remoteAddress,
     100
   );
+}
+
+
+function normalizeClientIp(value) {
+  let ip = cleanText(
+    value,
+    100
+  );
+
+  if (!ip) {
+    return null;
+  }
+
+  if (ip.startsWith("::ffff:")) {
+    ip = ip.slice(7);
+  }
+
+  if (
+    ip.startsWith("[") &&
+    ip.includes("]")
+  ) {
+    ip = ip.slice(
+      1,
+      ip.indexOf("]")
+    );
+  } else if (
+    /^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(ip)
+  ) {
+    ip = ip.replace(/:\d+$/, "");
+  }
+
+  return ip;
+}
+
+
+export function resolveSearchLocation(req) {
+  const clientIp = normalizeClientIp(
+    resolveClientIp(req)
+  );
+
+  const location = clientIp
+    ? geoip.lookup(clientIp)
+    : null;
+
+  return {
+    clientIp,
+
+    city:
+      resolveCity(req) ||
+      cleanText(
+        location?.city,
+        150
+      ),
+
+    countryCode:
+      (
+        resolveCountryCode(req) ||
+        cleanText(
+          location?.country,
+          10
+        )
+      )?.toUpperCase() || null,
+  };
 }
 
 
@@ -185,7 +281,7 @@ function finiteNumber(value) {
 
 
 function collectResults(
-  publicResult
+  sourceResult
 ) {
   const results = [];
   const seen = new Set();
@@ -268,6 +364,18 @@ function collectResults(
             50
           ),
 
+        supplierName:
+          cleanText(
+            offer?.supplier?.name,
+            255
+          ),
+
+        warehouseName:
+          cleanText(
+            offer?.warehouse?.name,
+            255
+          ),
+
         sortPosition:
           results.length,
       });
@@ -275,7 +383,7 @@ function collectResults(
   }
 
   const productCard =
-    publicResult?.productCard;
+    sourceResult?.productCard;
 
   if (productCard) {
     addProduct(
@@ -309,7 +417,7 @@ function collectResults(
 
   for (
     const item of
-      publicResult?.family || []
+      sourceResult?.family || []
   ) {
     addProduct(
       item.product ?? item,
@@ -328,11 +436,16 @@ export const SearchAnalyticsService = {
     article,
     searchResult,
     publicResult = null,
+    analyticsResult = null,
     requestedLocale = null,
   }) {
     try {
+      const location =
+        resolveSearchLocation(req);
+
       const results =
         collectResults(
+          analyticsResult ||
           publicResult
         );
 
@@ -413,14 +526,14 @@ export const SearchAnalyticsService = {
             offersCount,
 
           city:
-            resolveCity(req),
+            location.city,
 
           countryCode:
-            resolveCountryCode(req),
+            location.countryCode,
 
           ipHash:
             hashIp(
-              resolveClientIp(req)
+              location.clientIp
             ),
 
           userAgent:
