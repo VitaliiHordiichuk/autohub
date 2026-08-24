@@ -576,6 +576,48 @@ async function seedSearchFixture() {
       ]]
     );
 
+    let supplierResult =
+      await db.query(
+        `
+          SELECT id
+          FROM suppliers
+          WHERE name = $1
+          ORDER BY id
+          LIMIT 1;
+        `,
+        [SEARCH_FIXTURE.supplierName]
+      );
+
+    if (!supplierResult.rows[0]) {
+      supplierResult =
+        await db.query(
+          `
+            INSERT INTO suppliers (
+              name,
+              type,
+              is_active
+            )
+            VALUES ($1, 'OWN', TRUE)
+            RETURNING id;
+          `,
+          [SEARCH_FIXTURE.supplierName]
+        );
+    } else {
+      await db.query(
+        `
+          UPDATE suppliers
+          SET
+            type = 'OWN',
+            is_active = TRUE
+          WHERE id = $1;
+        `,
+        [supplierResult.rows[0].id]
+      );
+    }
+
+    const supplierId =
+      Number(supplierResult.rows[0].id);
+
     const warehouseResult =
       await db.query(
         `
@@ -591,7 +633,7 @@ async function seedSearchFixture() {
             priority
           )
           VALUES (
-            $1, $2, 'OWN', NULL,
+            $1, $2, 'OWN', $3,
             0, TRUE, TRUE, TRUE, 1
           )
           RETURNING id;
@@ -599,6 +641,7 @@ async function seedSearchFixture() {
         [
           SEARCH_FIXTURE.warehouseName,
           SEARCH_FIXTURE.warehouseCity,
+          supplierId,
         ]
       );
 

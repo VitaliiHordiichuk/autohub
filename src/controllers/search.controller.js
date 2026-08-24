@@ -70,6 +70,10 @@ export async function searchByArticle(
         );
 
     const pricingContext = await CustomerPricingService.getContext(req.auth?.userId ?? null);
+    const includeSourceDetails = [
+      "ADMIN",
+      "MANAGER",
+    ].includes(req.auth?.role);
 
     if (!searchResult.found) {
       await SearchAnalyticsService
@@ -153,6 +157,7 @@ export async function searchByArticle(
 
           productCard,
           replacementSourceCard,
+          includeSourceDetails,
         });
 
     await SearchAnalyticsService

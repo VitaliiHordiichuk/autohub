@@ -86,6 +86,15 @@ test("аксессуары отображаются первой основно�
   assert.equal(tree[0]?.slug, "accessories");
 });
 
+test("резервная группа Остальное всегда доступна в публичном каталоге", async () => {
+  const tree = await PublicCatalogService.getTree("ru");
+  const other = tree.find((category) => category.slug === "other");
+
+  assert.ok(other);
+  assert.equal(other.name, "Остальное");
+  assert.equal(other.parentId, null);
+});
+
 test("товар без подходящего правила автоматически попадает в группу Остальное", async () => {
   const article = `OTHER${Date.now()}`;
   const inserted = await pool.query(`

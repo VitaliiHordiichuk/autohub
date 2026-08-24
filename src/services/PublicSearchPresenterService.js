@@ -460,7 +460,8 @@ function buildAvailabilityText(
 
 function mapPublicOffer(
   offer,
-  locale
+  locale,
+  includeSourceDetails = false
 ) {
   const quantity =
     formatQuantity(
@@ -540,20 +541,40 @@ function mapPublicOffer(
         offer,
         locale
       ),
+
+    ...(includeSourceDetails
+      ? {
+          sourceDetails: {
+            supplierName:
+              offer.supplier?.name ??
+              null,
+
+            warehouseName:
+              offer.warehouse?.name ??
+              null,
+
+            warehouseCity:
+              offer.warehouse?.city ??
+              null,
+          },
+        }
+      : {}),
   };
 }
 
 
 function mapPublicOffers(
   offers,
-  locale
+  locale,
+  includeSourceDetails = false
 ) {
   return (offers || [])
     .map(
       (offer) =>
         mapPublicOffer(
           offer,
-          locale
+          locale,
+          includeSourceDetails
         )
     )
     .filter(Boolean);
@@ -563,7 +584,8 @@ function mapPublicOffers(
 function localizeRelated(
   relatedItems,
   names,
-  locale
+  locale,
+  includeSourceDetails = false
 ) {
   return (
     relatedItems || []
@@ -578,7 +600,8 @@ function localizeRelated(
       offers:
         mapPublicOffers(
           item.offers,
-          locale
+          locale,
+          includeSourceDetails
         ),
     })
   );
@@ -591,6 +614,7 @@ export const PublicSearchPresenterService = {
     family,
     productCard,
     replacementSourceCard = null,
+    includeSourceDetails = false,
   }) {
     const locale =
       await resolvePublicLocale(
@@ -613,15 +637,30 @@ export const PublicSearchPresenterService = {
         localizeRelated(
           family,
           names,
-          locale
+          locale,
+          includeSourceDetails
         ),
 
       replacementSourceCard: replacementSourceCard
         ? {
             product: localizeProduct(replacementSourceCard.product, names),
-            offers: mapPublicOffers(replacementSourceCard.offers, locale),
-            analogs: localizeRelated(replacementSourceCard.analogs, names, locale),
-            replacements: localizeRelated(replacementSourceCard.replacements, names, locale),
+            offers: mapPublicOffers(
+              replacementSourceCard.offers,
+              locale,
+              includeSourceDetails
+            ),
+            analogs: localizeRelated(
+              replacementSourceCard.analogs,
+              names,
+              locale,
+              includeSourceDetails
+            ),
+            replacements: localizeRelated(
+              replacementSourceCard.replacements,
+              names,
+              locale,
+              includeSourceDetails
+            ),
           }
         : null,
 
@@ -637,21 +676,24 @@ export const PublicSearchPresenterService = {
               offers:
                 mapPublicOffers(
                   productCard.offers,
-                  locale
+                  locale,
+                  includeSourceDetails
                 ),
 
               analogs:
                 localizeRelated(
                   productCard.analogs,
                   names,
-                  locale
+                  locale,
+                  includeSourceDetails
                 ),
 
               replacements:
                 localizeRelated(
                   productCard.replacements,
                   names,
-                  locale
+                  locale,
+                  includeSourceDetails
                 ),
             }
           : null,

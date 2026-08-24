@@ -4,6 +4,7 @@ import test, {
 } from "node:test";
 
 import assert from "node:assert/strict";
+import jwt from "jsonwebtoken";
 
 import { app } from "../../src/app.js";
 import { pool } from "../../src/config/db.js";
@@ -15,12 +16,51 @@ import {
 
 let server;
 let baseUrl;
+let managerUserId;
+let managerToken;
 
 const ANALYTICS_SESSION_ID =
   "api-search-analytics-test";
 
 
 before(async () => {
+  const managerRole = await pool.query(`
+    SELECT id
+    FROM roles
+    WHERE name = 'MANAGER'
+    LIMIT 1
+  `);
+  assert.ok(managerRole.rows[0], "В тестовой базе отсутствует роль MANAGER");
+
+  const manager = await pool.query(`
+    INSERT INTO users(
+      first_name,
+      email,
+      password_hash,
+      role_id,
+      is_active
+    )
+    VALUES('Search source test', $1, 'not-used', $2, TRUE)
+    RETURNING id, auth_version
+  `, [
+    `search-source-${Date.now()}@autohub.local`,
+    managerRole.rows[0].id,
+  ]);
+  managerUserId = Number(manager.rows[0].id);
+  managerToken = jwt.sign(
+    {
+      sub: String(managerUserId),
+      role: "MANAGER",
+      authVersion: Number(manager.rows[0].auth_version || 0),
+    },
+    process.env.AUTH_JWT_SECRET,
+    {
+      expiresIn: "10m",
+      issuer: "autohub-backend",
+      audience: "autohub-client",
+    }
+  );
+
   server = app.listen(0);
 
   await new Promise(
@@ -55,6 +95,11 @@ after(async () => {
       );
     }
   );
+
+  if (managerUserId) {
+    await pool.query("DELETE FROM search_events WHERE user_id = $1", [managerUserId]);
+    await pool.query("DELETE FROM users WHERE id = $1", [managerUserId]);
+  }
 
   await pool.end();
 });
@@ -156,6 +201,14 @@ test(
       Object.hasOwn(
         analogOffer,
         "warehouse"
+      ),
+      false
+    );
+
+    assert.equal(
+      Object.hasOwn(
+        analogOffer,
+        "sourceDetails"
       ),
       false
     );
@@ -292,6 +345,36 @@ test(
     assert.equal(
       shownOffer.source_type,
       "OWN_STOCK"
+    );
+  }
+);
+
+
+test(
+  "менеджер видит поставщика и склад в результатах поиска",
+  async () => {
+    const response = await fetch(
+      `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}`,
+      {
+        headers: {
+          Cookie: `autohub_token=${managerToken}`,
+        },
+      }
+    );
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const analogOffer = body.productCard.analogs[0].offers[0];
+
+    assert.deepEqual(analogOffer.sourceDetails, {
+      supplierName: SEARCH_FIXTURE.supplierName,
+      warehouseName: SEARCH_FIXTURE.warehouseName,
+      warehouseCity: SEARCH_FIXTURE.warehouseCity,
+    });
+
+    assert.equal(
+      Object.hasOwn(analogOffer, "warehouse"),
+      false
     );
   }
 );

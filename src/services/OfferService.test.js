@@ -170,8 +170,13 @@ test(
     );
 
     assert.equal(
-      offer.supplier,
-      null
+      offer.supplier?.name,
+      SEARCH_FIXTURE.supplierName
+    );
+
+    assert.equal(
+      offer.supplier?.type,
+      "OWN"
     );
   }
 );

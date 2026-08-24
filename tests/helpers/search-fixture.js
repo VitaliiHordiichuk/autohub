@@ -8,6 +8,7 @@ export const SEARCH_FIXTURE = Object.freeze({
 
   warehouseName: "AUTOHUB TEST WAREHOUSE",
   warehouseCity: "Харьков",
+  supplierName: "AUTOHUB TEST SUPPLIER",
 
   quantity: 4,
   purchasePrice: 400,
