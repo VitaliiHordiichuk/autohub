@@ -78,6 +78,73 @@ function optionalBoolean(value, fallback) {
   throw new Error("Некоректне логічне значення");
 }
 
+function storedDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function bannerPeriod(data, current = null) {
+  const currentStartsOn = storedDate(current?.starts_on ?? current?.scheduled_date);
+  const currentEndsOn = storedDate(current?.ends_on ?? current?.scheduled_date);
+  let startsOn;
+  let endsOn;
+
+  if (data.startsOn === undefined && data.endsOn === undefined) {
+    if (data.scheduledDate === undefined) {
+      startsOn = currentStartsOn;
+      endsOn = currentEndsOn;
+    } else {
+      const scheduledDate = optionalDate(data.scheduledDate, "Дата показу");
+      startsOn = scheduledDate;
+      endsOn = scheduledDate;
+    }
+  } else {
+    startsOn = data.startsOn === undefined
+      ? currentStartsOn
+      : optionalDate(data.startsOn, "Початок показу");
+    endsOn = data.endsOn === undefined
+      ? currentEndsOn
+      : optionalDate(data.endsOn, "Кінець показу");
+  }
+
+  if ((startsOn === null) !== (endsOn === null)) {
+    throw new Error("Вкажіть обидві дати періоду або очистьте обидві");
+  }
+  if (startsOn && endsOn && startsOn > endsOn) {
+    throw new Error("Дата завершення показу не може бути раніше дати початку");
+  }
+  return { startsOn, endsOn };
+}
+
+export function rotatingBannerIndex(displayDate, bannerCount) {
+  if (!Number.isInteger(bannerCount) || bannerCount <= 0) return -1;
+  const dayNumber = Math.floor(Date.parse(`${displayDate}T00:00:00Z`) / 86_400_000);
+  return ((dayNumber % bannerCount) + bannerCount) % bannerCount;
+}
+
+export async function selectHomepageBanner(displayDate, db = pool) {
+  const scheduledResult = await db.query(`
+    SELECT * FROM homepage_banners
+    WHERE is_active = TRUE
+      AND starts_on IS NOT NULL
+      AND ends_on IS NOT NULL
+      AND starts_on <= $1::date
+      AND ends_on >= $1::date
+    ORDER BY starts_on DESC, ends_on ASC, updated_at DESC, id DESC
+    LIMIT 1`, [displayDate]);
+  if (scheduledResult.rows[0]) return scheduledResult.rows[0];
+
+  const fallbackResult = await db.query(`
+    SELECT * FROM homepage_banners
+    WHERE is_active = TRUE
+      AND starts_on IS NULL
+      AND ends_on IS NULL
+    ORDER BY id`, []);
+  const index = rotatingBannerIndex(displayDate, fallbackResult.rows.length);
+  return index >= 0 ? fallbackResult.rows[index] : null;
+}
+
 function storageConfig() {
   const config = {
     endpoint: process.env.R2_ENDPOINT,
@@ -144,6 +211,9 @@ function presentBanner(row, locale) {
   return {
     id: Number(row.id),
     scheduledDate: row.scheduled_date || null,
+    startsOn: row.starts_on || row.scheduled_date || null,
+    endsOn: row.ends_on || row.scheduled_date || null,
+    showDailyFactLabel: row.show_daily_fact_label !== false,
     title: english
       ? row.title_en
       : russian
@@ -166,6 +236,9 @@ function presentAdminBanner(row) {
   return {
     id: Number(row.id),
     scheduledDate: row.scheduled_date || null,
+    startsOn: row.starts_on || row.scheduled_date || null,
+    endsOn: row.ends_on || row.scheduled_date || null,
+    showDailyFactLabel: row.show_daily_fact_label !== false,
     titleUk: row.title_uk,
     descriptionUk: row.description_uk,
     titleEn: row.title_en,
@@ -184,10 +257,12 @@ function presentAdminBanner(row) {
 }
 
 function bannerValues(data, current = null) {
+  const period = bannerPeriod(data, current);
   return {
-    scheduledDate: data.scheduledDate === undefined
-      ? current?.scheduled_date ?? null
-      : optionalDate(data.scheduledDate, "Дата показу"),
+    ...period,
+    scheduledDate: period.startsOn && period.startsOn === period.endsOn
+      ? period.startsOn
+      : null,
     titleUk: data.titleUk === undefined
       ? current?.title_uk
       : cleanText(data.titleUk, "Заголовок українською", 180),
@@ -206,8 +281,30 @@ function bannerValues(data, current = null) {
     descriptionRu: data.descriptionRu === undefined
       ? current?.description_ru || current?.description_uk
       : cleanText(data.descriptionRu, "Опис російською", 1200),
+    showDailyFactLabel: optionalBoolean(
+      data.showDailyFactLabel,
+      current?.show_daily_fact_label === undefined
+        ? true
+        : Boolean(current.show_daily_fact_label),
+    ),
     isActive: optionalBoolean(data.isActive, current ? Boolean(current.is_active) : true),
   };
+}
+
+async function ensureBannerPeriodAvailable(values, excludedId = null, db = pool) {
+  if (!values.isActive || !values.startsOn || !values.endsOn) return;
+  const result = await db.query(`
+    SELECT id FROM homepage_banners
+    WHERE is_active = TRUE
+      AND starts_on IS NOT NULL
+      AND ends_on IS NOT NULL
+      AND starts_on <= $2::date
+      AND ends_on >= $1::date
+      AND ($3::bigint IS NULL OR id <> $3::bigint)
+    LIMIT 1`, [values.startsOn, values.endsOn, excludedId]);
+  if (result.rows[0]) {
+    throw new Error("Обраний період перетинається з іншим активним банером");
+  }
 }
 
 async function findProduct(article, db = pool) {
@@ -302,14 +399,8 @@ export const HomepageContentService = {
   async getPublic({ locale: requestedLocale, userId = null, date = null } = {}, db = pool) {
     const locale = normalizeLocale(requestedLocale);
     const displayDate = optionalDate(date, "Дата") || homepageDateInKyiv();
-    const [bannerResult, featureRows, pricingContext] = await Promise.all([
-      db.query(`
-        SELECT * FROM homepage_banners
-        WHERE is_active = TRUE
-        ORDER BY
-          CASE WHEN scheduled_date = $1::date THEN 0 ELSE 1 END,
-          MD5(id::text || $1::text)
-        LIMIT 1`, [displayDate]),
+    const [bannerRow, featureRows, pricingContext] = await Promise.all([
+      selectHomepageBanner(displayDate, db),
       listFeatureRows(`WHERE f.is_active = TRUE
         AND p.is_active = TRUE
         AND (f.starts_on IS NULL OR f.starts_on <= $1::date)
@@ -351,38 +442,41 @@ export const HomepageContentService = {
     return {
       date: displayDate,
       locale,
-      banner: presentBanner(bannerResult.rows[0], locale),
+      banner: presentBanner(bannerRow, locale),
       features,
     };
   },
 
   async listBanners(db = pool) {
     const result = await db.query(`SELECT * FROM homepage_banners
-      ORDER BY scheduled_date DESC NULLS LAST, updated_at DESC, id DESC`);
+      ORDER BY starts_on DESC NULLS LAST, ends_on DESC NULLS LAST, updated_at DESC, id DESC`);
     return result.rows.map(presentAdminBanner);
   },
 
   async createBanner(data, files, userId, db = pool) {
     const values = bannerValues(data);
+    await ensureBannerPeriodAvailable(values, null, db);
     const bySlot = filesBySlot(files);
     const uploaded = {};
     try {
       for (const slot of IMAGE_FIELDS) uploaded[slot] = await uploadBannerImage(bySlot[slot], slot);
       const result = await db.query(`
         INSERT INTO homepage_banners(
-          scheduled_date, title_uk, description_uk, title_en, description_en,
+          scheduled_date, starts_on, ends_on,
+          title_uk, description_uk, title_en, description_en,
           title_ru, description_ru,
           desktop_image_url, tablet_image_url, mobile_image_url,
           desktop_storage_key, tablet_storage_key, mobile_storage_key,
-          is_active, created_by, updated_by
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15)
+          is_active, show_daily_fact_label, created_by, updated_by
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18)
         RETURNING *`, [
-        values.scheduledDate, values.titleUk, values.descriptionUk,
+        values.scheduledDate, values.startsOn, values.endsOn,
+        values.titleUk, values.descriptionUk,
         values.titleEn, values.descriptionEn,
         values.titleRu, values.descriptionRu,
         uploaded.desktop.url, uploaded.tablet.url, uploaded.mobile.url,
         uploaded.desktop.storageKey, uploaded.tablet.storageKey, uploaded.mobile.storageKey,
-        values.isActive, positiveId(userId, "користувач"),
+        values.isActive, values.showDailyFactLabel, positiveId(userId, "користувач"),
       ]);
       return presentAdminBanner(result.rows[0]);
     } catch (error) {
@@ -397,6 +491,7 @@ export const HomepageContentService = {
     const current = currentResult.rows[0];
     if (!current) throw new Error("Банер не знайдено");
     const values = bannerValues(data, current);
+    await ensureBannerPeriodAvailable(values, id, db);
     const bySlot = filesBySlot(files);
     const uploaded = {};
     try {
@@ -405,14 +500,17 @@ export const HomepageContentService = {
       }
       const result = await db.query(`
         UPDATE homepage_banners SET
-          scheduled_date=$2, title_uk=$3, description_uk=$4,
-          title_en=$5, description_en=$6,
-          title_ru=$7, description_ru=$8,
-          desktop_image_url=$9, tablet_image_url=$10, mobile_image_url=$11,
-          desktop_storage_key=$12, tablet_storage_key=$13, mobile_storage_key=$14,
-          is_active=$15, updated_by=$16, updated_at=CURRENT_TIMESTAMP
+          scheduled_date=$2, starts_on=$3, ends_on=$4,
+          title_uk=$5, description_uk=$6,
+          title_en=$7, description_en=$8,
+          title_ru=$9, description_ru=$10,
+          desktop_image_url=$11, tablet_image_url=$12, mobile_image_url=$13,
+          desktop_storage_key=$14, tablet_storage_key=$15, mobile_storage_key=$16,
+          is_active=$17, show_daily_fact_label=$18,
+          updated_by=$19, updated_at=CURRENT_TIMESTAMP
         WHERE id=$1 RETURNING *`, [
-        id, values.scheduledDate, values.titleUk, values.descriptionUk,
+        id, values.scheduledDate, values.startsOn, values.endsOn,
+        values.titleUk, values.descriptionUk,
         values.titleEn, values.descriptionEn,
         values.titleRu, values.descriptionRu,
         uploaded.desktop?.url || current.desktop_image_url,
@@ -421,7 +519,7 @@ export const HomepageContentService = {
         uploaded.desktop?.storageKey || current.desktop_storage_key,
         uploaded.tablet?.storageKey || current.tablet_storage_key,
         uploaded.mobile?.storageKey || current.mobile_storage_key,
-        values.isActive, positiveId(userId, "користувач"),
+        values.isActive, values.showDailyFactLabel, positiveId(userId, "користувач"),
       ]);
       await removeStorageObjects(IMAGE_FIELDS
         .filter((slot) => uploaded[slot])

@@ -8,6 +8,8 @@ import {
 } from "../src/services/HomepageContentService.js";
 
 const scheduledDate = "2098-11-17";
+const scheduledFrom = "2098-11-15";
+const scheduledTo = "2098-11-19";
 let bannerId;
 let featureId;
 let adminUserId;
@@ -47,14 +49,14 @@ before(async () => {
 
   const banner = await pool.query(`
     INSERT INTO homepage_banners(
-      scheduled_date, title_uk, description_uk, title_en, description_en,
+      starts_on, ends_on, title_uk, description_uk, title_en, description_en,
       title_ru, description_ru,
       desktop_image_url, tablet_image_url, mobile_image_url,
-      is_active, created_by, updated_by
-    ) VALUES($1,'Тестовий факт','Опис тестового факту','Test fact','Test fact description',
+      is_active, show_daily_fact_label, created_by, updated_by
+    ) VALUES($1,$2,'Тестовий факт','Опис тестового факту','Test fact','Test fact description',
       'Тестовый факт','Описание тестового факта',
-      '/desktop.png','/tablet.png','/mobile.png',TRUE,$2,$2)
-    RETURNING id`, [scheduledDate, adminUserId]);
+      '/desktop.png','/tablet.png','/mobile.png',TRUE,FALSE,$3,$3)
+    RETURNING id`, [scheduledFrom, scheduledTo, adminUserId]);
   bannerId = Number(banner.rows[0].id);
 });
 
@@ -64,18 +66,27 @@ after(async () => {
   await pool.end();
 });
 
-test("банер, призначений на дату, має пріоритет над резервною базою", async () => {
+test("банер з активним періодом має пріоритет над резервною базою", async () => {
   const homepage = await HomepageContentService.getPublic({
     locale: "uk",
     date: scheduledDate,
   });
   assert.equal(homepage.banner.id, bannerId);
   assert.equal(homepage.banner.title, "Тестовий факт");
+  assert.equal(homepage.banner.showDailyFactLabel, false);
   assert.deepEqual(homepage.banner.images, {
     desktop: "/desktop.png",
     tablet: "/tablet.png",
     mobile: "/mobile.png",
   });
+});
+
+test("банер поза своїм періодом не потрапляє до резервної ротації", async () => {
+  const homepage = await HomepageContentService.getPublic({
+    locale: "uk",
+    date: "2098-11-20",
+  });
+  assert.notEqual(homepage.banner?.id, bannerId);
 });
 
 test("російська локаль повертає російський публічний вміст", async () => {
