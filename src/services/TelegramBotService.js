@@ -36,13 +36,13 @@ async function poll() {
         const copy = {
           uk:verification.verified
             ? "✅ Номер підтверджено. Тепер можна надсилати VIN-запити та спілкуватися з менеджером."
-            : "Ой, цей номер не збігається з номером у вашому акаунті makahub. Перевірте номер у профілі або поділіться власним контактом.",
+            : "Ой, цей номер не збігається з номером у вашому акаунті MAKA. Перевірте номер у профілі або поділіться власним контактом.",
           en:verification.verified
             ? "✅ Phone number confirmed. You can now send VIN requests and chat with a manager."
-            : "This number does not match the phone number in your makahub account. Check your profile number or share your own contact.",
+            : "This number does not match the phone number in your MAKA account. Check your profile number or share your own contact.",
           ru:verification.verified
             ? "✅ Номер подтверждён. Теперь можно отправлять VIN-запросы и общаться с менеджером."
-            : "Ой, этот номер не совпадает с номером в вашем аккаунте makahub. Проверьте номер в профиле или поделитесь своим контактом.",
+            : "Ой, этот номер не совпадает с номером в вашем аккаунте MAKA. Проверьте номер в профиле или поделитесь своим контактом.",
         };
         await api("sendMessage", {
           chat_id:message.chat.id,
@@ -61,9 +61,9 @@ async function poll() {
         firstName: message.from?.first_name,
       });
       const connectedCopy = {
-        uk:"✅ Telegram успішно підключено до makahub. Тут надходитимуть сповіщення про замовлення.",
-        en:"✅ Telegram is now connected to makahub. Order notifications will arrive here.",
-        ru:"✅ Telegram успешно подключён к makahub. Здесь будут приходить уведомления о заказах.",
+        uk:"✅ Telegram успішно підключено до MAKA. Тут надходитимуть сповіщення про замовлення.",
+        en:"✅ Telegram is now connected to MAKA. Order notifications will arrive here.",
+        ru:"✅ Telegram успешно подключён к MAKA. Здесь будут приходить уведомления о заказах.",
       };
       const verifyCopy = {
         uk:"\n\nЩоб захистити VIN-чат від ботів, підтвердьте номер кнопкою нижче.",
@@ -75,7 +75,7 @@ async function poll() {
         chat_id: message.chat.id,
         text: connection
           ? `${connectedCopy[connection.locale] || connectedCopy.uk}${connection.role==="CLIENT"&&!connection.phoneVerified?(verifyCopy[connection.locale]||verifyCopy.uk):""}`
-          : "Посилання застаріло або вже використане. Створіть нове посилання в makahub.",
+          : "Посилання застаріло або вже використане. Створіть нове посилання в MAKA.",
         ...(connection?.role==="CLIENT"&&!connection.phoneVerified?{
           reply_markup:{keyboard:[[{text:buttonCopy[connection.locale]||buttonCopy.uk,request_contact:true}]],resize_keyboard:true,one_time_keyboard:true},
         }:{}),

@@ -287,10 +287,12 @@ export const PublicSeoService = {
         SELECT
           p.article,
           p.updated_at,
-          (SELECT pi.url FROM product_images pi
-           WHERE pi.product_id = p.id
-           ORDER BY pi.priority, pi.id
-           LIMIT 1) AS image_url
+          ARRAY(
+            SELECT pi.url
+            FROM product_images pi
+            WHERE pi.product_id = p.id
+            ORDER BY pi.priority, pi.id
+          ) AS image_urls
         FROM products p
         WHERE p.is_active = TRUE
         ORDER BY p.id
@@ -325,7 +327,8 @@ export const PublicSeoService = {
       products: productsResult.rows.map((row) => ({
         article: row.article,
         updatedAt: row.updated_at || null,
-        imageUrl: row.image_url || null,
+        imageUrl: row.image_urls?.[0] || null,
+        imageUrls: Array.isArray(row.image_urls) ? row.image_urls.filter(Boolean) : [],
       })),
       categories: categoriesResult.rows.map((row) => ({ slug: row.slug })),
       brands: brandsResult.rows.map((row) => ({

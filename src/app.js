@@ -160,7 +160,7 @@ app.use(
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
-    message: "makahub server works",
+    message: "MAKA server works",
   });
 });
 

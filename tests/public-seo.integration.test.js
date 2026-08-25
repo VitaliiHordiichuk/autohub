@@ -42,7 +42,10 @@ test("SEO товару містить Product-дані, категорію, зв
 
 test("SEO sitemap містить товар і робочу сторінку бренду", async () => {
   const sitemap = await PublicSeoService.getSitemap();
-  assert.ok(sitemap.products.some((item) => item.article === SEARCH_FIXTURE.originalArticle));
+  const product = sitemap.products.find((item) => item.article === SEARCH_FIXTURE.originalArticle);
+  assert.ok(product);
+  assert.ok(Array.isArray(product.imageUrls));
+  assert.equal(product.imageUrl, product.imageUrls[0] || null);
   const brand = sitemap.brands.find((item) => item.name === "Mercedes-Benz");
   assert.ok(brand);
 

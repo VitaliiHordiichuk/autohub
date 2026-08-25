@@ -18,7 +18,7 @@ const PORT =
 
 app.listen(PORT, () => {
   console.log(
-    `🚀 makahub server started on port ${PORT}`
+    `🚀 MAKA server started on port ${PORT}`
   );
 
   startEmailImportScheduler();

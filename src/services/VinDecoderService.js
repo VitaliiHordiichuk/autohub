@@ -7,7 +7,7 @@ export const VinDecoderService={
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),8000);
     try{
-      const response=await fetch(`${API_URL}/${encodeURIComponent(vin)}?format=json`,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"makahub/1.0"}});
+      const response=await fetch(`${API_URL}/${encodeURIComponent(vin)}?format=json`,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"MAKA/1.0"}});
       if(!response.ok)throw new Error("VIN-сервіс тимчасово недоступний");
       const data=await response.json();
       const item=data?.Results?.[0];

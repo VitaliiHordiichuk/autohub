@@ -25,7 +25,7 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
     'is_available',(p.is_active=TRUE AND po.is_available=TRUE AND po.is_hidden=FALSE
       AND (w.id IS NULL OR w.is_active=TRUE) AND (s.id IS NULL OR s.is_active=TRUE)
       AND GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)>0),
-    'source_label',COALESCE(w.name,s.name,'makahub')
+    'source_label',COALESCE(w.name,s.name,'MAKA')
   ) ORDER BY rec.created_at,rec.id)
   FROM vin_request_recommendations rec
   JOIN products p ON p.id=rec.product_id

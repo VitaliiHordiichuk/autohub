@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { pool } from "../config/db.js";
 import { ProductImageProcessor } from "./ProductImageProcessor.js";
+import { normalizeArticle } from "./articleEngine/normalize.js";
 
 const mimeExtensions = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
@@ -45,6 +46,10 @@ function publicUrl(config, key) {
   return `${config.publicBaseUrl}/${key}`;
 }
 
+function imageArticleSlug(article, productId) {
+  return normalizeArticle(article).toLowerCase() || `product-${productId}`;
+}
+
 async function removeKeys(keys) {
   const unique = [...new Set(keys.filter(Boolean))];
   if (!unique.length) return;
@@ -55,9 +60,12 @@ async function removeKeys(keys) {
 
 async function runProcessing(imageId, db = pool) {
   const id = positiveId(imageId, "imageId");
-  const rowResult = await db.query(`SELECT id,product_id,original_storage_key,
-      processed_storage_key_1600,processed_storage_key_1200,processed_storage_key_800,processed_storage_key_400
-    FROM product_images WHERE id=$1`, [id]);
+  const rowResult = await db.query(`SELECT pi.id,pi.product_id,pi.original_storage_key,
+      pi.processed_storage_key_1600,pi.processed_storage_key_1200,
+      pi.processed_storage_key_800,pi.processed_storage_key_400,p.article
+    FROM product_images pi
+    JOIN products p ON p.id=pi.product_id
+    WHERE pi.id=$1`, [id]);
   const row = rowResult.rows[0];
   if (!row?.original_storage_key) throw new Error("Оригинал изображения не найден");
   await db.query("UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL WHERE id=$1", [id]);
@@ -68,9 +76,10 @@ async function runProcessing(imageId, db = pool) {
     const source = await r2.send(new GetObjectCommand({ Bucket: config.bucket, Key: row.original_storage_key }));
     const variants = await ProductImageProcessor.process(await bodyToBuffer(source.Body));
     const revision = randomUUID();
+    const articleSlug = imageArticleSlug(row.article, row.product_id);
     const keys = {};
     for (const size of [1600, 1200, 800, 400]) {
-      const key = `products/${row.product_id}/processed/${id}-${revision}-${size}.webp`;
+      const key = `products/${row.product_id}/processed/${articleSlug}-photo-${id}-${revision}-${size}.webp`;
       await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: variants[size],
         ContentType: "image/webp", CacheControl: "public, max-age=31536000, immutable" }));
       keys[size] = key;
@@ -141,8 +150,9 @@ export const ProductImageService = {
   async upload(productId, files, db = pool) {
     const id = positiveId(productId, "productId");
     if (!files?.length) throw new Error("Выбери хотя бы одно изображение");
-    const exists = await db.query("SELECT 1 FROM products WHERE id=$1", [id]);
+    const exists = await db.query("SELECT article FROM products WHERE id=$1", [id]);
     if (!exists.rows[0]) throw new Error("Товар не найден");
+    const articleSlug = imageArticleSlug(exists.rows[0].article, id);
     const config = storageConfig();
     const r2 = client(config);
     const current = await db.query("SELECT COALESCE(MAX(priority),-1)::integer AS priority FROM product_images WHERE product_id=$1", [id]);
@@ -151,7 +161,7 @@ export const ProductImageService = {
     for (const file of files) {
       const extension = mimeExtensions.get(file.mimetype);
       if (!extension) throw new Error("Поддерживаются фотографии JPG, PNG и WEBP");
-      const storageKey = `products/${id}/originals/${randomUUID()}${extension}`;
+      const storageKey = `products/${id}/originals/${articleSlug}-photo-${randomUUID()}${extension}`;
       await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: storageKey,
         Body: file.buffer, ContentType: file.mimetype, CacheControl: "public, max-age=31536000, immutable" }));
       const url = publicUrl(config, storageKey);

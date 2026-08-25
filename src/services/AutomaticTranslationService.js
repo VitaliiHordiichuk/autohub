@@ -140,7 +140,7 @@ function getClient() {
       {
         appInfo: {
           appName:
-            "makahub",
+            "MAKA",
           appVersion:
             "0.1.0",
         },
