@@ -70,6 +70,19 @@ function optionalDate(value, label) {
   return result;
 }
 
+function optionalAnnualDate(value, label) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+  const match = String(value).trim().match(/^(\d{1,2})\.(\d{1,2})$/);
+  if (!match) {
+    throw new Error(`Поле «${label}» має бути датою у форматі ДД.ММ`);
+  }
+  const day = match[1].padStart(2, "0");
+  const month = match[2].padStart(2, "0");
+  return optionalDate(`2000-${month}-${day}`, label);
+}
+
 function optionalBoolean(value, fallback) {
   if (value === undefined) return fallback;
   if (typeof value === "boolean") return value;
@@ -80,13 +93,100 @@ function optionalBoolean(value, fallback) {
 
 function storedDate(value) {
   if (!value) return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    const year = String(value.getFullYear()).padStart(4, "0");
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
   return String(value).slice(0, 10);
 }
 
+function annualDisplayDate(value) {
+  const date = storedDate(value);
+  return date ? `${date.slice(8, 10)}.${date.slice(5, 7)}` : null;
+}
+
+function monthDayOrdinal(value) {
+  const date = storedDate(value);
+  if (!date) return null;
+  const timestamp = Date.parse(`2000-${date.slice(5, 10)}T00:00:00Z`);
+  return Number.isNaN(timestamp)
+    ? null
+    : Math.floor((timestamp - Date.parse("2000-01-01T00:00:00Z")) / 86_400_000);
+}
+
+function annualSegments(startsOn, endsOn) {
+  const start = monthDayOrdinal(startsOn);
+  const end = monthDayOrdinal(endsOn);
+  if (start === null || end === null) return [];
+  return start <= end ? [[start, end]] : [[start, 365], [0, end]];
+}
+
+export function annualDateIsWithin(displayDate, startsOn, endsOn) {
+  const current = monthDayOrdinal(displayDate);
+  if (current === null) return false;
+  return annualSegments(startsOn, endsOn)
+    .some(([start, end]) => start <= current && current <= end);
+}
+
+function annualPeriodsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+  return annualSegments(firstStart, firstEnd).some(([firstFrom, firstTo]) =>
+    annualSegments(secondStart, secondEnd).some(([secondFrom, secondTo]) =>
+      firstFrom <= secondTo && secondFrom <= firstTo));
+}
+
 function bannerPeriod(data, current = null) {
-  const currentStartsOn = storedDate(current?.starts_on ?? current?.scheduled_date);
-  const currentEndsOn = storedDate(current?.ends_on ?? current?.scheduled_date);
+  const currentRepeatsAnnually = Boolean(current?.repeats_annually);
+  const hasPeriodChanges = [
+    "scheduledDate",
+    "startsOn",
+    "endsOn",
+    "annualStartsOn",
+    "annualEndsOn",
+    "repeatsAnnually",
+  ].some((field) => data[field] !== undefined);
+
+  if (!hasPeriodChanges) {
+    return {
+      startsOn: storedDate(current?.starts_on ?? current?.scheduled_date),
+      endsOn: storedDate(current?.ends_on ?? current?.scheduled_date),
+      repeatsAnnually: currentRepeatsAnnually,
+    };
+  }
+
+  const repeatsAnnually = optionalBoolean(data.repeatsAnnually, currentRepeatsAnnually);
+  if (repeatsAnnually) {
+    const currentStartsOn = currentRepeatsAnnually
+      ? annualDisplayDate(current?.starts_on ?? current?.scheduled_date)
+      : null;
+    const currentEndsOn = currentRepeatsAnnually
+      ? annualDisplayDate(current?.ends_on ?? current?.scheduled_date)
+      : null;
+    const startsOn = optionalAnnualDate(
+      data.annualStartsOn === undefined ? currentStartsOn : data.annualStartsOn,
+      "Початок щорічного показу",
+    );
+    let endsOn = optionalAnnualDate(
+      data.annualEndsOn === undefined ? currentEndsOn : data.annualEndsOn,
+      "Кінець щорічного показу",
+    );
+    if (!startsOn && endsOn) {
+      throw new Error("Спочатку вкажіть день початку щорічного показу");
+    }
+    if (!startsOn) {
+      throw new Error("Вкажіть день і місяць щорічного показу");
+    }
+    endsOn ||= startsOn;
+    return { startsOn, endsOn, repeatsAnnually: true };
+  }
+
+  const currentStartsOn = currentRepeatsAnnually
+    ? null
+    : storedDate(current?.starts_on ?? current?.scheduled_date);
+  const currentEndsOn = currentRepeatsAnnually
+    ? null
+    : storedDate(current?.ends_on ?? current?.scheduled_date);
   let startsOn;
   let endsOn;
 
@@ -104,17 +204,18 @@ function bannerPeriod(data, current = null) {
       ? currentStartsOn
       : optionalDate(data.startsOn, "Початок показу");
     endsOn = data.endsOn === undefined
-      ? currentEndsOn
+      ? (data.startsOn === undefined ? currentEndsOn : startsOn)
       : optionalDate(data.endsOn, "Кінець показу");
+    if (startsOn && !endsOn) endsOn = startsOn;
   }
 
-  if ((startsOn === null) !== (endsOn === null)) {
-    throw new Error("Вкажіть обидві дати періоду або очистьте обидві");
+  if (!startsOn && endsOn) {
+    throw new Error("Спочатку вкажіть дату початку показу");
   }
   if (startsOn && endsOn && startsOn > endsOn) {
     throw new Error("Дата завершення показу не може бути раніше дати початку");
   }
-  return { startsOn, endsOn };
+  return { startsOn, endsOn, repeatsAnnually: false };
 }
 
 export function rotatingBannerIndex(displayDate, bannerCount) {
@@ -127,6 +228,7 @@ export async function selectHomepageBanner(displayDate, db = pool) {
   const scheduledResult = await db.query(`
     SELECT * FROM homepage_banners
     WHERE is_active = TRUE
+      AND COALESCE(repeats_annually, FALSE) = FALSE
       AND starts_on IS NOT NULL
       AND ends_on IS NOT NULL
       AND starts_on <= $1::date
@@ -135,9 +237,21 @@ export async function selectHomepageBanner(displayDate, db = pool) {
     LIMIT 1`, [displayDate]);
   if (scheduledResult.rows[0]) return scheduledResult.rows[0];
 
+  const annualResult = await db.query(`
+    SELECT * FROM homepage_banners
+    WHERE is_active = TRUE
+      AND repeats_annually = TRUE
+      AND starts_on IS NOT NULL
+      AND ends_on IS NOT NULL
+    ORDER BY updated_at DESC, id DESC`, []);
+  const annualBanner = annualResult.rows.find((row) =>
+    annualDateIsWithin(displayDate, row.starts_on, row.ends_on));
+  if (annualBanner) return annualBanner;
+
   const fallbackResult = await db.query(`
     SELECT * FROM homepage_banners
     WHERE is_active = TRUE
+      AND COALESCE(repeats_annually, FALSE) = FALSE
       AND starts_on IS NULL
       AND ends_on IS NULL
     ORDER BY id`, []);
@@ -213,6 +327,13 @@ function presentBanner(row, locale) {
     scheduledDate: row.scheduled_date || null,
     startsOn: row.starts_on || row.scheduled_date || null,
     endsOn: row.ends_on || row.scheduled_date || null,
+    repeatsAnnually: Boolean(row.repeats_annually),
+    annualStartsOn: row.repeats_annually
+      ? annualDisplayDate(row.starts_on || row.scheduled_date)
+      : null,
+    annualEndsOn: row.repeats_annually
+      ? annualDisplayDate(row.ends_on || row.scheduled_date)
+      : null,
     showDailyFactLabel: row.show_daily_fact_label !== false,
     title: english
       ? row.title_en
@@ -238,6 +359,13 @@ function presentAdminBanner(row) {
     scheduledDate: row.scheduled_date || null,
     startsOn: row.starts_on || row.scheduled_date || null,
     endsOn: row.ends_on || row.scheduled_date || null,
+    repeatsAnnually: Boolean(row.repeats_annually),
+    annualStartsOn: row.repeats_annually
+      ? annualDisplayDate(row.starts_on || row.scheduled_date)
+      : null,
+    annualEndsOn: row.repeats_annually
+      ? annualDisplayDate(row.ends_on || row.scheduled_date)
+      : null,
     showDailyFactLabel: row.show_daily_fact_label !== false,
     titleUk: row.title_uk,
     descriptionUk: row.description_uk,
@@ -260,7 +388,9 @@ function bannerValues(data, current = null) {
   const period = bannerPeriod(data, current);
   return {
     ...period,
-    scheduledDate: period.startsOn && period.startsOn === period.endsOn
+    scheduledDate: !period.repeatsAnnually
+      && period.startsOn
+      && period.startsOn === period.endsOn
       ? period.startsOn
       : null,
     titleUk: data.titleUk === undefined
@@ -293,9 +423,29 @@ function bannerValues(data, current = null) {
 
 async function ensureBannerPeriodAvailable(values, excludedId = null, db = pool) {
   if (!values.isActive || !values.startsOn || !values.endsOn) return;
+  if (values.repeatsAnnually) {
+    const result = await db.query(`
+      SELECT id, starts_on, ends_on FROM homepage_banners
+      WHERE is_active = TRUE
+        AND repeats_annually = TRUE
+        AND starts_on IS NOT NULL
+        AND ends_on IS NOT NULL
+        AND ($1::bigint IS NULL OR id <> $1::bigint)`, [excludedId]);
+    const overlap = result.rows.some((row) => annualPeriodsOverlap(
+      values.startsOn,
+      values.endsOn,
+      row.starts_on,
+      row.ends_on,
+    ));
+    if (overlap) {
+      throw new Error("Обраний щорічний період перетинається з іншим активним щорічним банером");
+    }
+    return;
+  }
   const result = await db.query(`
     SELECT id FROM homepage_banners
     WHERE is_active = TRUE
+      AND COALESCE(repeats_annually, FALSE) = FALSE
       AND starts_on IS NOT NULL
       AND ends_on IS NOT NULL
       AND starts_on <= $2::date
@@ -449,7 +599,8 @@ export const HomepageContentService = {
 
   async listBanners(db = pool) {
     const result = await db.query(`SELECT * FROM homepage_banners
-      ORDER BY starts_on DESC NULLS LAST, ends_on DESC NULLS LAST, updated_at DESC, id DESC`);
+      ORDER BY repeats_annually DESC, starts_on DESC NULLS LAST,
+        ends_on DESC NULLS LAST, updated_at DESC, id DESC`);
     return result.rows.map(presentAdminBanner);
   },
 
@@ -462,15 +613,15 @@ export const HomepageContentService = {
       for (const slot of IMAGE_FIELDS) uploaded[slot] = await uploadBannerImage(bySlot[slot], slot);
       const result = await db.query(`
         INSERT INTO homepage_banners(
-          scheduled_date, starts_on, ends_on,
+          scheduled_date, starts_on, ends_on, repeats_annually,
           title_uk, description_uk, title_en, description_en,
           title_ru, description_ru,
           desktop_image_url, tablet_image_url, mobile_image_url,
           desktop_storage_key, tablet_storage_key, mobile_storage_key,
           is_active, show_daily_fact_label, created_by, updated_by
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18)
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19)
         RETURNING *`, [
-        values.scheduledDate, values.startsOn, values.endsOn,
+        values.scheduledDate, values.startsOn, values.endsOn, values.repeatsAnnually,
         values.titleUk, values.descriptionUk,
         values.titleEn, values.descriptionEn,
         values.titleRu, values.descriptionRu,
@@ -500,16 +651,16 @@ export const HomepageContentService = {
       }
       const result = await db.query(`
         UPDATE homepage_banners SET
-          scheduled_date=$2, starts_on=$3, ends_on=$4,
-          title_uk=$5, description_uk=$6,
-          title_en=$7, description_en=$8,
-          title_ru=$9, description_ru=$10,
-          desktop_image_url=$11, tablet_image_url=$12, mobile_image_url=$13,
-          desktop_storage_key=$14, tablet_storage_key=$15, mobile_storage_key=$16,
-          is_active=$17, show_daily_fact_label=$18,
-          updated_by=$19, updated_at=CURRENT_TIMESTAMP
+          scheduled_date=$2, starts_on=$3, ends_on=$4, repeats_annually=$5,
+          title_uk=$6, description_uk=$7,
+          title_en=$8, description_en=$9,
+          title_ru=$10, description_ru=$11,
+          desktop_image_url=$12, tablet_image_url=$13, mobile_image_url=$14,
+          desktop_storage_key=$15, tablet_storage_key=$16, mobile_storage_key=$17,
+          is_active=$18, show_daily_fact_label=$19,
+          updated_by=$20, updated_at=CURRENT_TIMESTAMP
         WHERE id=$1 RETURNING *`, [
-        id, values.scheduledDate, values.startsOn, values.endsOn,
+        id, values.scheduledDate, values.startsOn, values.endsOn, values.repeatsAnnually,
         values.titleUk, values.descriptionUk,
         values.titleEn, values.descriptionEn,
         values.titleRu, values.descriptionRu,

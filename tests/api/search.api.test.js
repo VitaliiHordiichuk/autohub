@@ -351,7 +351,7 @@ test(
 
 
 test(
-  "менеджер видит поставщика и склад в результатах поиска",
+  "менеджер видит склад и все клиентские цены в результатах поиска",
   async () => {
     const response = await fetch(
       `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}`,
@@ -371,6 +371,19 @@ test(
       warehouseName: SEARCH_FIXTURE.warehouseName,
       warehouseCity: SEARCH_FIXTURE.warehouseCity,
     });
+
+    assert.deepEqual(
+      analogOffer.priceMatrix.map((row) => row.name),
+      ["Registered", "GOLD", "VIP"]
+    );
+    assert.equal(
+      analogOffer.priceMatrix.every((row) => Number.isFinite(row.price) && row.price > 0),
+      true
+    );
+    assert.equal(
+      analogOffer.priceMatrix.every((row) => row.price <= analogOffer.retailPrice),
+      true
+    );
 
     assert.equal(
       Object.hasOwn(analogOffer, "warehouse"),

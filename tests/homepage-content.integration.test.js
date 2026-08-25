@@ -11,6 +11,7 @@ const scheduledDate = "2098-11-17";
 const scheduledFrom = "2098-11-15";
 const scheduledTo = "2098-11-19";
 let bannerId;
+let annualBannerId;
 let featureId;
 let adminUserId;
 let article;
@@ -58,10 +59,25 @@ before(async () => {
       '/desktop.png','/tablet.png','/mobile.png',TRUE,FALSE,$3,$3)
     RETURNING id`, [scheduledFrom, scheduledTo, adminUserId]);
   bannerId = Number(banner.rows[0].id);
+
+  const annualBanner = await pool.query(`
+    INSERT INTO homepage_banners(
+      starts_on, ends_on, repeats_annually,
+      title_uk, description_uk, title_en, description_en,
+      title_ru, description_ru,
+      desktop_image_url, tablet_image_url, mobile_image_url,
+      is_active, created_by, updated_by
+    ) VALUES('2000-12-24','2000-12-26',TRUE,
+      'Щорічне привітання','Щорічний опис','Annual greeting','Annual description',
+      'Ежегодное поздравление','Ежегодное описание',
+      '/annual-desktop.png','/annual-tablet.png','/annual-mobile.png',TRUE,$1,$1)
+    RETURNING id`, [adminUserId]);
+  annualBannerId = Number(annualBanner.rows[0].id);
 });
 
 after(async () => {
   if (featureId) await pool.query("DELETE FROM homepage_product_features WHERE id=$1", [featureId]);
+  if (annualBannerId) await pool.query("DELETE FROM homepage_banners WHERE id=$1", [annualBannerId]);
   if (bannerId) await pool.query("DELETE FROM homepage_banners WHERE id=$1", [bannerId]);
   await pool.end();
 });
@@ -87,6 +103,17 @@ test("банер поза своїм періодом не потрапляє д
     date: "2098-11-20",
   });
   assert.notEqual(homepage.banner?.id, bannerId);
+});
+
+test("щорічний банер показується у той самий день наступного року", async () => {
+  const homepage = await HomepageContentService.getPublic({
+    locale: "uk",
+    date: "2099-12-25",
+  });
+  assert.equal(homepage.banner.id, annualBannerId);
+  assert.equal(homepage.banner.repeatsAnnually, true);
+  assert.equal(homepage.banner.annualStartsOn, "24.12");
+  assert.equal(homepage.banner.annualEndsOn, "26.12");
 });
 
 test("російська локаль повертає російський публічний вміст", async () => {

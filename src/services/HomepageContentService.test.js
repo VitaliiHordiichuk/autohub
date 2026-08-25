@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   HomepageContentService,
+  annualDateIsWithin,
   rotatingBannerIndex,
   selectHomepageBanner,
 } from "./HomepageContentService.js";
@@ -34,12 +35,43 @@ test("поза активним періодом вибирається тіль
   const db = {
     async query() {
       queryCount += 1;
-      return queryCount === 1 ? { rows: [] } : { rows: fallbackRows };
+      return queryCount < 3 ? { rows: [] } : { rows: fallbackRows };
     },
   };
   const expected = fallbackRows[rotatingBannerIndex("2026-08-25", fallbackRows.length)];
 
   assert.equal(await selectHomepageBanner("2026-08-25", db), expected);
+  assert.equal(queryCount, 3);
+});
+
+test("щорічний банер працює без прив'язки до року", async () => {
+  assert.equal(annualDateIsWithin("2026-08-25", "2000-08-25", "2000-08-25"), true);
+  assert.equal(annualDateIsWithin("2034-08-25", "2000-08-25", "2000-08-25"), true);
+  assert.equal(annualDateIsWithin("2034-08-26", "2000-08-25", "2000-08-25"), false);
+});
+
+test("щорічний період може переходити через Новий рік", () => {
+  assert.equal(annualDateIsWithin("2026-12-31", "2000-12-29", "2000-01-05"), true);
+  assert.equal(annualDateIsWithin("2027-01-03", "2000-12-29", "2000-01-05"), true);
+  assert.equal(annualDateIsWithin("2027-01-06", "2000-12-29", "2000-01-05"), false);
+});
+
+test("щорічний банер має пріоритет над резервною ротацією", async () => {
+  const annual = {
+    id: 18,
+    starts_on: "2000-08-24",
+    ends_on: "2000-08-26",
+    repeats_annually: true,
+  };
+  let queryCount = 0;
+  const db = {
+    async query() {
+      queryCount += 1;
+      return queryCount === 2 ? { rows: [annual] } : { rows: [] };
+    },
+  };
+
+  assert.equal(await selectHomepageBanner("2032-08-25", db), annual);
   assert.equal(queryCount, 2);
 });
 
@@ -62,6 +94,7 @@ test("період банера можна повністю очистити б�
     tablet_storage_key: null,
     mobile_storage_key: null,
     show_daily_fact_label: false,
+    repeats_annually: false,
     is_active: true,
   };
   let updateValues = null;
@@ -87,15 +120,16 @@ test("період банера можна повністю очистити б�
   assert.equal(updateValues[1], null);
   assert.equal(updateValues[2], null);
   assert.equal(updateValues[3], null);
+  assert.equal(updateValues[4], false);
   assert.equal(result.startsOn, null);
   assert.equal(result.endsOn, null);
   assert.equal(result.showDailyFactLabel, false);
 });
 
-test("неповний або зворотний період відхиляється", async () => {
+test("період без початку або зі зворотними датами відхиляється", async () => {
   await assert.rejects(
-    HomepageContentService.createBanner({ startsOn: "2026-12-31", endsOn: "" }, [], 1),
-    /обидві дати/,
+    HomepageContentService.createBanner({ startsOn: "", endsOn: "2026-12-31" }, [], 1),
+    /Спочатку вкажіть дату початку/,
   );
   await assert.rejects(
     HomepageContentService.createBanner({ startsOn: "2027-01-05", endsOn: "2026-12-31" }, [], 1),
@@ -122,5 +156,28 @@ test("активні періоди банерів не можуть перет�
       isActive: true,
     }, [], 1, db),
     /перетинається/,
+  );
+});
+
+test("активні щорічні періоди не можуть перетинатися", async () => {
+  const db = {
+    async query() {
+      return { rows: [{ id: 45, starts_on: "2000-12-29", ends_on: "2000-01-05" }] };
+    },
+  };
+  await assert.rejects(
+    HomepageContentService.createBanner({
+      repeatsAnnually: true,
+      annualStartsOn: "02.01",
+      annualEndsOn: "06.01",
+      titleUk: "Новий рік",
+      descriptionUk: "Привітання",
+      titleEn: "New Year",
+      descriptionEn: "Greeting",
+      titleRu: "Новый год",
+      descriptionRu: "Поздравление",
+      isActive: true,
+    }, [], 1, db),
+    /щорічний період перетинається/,
   );
 });
