@@ -194,7 +194,7 @@ test(
 
     assert.equal(
       analogOffer.availabilityText,
-      "Є сьогодні"
+      "В наявності"
     );
 
     assert.equal(

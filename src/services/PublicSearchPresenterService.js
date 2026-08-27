@@ -13,13 +13,13 @@ const PUBLIC_TEXT = {
       "Доступно під замовлення",
 
     ownAvailable:
-      "Є сьогодні",
+      "В наявності",
 
     orderAvailable:
       "Під замовлення",
 
     unavailable:
-      "Немає в наявності",
+      "Під замовлення",
   },
 
   en: {
@@ -30,13 +30,13 @@ const PUBLIC_TEXT = {
       "Available to order",
 
     ownAvailable:
-      "Available today",
+      "In stock",
 
     orderAvailable:
-      "On order",
+      "Available to order",
 
     unavailable:
-      "Out of stock",
+      "Available to order",
   },
 
   ru: {
@@ -47,13 +47,13 @@ const PUBLIC_TEXT = {
       "Доступно под заказ",
 
     ownAvailable:
-      "Есть сегодня",
+      "В наличии",
 
     orderAvailable:
       "Под заказ",
 
     unavailable:
-      "Нет в наличии",
+      "Под заказ",
   },
 };
 
