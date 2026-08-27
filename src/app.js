@@ -72,6 +72,10 @@ import { optionalAuthSilent } from "./middleware/auth.middleware.js";
 import { enforceApiErrorLanguage } from "./middleware/api-error-language.middleware.js";
 import { seoRouter } from "./routes/seo.routes.js";
 import { productPlaceholderRouter } from "./routes/product-placeholder.routes.js";
+import {
+  adminSiteContactRouter,
+  siteContactRouter,
+} from "./routes/site-contact.routes.js";
 
 export const app = express();
 
@@ -124,6 +128,7 @@ app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
 app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 app.use("/api/seo", seoRouter);
 app.use("/api/products", productPlaceholderRouter);
+app.use("/api/site/contact", siteContactRouter);
 app.use("/api/admin/products", adminProductRouter);
 
 app.use(
@@ -155,6 +160,11 @@ app.use(
 app.use(
   "/api/admin/site-languages",
   adminSiteLanguageRouter
+);
+
+app.use(
+  "/api/admin/site-contact",
+  adminSiteContactRouter
 );
 
 app.get("/", (req, res) => {
