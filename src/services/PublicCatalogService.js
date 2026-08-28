@@ -49,9 +49,14 @@ export const PublicCatalogService = {
       else roots.push(row);
     }
     for (const root of roots) {
+      root.children = root.children.filter((child) => child.directProductCount > 0);
       root.productCount = root.children.reduce((sum, child) => sum + child.directProductCount, root.directProductCount);
     }
-    return roots;
+    return roots.filter((root) => (
+      root.slug === "other"
+      || root.directProductCount > 0
+      || root.children.length > 0
+    ));
   },
 
   async getCategoryProducts({ slug, locale = "uk", page = 1, pricingContext = null }, db = pool) {

@@ -10,9 +10,12 @@ let rootCategoryId;
 let childCategoryId;
 let childCategorySlug;
 let fixtureProductId;
+let mercedesBrandId;
 let accessoryProductId;
 let inactiveAccessoryProductId;
 let fallbackProductId;
+let nonMercedesProductId;
+const mercedesGroupProductIds = [];
 const sortingProductIds = [];
 
 before(async () => {
@@ -23,6 +26,14 @@ before(async () => {
   `);
   assert.ok(product.rows[0], "Тестовый товар каталога не найден");
   fixtureProductId = Number(product.rows[0].id);
+
+  const brand = await pool.query(`
+    SELECT id FROM brands
+    WHERE LOWER(name) LIKE '%mercedes%'
+    ORDER BY id LIMIT 1
+  `);
+  assert.ok(brand.rows[0], "Бренд Mercedes-Benz не найден");
+  mercedesBrandId = Number(brand.rows[0].id);
 });
 
 after(async () => {
@@ -35,6 +46,14 @@ after(async () => {
   if (fallbackProductId) {
     await pool.query("DELETE FROM product_categories WHERE product_id = $1", [fallbackProductId]);
     await pool.query("DELETE FROM products WHERE id = $1", [fallbackProductId]);
+  }
+  if (nonMercedesProductId) {
+    await pool.query("DELETE FROM product_categories WHERE product_id = $1", [nonMercedesProductId]);
+    await pool.query("DELETE FROM products WHERE id = $1", [nonMercedesProductId]);
+  }
+  if (mercedesGroupProductIds.length) {
+    await pool.query("DELETE FROM product_categories WHERE product_id = ANY($1::integer[])", [mercedesGroupProductIds]);
+    await pool.query("DELETE FROM products WHERE id = ANY($1::integer[])", [mercedesGroupProductIds]);
   }
   if (accessoryProductId) {
     await pool.query("DELETE FROM product_categories WHERE product_id = $1", [accessoryProductId]);
@@ -95,13 +114,28 @@ test("резервная группа Остальное всегда досту
   assert.equal(other.parentId, null);
 });
 
-test("товар без подходящего правила автоматически попадает в группу Остальное", async () => {
-  const article = `OTHER${Date.now()}`;
+test("миграция сбрасывает прежние ручные назначения Mercedes", async () => {
+  const assigned = await pool.query(`
+    SELECT category.slug, pc.assignment_source
+    FROM products product
+    JOIN product_categories pc ON pc.product_id = product.id
+    JOIN categories category ON category.id = pc.category_id
+    WHERE product.article_normalized = 'A000010030164'
+    ORDER BY pc.assignment_source, category.id
+  `);
+
+  assert.equal(assigned.rowCount, 1);
+  assert.equal(assigned.rows[0].slug, "mb-group-01");
+  assert.equal(assigned.rows[0].assignment_source, "AUTO_RULE");
+});
+
+test("нераспознанный Mercedes-артикул автоматически попадает в группу Остальное", async () => {
+  const article = `N${String(Date.now()).slice(-12)}`;
   const inserted = await pool.query(`
-    INSERT INTO products(article, article_normalized, name, is_active)
-    VALUES($1, $1, 'Уникальная тестовая позиция', TRUE)
+    INSERT INTO products(brand_id, article, article_normalized, name, is_active)
+    VALUES($1, $2, $2, 'Уникальная тестовая позиция Mercedes', TRUE)
     RETURNING id
-  `, [article]);
+  `, [mercedesBrandId, article]);
   fallbackProductId = Number(inserted.rows[0].id);
 
   const assigned = await pool.query(`
@@ -115,6 +149,51 @@ test("товар без подходящего правила автоматич
   assert.equal(assigned.rows[0].slug, "other");
   assert.equal(assigned.rows[0].assignment_source, "AUTO_RULE");
   assert.equal(Number(assigned.rows[0].confidence), 0);
+});
+
+test("нераспознанный товар другого бренда не попадает в Mercedes-группу Остальное", async () => {
+  const article = `OTHER${Date.now()}`;
+  const inserted = await pool.query(`
+    INSERT INTO products(article, article_normalized, name, is_active)
+    VALUES($1, $1, 'Уникальная позиция другого бренда', TRUE)
+    RETURNING id
+  `, [article]);
+  nonMercedesProductId = Number(inserted.rows[0].id);
+
+  const assigned = await pool.query(`
+    SELECT c.slug
+    FROM product_categories pc
+    JOIN categories c ON c.id = pc.category_id
+    WHERE pc.product_id = $1
+  `, [nonMercedesProductId]);
+
+  assert.equal(assigned.rowCount, 0);
+});
+
+test("Mercedes A распределяется по двум цифрам основной группы артикула", async () => {
+  const article = `A2113200304${String(Date.now()).slice(-4)}`;
+  const inserted = await pool.query(`
+    INSERT INTO products(brand_id, article, article_normalized, name, is_active)
+    VALUES($1, $2, $2, 'Тестовая деталь подвески Mercedes', TRUE)
+    RETURNING id
+  `, [mercedesBrandId, article]);
+  const productId = Number(inserted.rows[0].id);
+  mercedesGroupProductIds.push(productId);
+
+  const assigned = await pool.query(`
+    SELECT category.slug, parent.slug AS parent_slug,
+           pc.assignment_source, pc.confidence
+    FROM product_categories pc
+    JOIN categories category ON category.id = pc.category_id
+    LEFT JOIN categories parent ON parent.id = category.parent_id
+    WHERE pc.product_id = $1
+  `, [productId]);
+
+  assert.equal(assigned.rowCount, 1);
+  assert.equal(assigned.rows[0].slug, "mb-group-32");
+  assert.equal(assigned.rows[0].parent_slug, "suspension");
+  assert.equal(assigned.rows[0].assignment_source, "AUTO_RULE");
+  assert.equal(Number(assigned.rows[0].confidence), 100);
 });
 
 test("товар получает выбранную вручную подгруппу", async () => {
@@ -143,23 +222,16 @@ test("возврат в автоматический режим удаляет �
   `, [fixtureProductId]);
   assert.ok(stored.rowCount > 0);
   assert.ok(stored.rows.every((row) => row.assignment_source === "AUTO_RULE"));
-  assert.ok(stored.rows.some((row) => row.slug === "filter-oil"));
+  assert.ok(stored.rows.some((row) => row.slug === "mb-group-18"));
 });
 
 test("Mercedes-артикул B автоматически попадает в аксессуары", async () => {
-  const brand = await pool.query(`
-    SELECT id FROM brands
-    WHERE LOWER(name) LIKE '%mercedes%'
-    ORDER BY id LIMIT 1
-  `);
-  assert.ok(brand.rows[0], "Бренд Mercedes-Benz не найден");
-
   const article = `BTEST${Date.now()}`;
   const inserted = await pool.query(`
     INSERT INTO products(brand_id, article, article_normalized, name, is_active)
     VALUES($1, $2, $2, 'Тестовый аксессуар', TRUE)
     RETURNING id
-  `, [brand.rows[0].id, article]);
+  `, [mercedesBrandId, article]);
   accessoryProductId = Number(inserted.rows[0].id);
 
   const assigned = await pool.query(`
@@ -169,7 +241,7 @@ test("Mercedes-артикул B автоматически попадает в �
     WHERE pc.product_id = $1
   `, [accessoryProductId]);
   assert.equal(assigned.rowCount, 1);
-  assert.equal(assigned.rows[0].slug, "accessories");
+  assert.equal(assigned.rows[0].slug, "mb-accessories-b");
   assert.equal(assigned.rows[0].assignment_source, "AUTO_RULE");
 });
 
@@ -178,17 +250,12 @@ test("неактивный товар не увеличивает публичн
   const before = beforeTree.find((category) => category.slug === "accessories");
   assert.ok(before);
 
-  const brand = await pool.query(`
-    SELECT id FROM brands
-    WHERE LOWER(name) LIKE '%mercedes%'
-    ORDER BY id LIMIT 1
-  `);
   const article = `BINACTIVE${Date.now()}`;
   const inserted = await pool.query(`
     INSERT INTO products(brand_id, article, article_normalized, name, is_active)
     VALUES($1, $2, $2, 'Неактивный тестовый аксессуар', FALSE)
     RETURNING id
-  `, [brand.rows[0].id, article]);
+  `, [mercedesBrandId, article]);
   inactiveAccessoryProductId = Number(inserted.rows[0].id);
 
   const afterTree = await PublicCatalogService.getTree("ru");
