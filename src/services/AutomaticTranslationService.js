@@ -87,6 +87,51 @@ function normalizeSourceText(value) {
 }
 
 
+const UNSAFE_AUTOMATIC_TRANSLATIONS = new Map([
+  [
+    "abdeckung",
+    new Map([
+      ["uk", new Set(["обсяг перекладу"])],
+      ["ru", new Set(["область применения", "охват"])],
+      ["en", new Set(["coverage"])],
+    ]),
+  ],
+]);
+
+
+export function resolveAutomaticTranslation({
+  sourceName,
+  languageCode,
+  translatedName,
+  provider,
+}) {
+  const source = String(sourceName || "").trim();
+  const translated = String(translatedName || "").trim();
+  const normalizedSource = normalizeSourceText(source);
+  const normalizedTranslation = normalizeSourceText(translated);
+  const unsafeTranslations = UNSAFE_AUTOMATIC_TRANSLATIONS
+    .get(normalizedSource)
+    ?.get(String(languageCode || "").toLowerCase());
+
+  if (
+    provider !== "MANUAL"
+    && unsafeTranslations?.has(normalizedTranslation)
+  ) {
+    return {
+      name: source,
+      provider: "IMPORT",
+      usedOriginal: true,
+    };
+  }
+
+  return {
+    name: translated,
+    provider,
+    usedOriginal: false,
+  };
+}
+
+
 function normalizeDetectedLanguage(
   value
 ) {
@@ -352,23 +397,35 @@ async function saveProductTranslations(
       continue;
     }
 
-    const name =
+    const translatedName =
       String(
         translations.get(
           languageCode
         ) || ""
       ).trim();
 
-    if (!name) {
+    if (!translatedName) {
       throw new Error(
         `Порожній переклад ${languageCode} для ${product.article}`
       );
     }
 
-    const provider =
+    const translatedProvider =
       providers.get(
         languageCode
       ) || "DEEPL";
+
+    const {
+      name,
+      provider,
+    } = resolveAutomaticTranslation({
+      sourceName:
+        product.sourceName,
+      languageCode,
+      translatedName,
+      provider:
+        translatedProvider,
+    });
 
     await AutomaticTranslationRepository
       .upsertAutomaticTranslation({
