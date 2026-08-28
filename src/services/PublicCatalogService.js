@@ -158,12 +158,15 @@ export const PublicCatalogService = {
         )
       ORDER BY
         CASE
-          WHEN availability.has_available_offer IS TRUE THEN 0
           WHEN EXISTS (
             SELECT 1 FROM product_images pi_order
             WHERE pi_order.product_id = p.id
-          ) THEN 1
-          ELSE 2
+          ) THEN 0
+          ELSE 1
+        END,
+        CASE
+          WHEN availability.has_available_offer IS TRUE THEN 0
+          ELSE 1
         END,
         p.name,
         p.article
