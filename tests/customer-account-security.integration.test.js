@@ -27,11 +27,12 @@ after(async () => {
 });
 
 test("реєстрація автоматично створює унікальний номер MAKA від 001358", async () => {
+  const email = `security-register-${suffix}@autohub.local`;
   const registered = await AuthService.register({
     firstName: "Security",
     lastName: "Test",
     phone: "067 123 00 01",
-    email: `security-register-${suffix}@autohub.local`,
+    email,
     password: "InitialPassword42",
   });
   createdUserIds.push(Number(registered.user.id));
@@ -40,6 +41,21 @@ test("реєстрація автоматично створює унікаль�
   assert.match(registered.customer.customerNumber, /^MAKA-[0-9]{6}$/);
   assert.equal(registered.user.phone, "+380671230001");
   assert.ok(Number(registered.customer.customerNumber.slice(5)) >= 1358);
+
+  await assert.rejects(
+    AuthService.register({
+      firstName: "Duplicate",
+      lastName: "Account",
+      phone: "+380671230099",
+      email,
+      password: "AnotherPassword42",
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 409);
+      assert.equal(error.apiCode, "ACCOUNT_ALREADY_EXISTS");
+      return true;
+    },
+  );
 });
 
 test("одноразове посилання змінює пароль, вимикає прапорець і не працює повторно", async () => {

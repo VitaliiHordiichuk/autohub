@@ -69,9 +69,10 @@ function normalizeUkrainianPhone(value) {
   return `+${normalized}`;
 }
 
-function createError(message, statusCode = 400) {
+function createError(message, statusCode = 400, apiCode = null) {
   const error = new Error(message);
   error.statusCode = statusCode;
+  if (apiCode) error.apiCode = apiCode;
   return error;
 }
 
@@ -303,7 +304,8 @@ export const AuthService = {
       if (existingUser) {
         throw createError(
           "Користувач із таким email уже існує",
-          409
+          409,
+          "ACCOUNT_ALREADY_EXISTS"
         );
       }
 
@@ -441,7 +443,8 @@ export const AuthService = {
       if (error.code === "23505") {
         throw createError(
           "Користувач із таким email уже існує",
-          409
+          409,
+          "ACCOUNT_ALREADY_EXISTS"
         );
       }
 

@@ -35,6 +35,7 @@ function sendError(res, error) {
 
   return res.status(statusCode).json({
     success: false,
+    ...(error.apiCode ? { code: error.apiCode } : {}),
     error:
       statusCode >= 500
         ? "Внутрішня помилка сервера"
