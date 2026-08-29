@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   resolveSearchLocation,
+  shouldRecordSearchAnalytics,
 } from "./SearchAnalyticsService.js";
 
 
@@ -89,4 +90,33 @@ test("Cloudflare location headers are recognized", () => {
     city: "Kyiv",
     countryCode: "UA",
   });
+});
+
+
+test("staff searches are excluded from analytics", () => {
+  assert.equal(
+    shouldRecordSearchAnalytics({
+      auth: { role: "ADMIN" },
+    }),
+    false
+  );
+
+  assert.equal(
+    shouldRecordSearchAnalytics({
+      auth: { role: "MANAGER" },
+    }),
+    false
+  );
+
+  assert.equal(
+    shouldRecordSearchAnalytics({
+      auth: { role: "CLIENT" },
+    }),
+    true
+  );
+
+  assert.equal(
+    shouldRecordSearchAnalytics({}),
+    true
+  );
 });

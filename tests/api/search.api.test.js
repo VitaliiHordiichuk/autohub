@@ -22,6 +22,9 @@ let managerToken;
 const ANALYTICS_SESSION_ID =
   "api-search-analytics-test";
 
+const MANAGER_ANALYTICS_SESSION_ID =
+  "api-search-manager-excluded-test";
+
 
 before(async () => {
   const managerRole = await pool.query(`
@@ -358,6 +361,8 @@ test(
       {
         headers: {
           Cookie: `autohub_token=${managerToken}`,
+          "X-Analytics-Session":
+            MANAGER_ANALYTICS_SESSION_ID,
         },
       }
     );
@@ -388,6 +393,25 @@ test(
     assert.equal(
       Object.hasOwn(analogOffer, "warehouse"),
       false
+    );
+
+    const managerAnalytics =
+      await pool.query(
+        `
+          SELECT COUNT(*)::integer AS count
+          FROM search_events
+          WHERE visitor_session_id = $1
+             OR user_id = $2;
+        `,
+        [
+          MANAGER_ANALYTICS_SESSION_ID,
+          managerUserId,
+        ]
+      );
+
+    assert.equal(
+      managerAnalytics.rows[0].count,
+      0
     );
   }
 );

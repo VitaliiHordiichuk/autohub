@@ -245,6 +245,18 @@ export function resolveSearchLocation(req) {
 }
 
 
+export function shouldRecordSearchAnalytics(req) {
+  const role = String(
+    req?.auth?.role ?? ""
+  )
+    .trim()
+    .toUpperCase();
+
+  return role !== "ADMIN" &&
+    role !== "MANAGER";
+}
+
+
 function hashIp(value) {
   if (!value) {
     return null;
@@ -439,6 +451,14 @@ export const SearchAnalyticsService = {
     analyticsResult = null,
     requestedLocale = null,
   }) {
+    if (
+      !shouldRecordSearchAnalytics(
+        req
+      )
+    ) {
+      return null;
+    }
+
     try {
       const location =
         resolveSearchLocation(req);
