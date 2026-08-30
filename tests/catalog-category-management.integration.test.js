@@ -264,7 +264,7 @@ test("неактивный товар не увеличивает публичн
   assert.equal(after?.productCount, before.productCount);
 });
 
-test("каталог всегда показывает товары с фото раньше товаров без фото", async () => {
+test("каталог сначала показывает наличие, а фото учитывает внутри группы наличия", async () => {
   const articleSuffix = `${Date.now()}${Math.random().toString(16).slice(2, 8)}`;
   const fixtures = [
     { key: "availableWithoutPhoto", article: `SORTA${articleSuffix}`, name: "Я Товар в наличии" },
@@ -315,16 +315,16 @@ test("каталог всегда показывает товары с фото 
   assert.deepEqual(
     result.products.map((product) => Number(product.id)),
     [
-      ids.unavailableWithPhoto,
       ids.availableWithoutPhoto,
+      ids.unavailableWithPhoto,
       ids.unavailableWithoutPhoto,
     ],
   );
-  assert.equal(result.products[0].hasRealImage, true);
-  assert.deepEqual(result.products[0].image_urls, [
+  assert.equal(result.products[0].offers.length, 1);
+  assert.equal(result.products[1].hasRealImage, true);
+  assert.deepEqual(result.products[1].image_urls, [
     `https://example.com/${articleSuffix}-primary.webp`,
     `https://example.com/${articleSuffix}-secondary.webp`,
   ]);
-  assert.equal(result.products[1].offers.length, 1);
   assert.equal(result.products[2].hasRealImage, false);
 });
