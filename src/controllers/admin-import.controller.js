@@ -701,6 +701,9 @@ import {
   BrandAliasRepository,
   normalizeBrandAlias,
 } from "../repositories/BrandAliasRepository.js";
+import {
+  parseImportNumber,
+} from "../services/ImportNumericService.js";
 
 
 function readColumn(
@@ -737,31 +740,23 @@ function normalizeImportedRow(
     ) ?? ""
   ).trim();
 
-  const quantity = Number(
-    String(
-      readColumn(
-        row,
-        settings.quantity_column
-      ) ?? ""
-    )
-      .trim()
-      .replace(",", ".")
-  );
+  const quantityValue =
+    readColumn(
+      row,
+      settings.quantity_column
+    );
 
-  const price = Number(
-    String(
-      readColumn(
-        row,
-        settings.price_column
-      ) ?? ""
-    )
-      .trim()
-      .replace(",", ".")
-  );
+  const priceValue =
+    readColumn(
+      row,
+      settings.price_column
+    );
 
-  const retailPrice = settings.retail_price_column
-    ? Number(String(readColumn(row, settings.retail_price_column) ?? "").trim().replace(",", "."))
-    : null;
+  const retailPriceValue =
+    readColumn(
+      row,
+      settings.retail_price_column
+    );
 
   let brand = null;
 
@@ -782,11 +777,6 @@ function normalizeImportedRow(
     }
   }
 
-  if (settings.pricing_model === "OWN_DUAL_PRICE" &&
-      (!Number.isFinite(retailPrice) || retailPrice < 0)) {
-    throw new Error(`Строка ${rowNumber}: некорректная розничная цена для артикула ${article}`);
-  }
-
   if (!article) {
     throw new Error(
       `Строка ${rowNumber}: отсутствует артикул`
@@ -799,23 +789,38 @@ function normalizeImportedRow(
     );
   }
 
-  if (
-    !Number.isFinite(quantity) ||
-    quantity < 0
-  ) {
-    throw new Error(
-      `Строка ${rowNumber}: некорректное количество для артикула ${article}`
-    );
-  }
+  const quantity = parseImportNumber(
+    quantityValue,
+    {
+      fieldName: "количество",
+      article,
+      rowNumber,
+    }
+  );
 
-  if (
-    !Number.isFinite(price) ||
-    price < 0
-  ) {
-    throw new Error(
-      `Строка ${rowNumber}: некорректная цена для артикула ${article}`
-    );
-  }
+  const price = parseImportNumber(
+    priceValue,
+    {
+      fieldName: "цена",
+      article,
+      rowNumber,
+    }
+  );
+
+  const retailPrice =
+    settings.retail_price_column ||
+    settings.pricing_model ===
+      "OWN_DUAL_PRICE"
+      ? parseImportNumber(
+          retailPriceValue,
+          {
+            fieldName:
+              "розничная цена",
+            article,
+            rowNumber,
+          }
+        )
+      : null;
 
   return {
     rowNumber,

@@ -702,6 +702,82 @@ test(
           }
         );
       }
+
+      const overflowImport =
+        await ImportService.importRows(
+          {
+            warehouseId,
+            warehouseSupplierImportId,
+            fileName:
+              "test-overflow-price.csv",
+            fileType: "CSV",
+            importMethod: "MANUAL",
+          },
+          [
+            {
+              rowNumber: 3,
+              article:
+                `OVERFLOW${token}`,
+              name:
+                "Слишком большая цена",
+              price: 100_000_000,
+              quantity: 1,
+            },
+          ]
+        );
+
+      assert.equal(
+        overflowImport.successRows,
+        0
+      );
+      assert.equal(
+        overflowImport.errors,
+        1
+      );
+
+      const overflowRows =
+        await pool.query(
+          `
+            SELECT
+              status,
+              error_message,
+              price,
+              new_price,
+              quantity
+            FROM import_rows
+            WHERE import_id = $1
+          `,
+          [overflowImport.importId]
+        );
+
+      assert.equal(
+        overflowRows.rows.length,
+        1
+      );
+      assert.equal(
+        overflowRows.rows[0].status,
+        "ERROR"
+      );
+      assert.match(
+        overflowRows.rows[0]
+          .error_message,
+        /Проверьте цену в файле/
+      );
+      assert.equal(
+        overflowRows.rows[0].price,
+        null
+      );
+      assert.equal(
+        overflowRows.rows[0].new_price,
+        null
+      );
+      assert.equal(
+        Number(
+          overflowRows.rows[0]
+            .quantity
+        ),
+        1
+      );
     } finally {
       const db = await pool.connect();
 

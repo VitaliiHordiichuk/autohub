@@ -31,6 +31,10 @@ import {
   ArticleNumberService,
 } from "./ArticleNumberService.js";
 import { WarehousePricingService } from "./WarehousePricingService.js";
+import {
+  databaseNumberOrNull,
+  OFFER_NUMBER_MAX_EXCLUSIVE,
+} from "./ImportNumericService.js";
 
 function normalizeImportContext(
   importContext
@@ -127,29 +131,6 @@ function toNullableText(
   return text.slice(0, maxLength);
 }
 
-function toNullableNumber(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return null;
-  }
-
-  const text = String(value)
-    .trim()
-    .replace(",", ".");
-
-  if (!text) {
-    return null;
-  }
-
-  const number = Number(text);
-
-  return Number.isFinite(number)
-    ? number
-    : null;
-}
-
 function buildSafeErrorRow(errorRow) {
   return {
     article: toNullableText(
@@ -160,11 +141,13 @@ function buildSafeErrorRow(errorRow) {
       errorRow?.name,
       255
     ),
-    price: toNullableNumber(
-      errorRow?.price
+    price: databaseNumberOrNull(
+      errorRow?.price,
+      OFFER_NUMBER_MAX_EXCLUSIVE
     ),
-    quantity: toNullableNumber(
-      errorRow?.quantity
+    quantity: databaseNumberOrNull(
+      errorRow?.quantity,
+      OFFER_NUMBER_MAX_EXCLUSIVE
     ),
     brand: toNullableText(
       errorRow?.brand,

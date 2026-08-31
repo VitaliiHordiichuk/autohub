@@ -1,4 +1,10 @@
 import { pool } from "../config/db.js";
+import {
+  databaseNumberOrNull,
+  IMPORT_PRICE_MAX_EXCLUSIVE,
+  OFFER_NUMBER_MAX_EXCLUSIVE,
+  PERCENT_MAX_EXCLUSIVE,
+} from "../services/ImportNumericService.js";
 
 export const ImportRepository = {
   async createImport(
@@ -98,8 +104,14 @@ export const ImportRepository = {
         importId,
         article,
         name,
-        price,
-        quantity,
+        databaseNumberOrNull(
+          price,
+          IMPORT_PRICE_MAX_EXCLUSIVE
+        ),
+        databaseNumberOrNull(
+          quantity,
+          OFFER_NUMBER_MAX_EXCLUSIVE
+        ),
         brand,
         status,
         errorMessage,
@@ -108,12 +120,30 @@ export const ImportRepository = {
         rawData === null
           ? null
           : JSON.stringify(rawData),
-        oldPrice,
-        newPrice,
-        changePercent,
-        oldQuantity,
-        newQuantity,
-        quantityChange,
+        databaseNumberOrNull(
+          oldPrice,
+          IMPORT_PRICE_MAX_EXCLUSIVE
+        ),
+        databaseNumberOrNull(
+          newPrice,
+          IMPORT_PRICE_MAX_EXCLUSIVE
+        ),
+        databaseNumberOrNull(
+          changePercent,
+          PERCENT_MAX_EXCLUSIVE
+        ),
+        databaseNumberOrNull(
+          oldQuantity,
+          OFFER_NUMBER_MAX_EXCLUSIVE
+        ),
+        databaseNumberOrNull(
+          newQuantity,
+          OFFER_NUMBER_MAX_EXCLUSIVE
+        ),
+        databaseNumberOrNull(
+          quantityChange,
+          OFFER_NUMBER_MAX_EXCLUSIVE
+        ),
       ]
     );
 

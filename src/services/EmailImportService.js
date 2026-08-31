@@ -7,6 +7,9 @@ import { simpleParser } from "mailparser";
 import { pool } from "../config/db.js";
 import { ImportService } from "./ImportService.js";
 import { ImportFileParserService } from "./ImportFileParserService.js";
+import {
+  parseImportNumber,
+} from "./ImportNumericService.js";
 
 import { EmailImportFileRepository } from "../repositories/EmailImportFileRepository.js";
 import { EmailImportRuleRepository } from "../repositories/EmailImportRuleRepository.js";
@@ -33,26 +36,14 @@ function readColumn(row, columnNumber) {
 
 
 function parseRequiredNumber(value, fieldName, article, rowNumber) {
-  const text = String(value ?? "")
-    .trim()
-    .replace(/\s/g, "")
-    .replace(",", ".");
-
-  if (!text) {
-    throw new Error(
-      `Строка ${rowNumber}: отсутствует ${fieldName} для артикула ${article || "без артикула"}`
-    );
-  }
-
-  const number = Number(text);
-
-  if (!Number.isFinite(number) || number < 0) {
-    throw new Error(
-      `Строка ${rowNumber}: некорректное значение поля «${fieldName}» для артикула ${article || "без артикула"}`
-    );
-  }
-
-  return number;
+  return parseImportNumber(
+    value,
+    {
+      fieldName,
+      article,
+      rowNumber,
+    }
+  );
 }
 
 

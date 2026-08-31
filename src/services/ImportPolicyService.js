@@ -1,3 +1,8 @@
+import {
+  clampDatabasePercent,
+} from "./ImportNumericService.js";
+
+
 export const NEW_PRODUCTS_MODES = [
   "REVIEW",
   "AUTO",
@@ -96,7 +101,7 @@ export function calculatePriceChangePercent(
       oldValue) *
     100;
 
-  return Number(change.toFixed(2));
+  return clampDatabasePercent(change);
 }
 
 export function classifyPriceChange({
