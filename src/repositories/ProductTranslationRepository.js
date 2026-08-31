@@ -238,4 +238,62 @@ export const ProductTranslationRepository = {
       result.rows[0]
     );
   },
+
+
+  async saveManual(
+    {
+      productId,
+      languageCode,
+      name,
+      description,
+    }
+  ) {
+    const db = await pool.connect();
+
+    try {
+      await db.query("BEGIN");
+
+      const translation =
+        await this.upsert(
+          {
+            productId,
+            languageCode,
+            name,
+            description,
+          },
+          db
+        );
+
+      await db.query(
+        `
+          UPDATE products p
+          SET
+            name = $3,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE p.id = $1
+            AND EXISTS (
+              SELECT 1
+              FROM site_languages sl
+              WHERE sl.code = $2
+                AND sl.is_default = TRUE
+            )
+            AND p.name IS DISTINCT FROM $3
+        `,
+        [
+          productId,
+          languageCode,
+          name,
+        ]
+      );
+
+      await db.query("COMMIT");
+
+      return translation;
+    } catch (error) {
+      await db.query("ROLLBACK");
+      throw error;
+    } finally {
+      db.release();
+    }
+  },
 };

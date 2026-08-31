@@ -189,7 +189,7 @@ export const ProductTranslationService = {
     );
 
     return ProductTranslationRepository
-      .upsert({
+      .saveManual({
         productId,
         languageCode,
 
