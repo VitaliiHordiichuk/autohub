@@ -46,6 +46,8 @@ test("SEO sitemap містить товар і робочу сторінку б�
   assert.ok(product);
   assert.ok(Array.isArray(product.imageUrls));
   assert.equal(product.imageUrl, product.imageUrls[0] || null);
+  assert.equal(product.hasRealImage, product.imageUrls.length > 0);
+  assert.equal(typeof product.isAvailable, "boolean");
   const brand = sitemap.brands.find((item) => item.name === "Mercedes-Benz");
   assert.ok(brand);
 

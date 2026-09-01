@@ -292,7 +292,19 @@ export const PublicSeoService = {
             FROM product_images pi
             WHERE pi.product_id = p.id
             ORDER BY pi.priority, pi.id
-          ) AS image_urls
+          ) AS image_urls,
+          EXISTS (
+            SELECT 1
+            FROM product_offers po
+            LEFT JOIN warehouses w ON w.id = po.warehouse_id
+            LEFT JOIN suppliers s ON s.id = COALESCE(po.supplier_id, w.supplier_id)
+            WHERE po.product_id = p.id
+              AND po.is_available = TRUE
+              AND COALESCE(po.is_hidden, FALSE) = FALSE
+              AND po.quantity > 0
+              AND (w.id IS NULL OR w.is_active = TRUE)
+              AND (s.id IS NULL OR s.is_active = TRUE)
+          ) AS is_available
         FROM products p
         WHERE p.is_active = TRUE
         ORDER BY p.id
@@ -324,12 +336,17 @@ export const PublicSeoService = {
 
     return {
       languages: languagesResult.rows.map((row) => row.code),
-      products: productsResult.rows.map((row) => ({
-        article: row.article,
-        updatedAt: row.updated_at || null,
-        imageUrl: row.image_urls?.[0] || null,
-        imageUrls: Array.isArray(row.image_urls) ? row.image_urls.filter(Boolean) : [],
-      })),
+      products: productsResult.rows.map((row) => {
+        const imageUrls = Array.isArray(row.image_urls) ? row.image_urls.filter(Boolean) : [];
+        return {
+          article: row.article,
+          updatedAt: row.updated_at || null,
+          imageUrl: imageUrls[0] || null,
+          imageUrls,
+          hasRealImage: imageUrls.length > 0,
+          isAvailable: row.is_available === true,
+        };
+      }),
       categories: categoriesResult.rows.map((row) => ({ slug: row.slug })),
       brands: brandsResult.rows.map((row) => ({
         id: Number(row.id),
