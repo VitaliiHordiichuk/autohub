@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { normalizeProductName } from "../services/ProductNameService.js";
 
 export const ProductRepository = {
   async findByNormalizedArticle(articleNormalized) {
@@ -603,7 +604,7 @@ async createProduct(
       brandId,
       article,
       articleNormalized,
-      name
+      normalizeProductName(name)
     ]
   );
 

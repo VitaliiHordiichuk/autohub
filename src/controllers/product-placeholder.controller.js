@@ -1,6 +1,8 @@
 import { pool } from "../config/db.js";
 import { ProductPlaceholderService } from "../services/ProductPlaceholderService.js";
 import { normalizeArticle } from "../services/articleEngine/normalize.js";
+import { effectiveProductCategoryQuery } from "../services/EffectiveProductCategoryService.js";
+import { publicProductName } from "../services/ProductNameService.js";
 
 async function findProduct(article) {
   const normalized = normalizeArticle(article);
@@ -11,18 +13,26 @@ async function findProduct(article) {
       p.article,
       p.article_normalized,
       p.name,
+      CASE WHEN EXISTS (
+        SELECT 1
+        FROM product_translations manual_name
+        WHERE manual_name.product_id = p.id
+          AND manual_name.provider = 'MANUAL'
+          AND manual_name.name = p.name
+      ) THEN 'MANUAL' ELSE NULL END AS name_provider,
       COALESCE(b.name, pm.name) AS brand,
       pt.name AS product_type,
-      (
-        SELECT STRING_AGG(
-          CONCAT_WS(' ', c.name, c.name_uk, c.name_ru, c.name_en),
-          ' '
-        )
-        FROM product_categories pc
-        JOIN categories c ON c.id = pc.category_id AND c.is_active = TRUE
-        WHERE pc.product_id = p.id
+      CONCAT_WS(
+        ' ',
+        effective_category.name,
+        effective_category.name_uk,
+        effective_category.name_ru,
+        effective_category.name_en
       ) AS category
     FROM products p
+    LEFT JOIN LATERAL (
+      ${effectiveProductCategoryQuery("p")}
+    ) effective_category ON TRUE
     LEFT JOIN brands b ON b.id = p.brand_id
     LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
     LEFT JOIN product_types pt ON pt.id = p.product_type_id
@@ -35,7 +45,9 @@ async function findProduct(article) {
     LIMIT 1
   `, [normalized]);
 
-  return result.rows[0] || null;
+  const product = result.rows[0] || null;
+  if (product) product.name = publicProductName(product.name, product.name_provider);
+  return product;
 }
 
 export async function getProductPlaceholder(req, res) {

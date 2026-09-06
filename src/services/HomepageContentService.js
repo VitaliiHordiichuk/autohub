@@ -9,6 +9,7 @@ import { pool } from "../config/db.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { OfferService } from "./OfferService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { publicProductName } from "./ProductNameService.js";
 
 const IMAGE_FIELDS = ["desktop", "tablet", "mobile"];
 const HOMEPAGE_TIME_ZONE = "Europe/Kyiv";
@@ -530,10 +531,20 @@ async function listFeatureRows(where, values, db = pool) {
       COALESCE(b.name, pm.name) AS brand,
       (SELECT pt.name FROM product_translations pt
        WHERE pt.product_id = p.id AND pt.language_code = 'uk' LIMIT 1) AS name_uk,
+      (SELECT pt.provider FROM product_translations pt
+       WHERE pt.product_id = p.id AND pt.language_code = 'uk' LIMIT 1) AS name_uk_provider,
       (SELECT pt.name FROM product_translations pt
        WHERE pt.product_id = p.id AND pt.language_code = 'en' LIMIT 1) AS name_en,
+      (SELECT pt.provider FROM product_translations pt
+       WHERE pt.product_id = p.id AND pt.language_code = 'en' LIMIT 1) AS name_en_provider,
       (SELECT pt.name FROM product_translations pt
        WHERE pt.product_id = p.id AND pt.language_code = 'ru' LIMIT 1) AS name_ru,
+      (SELECT pt.provider FROM product_translations pt
+       WHERE pt.product_id = p.id AND pt.language_code = 'ru' LIMIT 1) AS name_ru_provider,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM product_translations pt
+        WHERE pt.product_id = p.id AND pt.provider = 'MANUAL' AND pt.name = p.name
+      ) THEN 'MANUAL' ELSE NULL END AS name_provider,
       (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id
        ORDER BY pi.priority, pi.id LIMIT 1) AS image_url
     FROM homepage_product_features f
@@ -563,7 +574,13 @@ export const HomepageContentService = {
       const offer = offers
         .filter((item) => item.isAvailable && item.retailPrice !== null)
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0] || null;
-      const name = row[`name_${locale}`] || row.name_uk || row.name;
+      const localizedName = row[`name_${locale}`] || row.name_uk || row.name;
+      const localizedProvider = row[`name_${locale}`]
+        ? row[`name_${locale}_provider`]
+        : row.name_uk
+          ? row.name_uk_provider
+          : row.name_provider;
+      const name = publicProductName(localizedName, localizedProvider);
       const image = ProductPlaceholderService.getProductImage({
         ...row,
         name,

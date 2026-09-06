@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { normalizeProductName } from "../services/ProductNameService.js";
 
 
 function buildListFilters({
@@ -184,7 +185,7 @@ export const AdminWarehouseOfferRepository = {
           brandId,
           article,
           articleNormalized,
-          name,
+          normalizeProductName(name),
         ]
       );
 

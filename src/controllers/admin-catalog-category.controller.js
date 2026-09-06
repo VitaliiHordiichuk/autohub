@@ -7,8 +7,11 @@ function fail(res, error) {
 
 export async function getCatalogCategories(req, res) {
   try {
-    const categories = await AdminCatalogCategoryService.listCategories();
-    return res.json({ success: true, categories });
+    const [categories, warnings] = await Promise.all([
+      AdminCatalogCategoryService.listCategories(),
+      AdminCatalogCategoryService.getClassificationWarnings(),
+    ]);
+    return res.json({ success: true, categories, warnings });
   } catch (error) {
     return fail(res, error);
   }

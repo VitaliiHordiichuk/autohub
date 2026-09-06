@@ -43,8 +43,7 @@ function effectiveAssignmentCondition(productAlias = "p") {
   )`;
 }
 
-function mapCategory(row) {
-  if (!row.category_id) return null;
+function mapAssignment(row) {
   return {
     id: Number(row.category_id),
     slug: row.category_slug,
@@ -52,6 +51,15 @@ function mapCategory(row) {
     nameRu: row.category_name_ru || row.category_name,
     nameEn: row.category_name_en || row.category_name,
     assignmentSource: row.assignment_source,
+    confidence: row.confidence === null ? null : Number(row.confidence),
+    rule: row.rule_prefix
+      ? {
+          prefix: row.rule_prefix,
+          matchType: row.rule_match_type,
+          materialSubgroup: row.rule_material_subgroup,
+          notes: row.rule_notes,
+        }
+      : null,
   };
 }
 
@@ -111,6 +119,48 @@ export const AdminCatalogCategoryService = {
     }));
   },
 
+  async getClassificationWarnings(db = pool) {
+    const [countResult, examplesResult] = await Promise.all([
+      db.query(`
+        SELECT COUNT(DISTINCT product.id)::integer AS count
+        FROM product_categories assignment
+        JOIN products product
+          ON product.id = assignment.product_id
+          AND product.is_active = TRUE
+        JOIN categories category
+          ON category.id = assignment.category_id
+        WHERE assignment.assignment_source = 'ACCESSORY_RULE'
+          AND COALESCE(assignment.confidence, 0) = 0
+          AND category.slug = 'mb-accessories-other'
+      `),
+      db.query(`
+        SELECT product.id, product.article, product.name
+        FROM product_categories assignment
+        JOIN products product
+          ON product.id = assignment.product_id
+          AND product.is_active = TRUE
+        JOIN categories category
+          ON category.id = assignment.category_id
+        WHERE assignment.assignment_source = 'ACCESSORY_RULE'
+          AND COALESCE(assignment.confidence, 0) = 0
+          AND category.slug = 'mb-accessories-other'
+        ORDER BY product.id DESC
+        LIMIT 10
+      `),
+    ]);
+
+    return {
+      unclassifiedMercedesAccessories: {
+        count: Number(countResult.rows[0]?.count || 0),
+        examples: examplesResult.rows.map((row) => ({
+          id: Number(row.id),
+          article: row.article,
+          name: row.name,
+        })),
+      },
+    };
+  },
+
   async createCategory({ parentId: parentIdValue, nameUk, nameRu, nameEn }, db = pool) {
     const parentId = parentIdValue ? positiveInteger(parentIdValue, null) : null;
     const normalizedNames = {
@@ -129,10 +179,10 @@ export const AdminCatalogCategoryService = {
       if (parentId) {
         const parentResult = await client.query(`
           SELECT id FROM categories
-          WHERE id = $1 AND parent_id IS NULL AND is_active = TRUE
+          WHERE id = $1 AND is_active = TRUE
           FOR UPDATE
         `, [parentId]);
-        if (!parentResult.rowCount) throw new Error("Основная группа не найдена");
+        if (!parentResult.rowCount) throw new Error("Родительская группа не найдена");
       }
 
       const baseSlug = slugify(normalizedNames.en || normalizedNames.ru || normalizedNames.uk);
@@ -248,14 +298,7 @@ export const AdminCatalogCategoryService = {
         b.name AS brand_name,
         pm.name AS manufacturer,
         image.image_url,
-        image.image_count,
-        assigned.category_id,
-        assigned.category_slug,
-        assigned.category_name,
-        assigned.category_name_uk,
-        assigned.category_name_ru,
-        assigned.category_name_en,
-        assigned.assignment_source
+        image.image_count
       FROM products p
       LEFT JOIN brands b ON b.id = p.brand_id
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
@@ -266,25 +309,6 @@ export const AdminCatalogCategoryService = {
           (SELECT COUNT(*)::integer FROM product_images pi_count
             WHERE pi_count.product_id = p.id) AS image_count
       ) image ON TRUE
-      LEFT JOIN LATERAL (
-        SELECT
-          c.id AS category_id,
-          c.slug AS category_slug,
-          c.name AS category_name,
-          c.name_uk AS category_name_uk,
-          c.name_ru AS category_name_ru,
-          c.name_en AS category_name_en,
-          pc.assignment_source
-        FROM product_categories pc
-        JOIN categories c ON c.id = pc.category_id AND c.is_active = TRUE
-        WHERE pc.product_id = p.id
-        ORDER BY
-          CASE WHEN pc.assignment_source = 'MANUAL' THEN 0 ELSE 1 END,
-          pc.confidence DESC NULLS LAST,
-          c.sort_order,
-          c.id
-        LIMIT 1
-      ) assigned ON TRUE
       ${where}
       ORDER BY
         CASE WHEN image.image_url IS NULL THEN 1 ELSE 0 END,
@@ -293,18 +317,109 @@ export const AdminCatalogCategoryService = {
       LIMIT $${limitIndex} OFFSET $${offsetIndex}
     `, queryValues);
 
+    const productIds = result.rows.map((row) => Number(row.id));
+    const assignmentResult = productIds.length
+      ? await db.query(`
+          SELECT
+            assignment.product_id,
+            category.id AS category_id,
+            category.slug AS category_slug,
+            category.name AS category_name,
+            category.name_uk AS category_name_uk,
+            category.name_ru AS category_name_ru,
+            category.name_en AS category_name_en,
+            assignment.assignment_source,
+            assignment.confidence,
+            accessory_rule.article_prefix AS rule_prefix,
+            accessory_rule.match_type AS rule_match_type,
+            accessory_rule.material_subgroup AS rule_material_subgroup,
+            accessory_rule.notes AS rule_notes
+          FROM product_categories assignment
+          JOIN products product ON product.id = assignment.product_id
+          JOIN categories category
+            ON category.id = assignment.category_id
+            AND category.is_active = TRUE
+          LEFT JOIN LATERAL (
+            SELECT rule.*
+            FROM mercedes_accessory_rules rule
+            WHERE assignment.assignment_source = 'ACCESSORY_RULE'
+              AND rule.active = TRUE
+              AND rule.category_id = assignment.category_id
+              AND (
+                (rule.article_type = 'A' AND REGEXP_REPLACE(
+                  UPPER(COALESCE(product.article_normalized, product.article, '')),
+                  '[^A-Z0-9]', '', 'g'
+                ) LIKE 'A%')
+                OR (rule.article_type = 'B6' AND REGEXP_REPLACE(
+                  UPPER(COALESCE(product.article_normalized, product.article, '')),
+                  '[^A-Z0-9]', '', 'g'
+                ) LIKE 'B6%')
+              )
+              AND (
+                (rule.match_type = 'EXACT' AND REGEXP_REPLACE(
+                  UPPER(COALESCE(product.article_normalized, product.article, '')),
+                  '[^A-Z0-9]', '', 'g'
+                ) = rule.article_prefix)
+                OR (rule.match_type = 'PREFIX' AND REGEXP_REPLACE(
+                  UPPER(COALESCE(product.article_normalized, product.article, '')),
+                  '[^A-Z0-9]', '', 'g'
+                ) LIKE rule.article_prefix || '%')
+              )
+            ORDER BY
+              rule.priority,
+              CASE WHEN rule.match_type = 'EXACT' THEN 0 ELSE 1 END,
+              LENGTH(rule.article_prefix) DESC,
+              rule.id
+            LIMIT 1
+          ) accessory_rule ON TRUE
+          WHERE assignment.product_id = ANY($1::integer[])
+            AND (
+              assignment.assignment_source = 'MANUAL'
+              OR NOT EXISTS (
+                SELECT 1
+                FROM product_categories manual_assignment
+                WHERE manual_assignment.product_id = assignment.product_id
+                  AND manual_assignment.assignment_source = 'MANUAL'
+              )
+            )
+          ORDER BY
+            assignment.product_id,
+            CASE
+              WHEN assignment.assignment_source = 'MANUAL' THEN 0
+              WHEN assignment.assignment_source = 'ACCESSORY_RULE' THEN 2
+              ELSE 1
+            END,
+            assignment.confidence DESC NULLS LAST,
+            category.sort_order,
+            category.id
+        `, [productIds])
+      : { rows: [] };
+    const assignmentsByProduct = new Map();
+    assignmentResult.rows.forEach((row) => {
+      const productId = Number(row.product_id);
+      assignmentsByProduct.set(productId, [
+        ...(assignmentsByProduct.get(productId) || []),
+        mapAssignment(row),
+      ]);
+    });
+
     const total = Number(countResult.rows[0]?.count || 0);
     return {
-      products: result.rows.map((row) => ({
-        id: Number(row.id),
-        article: row.article,
-        name: row.name,
-        brandName: row.brand_name,
-        manufacturer: row.manufacturer,
-        imageUrl: row.image_url,
-        imageCount: Number(row.image_count || 0),
-        category: mapCategory(row),
-      })),
+      products: result.rows.map((row) => {
+        const id = Number(row.id);
+        const assignments = assignmentsByProduct.get(id) || [];
+        return {
+          id,
+          article: row.article,
+          name: row.name,
+          brandName: row.brand_name,
+          manufacturer: row.manufacturer,
+          imageUrl: row.image_url,
+          imageCount: Number(row.image_count || 0),
+          category: assignments[0] || null,
+          assignments,
+        };
+      }),
       pagination: {
         page: normalizedPage,
         pageSize: normalizedLimit,

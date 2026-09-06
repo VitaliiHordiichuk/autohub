@@ -5,6 +5,8 @@ import { OfferService } from "./OfferService.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { EffectiveProductCategoryService } from "./EffectiveProductCategoryService.js";
+import { publicProductName } from "./ProductNameService.js";
 
 const PUBLIC_LOCALES = new Set(["uk", "en", "ru"]);
 
@@ -133,47 +135,13 @@ export const PublicSeoService = {
     const [pricingContext, translationsResult, categoryResult, articleLinksResult] = await Promise.all([
       CustomerPricingService.getContext(null, db),
       db.query(`
-        SELECT language_code, name, description
+        SELECT language_code, name, description, provider
         FROM product_translations
         WHERE product_id = $1
           AND language_code = ANY($2::varchar[])
         ORDER BY language_code
       `, [product.id, [...PUBLIC_LOCALES]]),
-      db.query(`
-        SELECT
-          c.id,
-          c.slug,
-          c.name,
-          c.name_uk,
-          c.name_ru,
-          c.name_en,
-          parent.id AS parent_id,
-          parent.slug AS parent_slug,
-          parent.name AS parent_name,
-          parent.name_uk AS parent_name_uk,
-          parent.name_ru AS parent_name_ru,
-          parent.name_en AS parent_name_en
-        FROM product_categories pc
-        JOIN categories c ON c.id = pc.category_id AND c.is_active = TRUE
-        LEFT JOIN categories parent ON parent.id = c.parent_id AND parent.is_active = TRUE
-        WHERE pc.product_id = $1
-          AND (
-            pc.assignment_source = 'MANUAL'
-            OR NOT EXISTS (
-              SELECT 1
-              FROM product_categories manual_pc
-              WHERE manual_pc.product_id = pc.product_id
-                AND manual_pc.assignment_source = 'MANUAL'
-            )
-          )
-        ORDER BY
-          CASE WHEN pc.assignment_source = 'MANUAL' THEN 0 ELSE 1 END,
-          (c.parent_id IS NOT NULL) DESC,
-          pc.confidence DESC NULLS LAST,
-          c.sort_order,
-          c.id
-        LIMIT 1
-      `, [product.id]),
+      EffectiveProductCategoryService.getByProductId(product.id, db),
       db.query(`
         SELECT
           links.link_type,
@@ -212,7 +180,7 @@ export const PublicSeoService = {
 
     const translations = translationsResult.rows.map((row) => ({
       languageCode: row.language_code,
-      name: row.name,
+      name: publicProductName(row.name, row.provider),
       description: row.description || null,
     }));
     const selectedTranslation = localizedTranslation(translations, locale);
@@ -222,7 +190,7 @@ export const PublicSeoService = {
     const linkedByType = (type) => articleLinksResult.rows.filter((item) => item.link_type === type);
     const analogs = mergeRelatedProducts(publicCard.analogs, linkedByType("ANALOG"));
     const replacements = mergeRelatedProducts(publicCard.replacements, linkedByType("REPLACEMENT"));
-    const category = categoryResult.rows[0];
+    const category = categoryResult;
     const alternativeArticles = [
       product.article_no_prefix,
       ...linkedByType("ALIAS").map((item) => item.article),
@@ -384,6 +352,17 @@ export const PublicSeoService = {
           p.id,
           p.article,
           COALESCE(requested_translation.name, default_translation.name, p.name) AS name,
+          CASE
+            WHEN requested_translation.name IS NOT NULL THEN requested_translation.provider
+            WHEN default_translation.name IS NOT NULL THEN default_translation.provider
+            WHEN EXISTS (
+              SELECT 1 FROM product_translations manual_name
+              WHERE manual_name.product_id = p.id
+                AND manual_name.provider = 'MANUAL'
+                AND manual_name.name = p.name
+            ) THEN 'MANUAL'
+            ELSE NULL
+          END AS name_provider,
           image.url AS image_url
         FROM products p
         LEFT JOIN product_translations requested_translation
@@ -414,18 +393,20 @@ export const PublicSeoService = {
     ]);
 
     const products = await Promise.all(productsResult.rows.map(async (product) => {
+      const name = publicProductName(product.name, product.name_provider);
       const offers = await OfferService.getOffersByProductId(product.id, pricingContext, locale);
       const offer = offers
         .filter((item) => item.isAvailable && Number.isFinite(Number(item.retailPrice)))
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0];
       const image = ProductPlaceholderService.getProductImage({
         ...product,
+        name,
         imageUrl: product.image_url,
       });
       return {
         id: Number(product.id),
         article: product.article,
-        name: product.name,
+        name,
         imageUrl: image.imageUrl,
         hasRealImage: image.hasRealImage,
         isPlaceholder: image.isPlaceholder,

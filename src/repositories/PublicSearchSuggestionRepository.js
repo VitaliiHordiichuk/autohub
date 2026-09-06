@@ -1,6 +1,7 @@
 import { pool } from "../config/db.js";
 import { normalizeArticle } from "../services/articleEngine/normalize.js";
 import { ProductPlaceholderService } from "../services/ProductPlaceholderService.js";
+import { publicProductName } from "../services/ProductNameService.js";
 
 function publicLocale(value) {
   const locale = String(value || "").toLowerCase();
@@ -27,6 +28,17 @@ export const PublicSearchSuggestionRepository = {
         p.article,
         p.article_normalized,
         COALESCE(requested_translation.name, default_translation.name, p.name) AS name,
+        CASE
+          WHEN requested_translation.name IS NOT NULL THEN requested_translation.provider
+          WHEN default_translation.name IS NOT NULL THEN default_translation.provider
+          WHEN EXISTS (
+            SELECT 1 FROM product_translations manual_name
+            WHERE manual_name.product_id = p.id
+              AND manual_name.provider = 'MANUAL'
+              AND manual_name.name = p.name
+          ) THEN 'MANUAL'
+          ELSE NULL
+        END AS name_provider,
         COALESCE(b.name, pm.name, '') AS manufacturer,
         image.url AS image_url
       FROM products p
@@ -79,15 +91,17 @@ export const PublicSearchSuggestionRepository = {
     `, [articleQuery, rawQuery, safeLocale, safeLimit]);
 
     return result.rows.map((row) => {
+      const name = publicProductName(row.name, row.name_provider);
       const image = ProductPlaceholderService.getProductImage({
         ...row,
+        name,
         imageUrl: row.image_url,
       });
       return {
         id: Number(row.id),
         article: row.article,
         normalized: row.article_normalized,
-        name: row.name,
+        name,
         manufacturer: row.manufacturer || null,
         imageUrl: image.imageUrl,
         hasRealImage: image.hasRealImage,

@@ -2,6 +2,7 @@ import {
   pool,
 } from "../config/db.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { publicProductName } from "./ProductNameService.js";
 
 
 const PUBLIC_TEXT = {
@@ -150,6 +151,20 @@ async function loadPublicNames(
             ELSE NULL
           END AS translation_locale,
 
+          CASE
+            WHEN requested_translation.name IS NOT NULL
+            THEN requested_translation.provider
+            WHEN default_translation.name IS NOT NULL
+            THEN default_translation.provider
+            WHEN EXISTS (
+              SELECT 1 FROM product_translations manual_name
+              WHERE manual_name.product_id = p.id
+                AND manual_name.provider = 'MANUAL'
+                AND manual_name.name = p.name
+            ) THEN 'MANUAL'
+            ELSE NULL
+          END AS name_provider,
+
           ARRAY(
             SELECT pi.url
             FROM product_images pi
@@ -210,7 +225,10 @@ async function loadPublicNames(
 
         {
           name:
-            row.public_name,
+            publicProductName(
+              row.public_name,
+              row.name_provider
+            ),
 
           translationLocale:
             row.translation_locale ??
@@ -299,7 +317,7 @@ function localizeProduct(
 
     name:
       localized?.name ??
-      product.name,
+      publicProductName(product.name),
 
     translationLocale:
       localized?.translationLocale ??
