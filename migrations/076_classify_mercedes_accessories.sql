@@ -119,6 +119,10 @@ DO UPDATE SET
 WITH exact_rules(article, article_type, category_slug, material_subgroup, notes) AS (
   VALUES
     ('A2046804348', 'A', 'mb-accessories-floor-mats', 'FLOOR_MATS', 'Verified A accessory example: floor mat'),
+    ('A1648990640', 'A', 'mb-accessories-exterior', 'MUD_FLAPS', 'Verified genuine Mercedes-Benz mud-flap accessory'),
+    ('A1768900178', 'A', 'mb-accessories-exterior', 'MUD_FLAPS', 'Verified genuine Mercedes-Benz mud-flap accessory'),
+    ('A4478900000', 'A', 'mb-accessories-exterior', 'MUD_FLAPS', 'Verified genuine Mercedes-Benz mud-flap accessory'),
+    ('A4478900100', 'A', 'mb-accessories-exterior', 'MUD_FLAPS', 'Verified genuine Mercedes-Benz mud-flap accessory'),
     ('B67660042', 'B6', 'mb-accessories-interior', 'COAT_HANGER', 'Inspected product: coat hanger'),
     ('B67660114', 'B6', 'mb-accessories-luggage', 'LUGGAGE_NET', 'Inspected product: luggage net'),
     ('B67870266', 'B6', 'mb-accessories-collection', 'COLLECTION_APPAREL', 'Inspected Collection apparel'),
@@ -179,6 +183,13 @@ CREATE TABLE IF NOT EXISTS mercedes_accessory_name_rules (
 CREATE UNIQUE INDEX IF NOT EXISTS mercedes_accessory_name_rules_identity_unique
   ON mercedes_accessory_name_rules(article_type, name_pattern);
 
+-- Mud-flap wording is ambiguous for A articles: it is also used for regular
+-- wheel-arch and fender body parts. Those products are accessories only when
+-- their complete article number is present in the verified exact rules above.
+DELETE FROM mercedes_accessory_name_rules
+WHERE article_type = 'A'
+  AND material_subgroup = 'MUD_FLAPS';
+
 WITH name_rules(name_pattern, category_slug, material_subgroup, priority, notes) AS (
   VALUES
     ('^[[:space:]]*(килим(ок|ки)?|коврик(и)?)[[:space:]]+багаж', 'mb-accessories-luggage', 'LUGGAGE_MAT', 100, 'High-confidence luggage-compartment mat name'),
@@ -186,7 +197,6 @@ WITH name_rules(name_pattern, category_slug, material_subgroup, priority, notes)
     ('^[[:space:]]*(сітка|сетка)[[:space:]]+багаж', 'mb-accessories-luggage', 'LUGGAGE_NET', 120, 'High-confidence luggage net name'),
     ('^[[:space:]]*багажник[[:space:]]+(зовнішн|внешн|на[[:space:]]+(дах|крыш))', 'mb-accessories-luggage', 'ROOF_CARRIER', 130, 'High-confidence roof carrier name'),
     ('^[[:space:]]*((килимки|коврики|floor[[:space:]-]*mats?)([[:space:][:punct:]]|$)|(килимок|коврик)[[:space:]]+(салон|підлог|пола|тунел|гумов|резин|текстил|воді|водит|пасаж|пассаж))', 'mb-accessories-floor-mats', 'FLOOR_MATS', 200, 'High-confidence floor mat name with a plural or an interior qualifier'),
-    ('^[[:space:]]*(бризковик|брызговик|mud[[:space:]-]*flaps?)([[:space:][:punct:]]|$)', 'mb-accessories-exterior', 'MUD_FLAPS', 210, 'High-confidence mud flap name'),
     ('^[[:space:]]*(дитяче|детское|child)[[:space:]-]+(авто)?(крісло|кресло|seat)', 'mb-accessories-children', 'CHILD_SEAT', 220, 'High-confidence child seat name'),
     ('^[[:space:]]*(чохол|чехол|bag)[[:space:]]+(для[[:space:]]+)?(запасного[[:space:]]+)?колес', 'mb-accessories-wheels', 'WHEEL_STORAGE', 230, 'High-confidence wheel cover or bag name'),
     ('^[[:space:]]*(вішалка|вешалка|coat[[:space:]-]*hanger)([[:space:][:punct:]]|$)', 'mb-accessories-interior', 'COAT_HANGER', 240, 'High-confidence coat hanger name')

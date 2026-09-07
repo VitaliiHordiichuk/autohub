@@ -473,6 +473,111 @@ test("Mercedes A может иметь функциональную и аксе�
   );
 });
 
+test("проверенные A-брызговики определяются только по точному артикулу", async () => {
+  const verifiedArticles = [
+    "A1648990640",
+    "A1768900178",
+    "A4478900000",
+    "A4478900100",
+  ];
+
+  const rules = await pool.query(`
+    SELECT article_prefix, match_type, confidence, category.slug
+    FROM mercedes_accessory_rules rule
+    JOIN categories category ON category.id = rule.category_id
+    WHERE rule.article_type = 'A'
+      AND rule.article_prefix = ANY($1::text[])
+    ORDER BY rule.article_prefix
+  `, [verifiedArticles]);
+
+  assert.deepEqual(rules.rows, verifiedArticles.sort().map((article) => ({
+    article_prefix: article,
+    match_type: "EXACT",
+    confidence: "100.00",
+    slug: "mb-accessories-exterior",
+  })));
+
+  const products = await pool.query(`
+    SELECT id
+    FROM products
+    WHERE REGEXP_REPLACE(
+      UPPER(COALESCE(article_normalized, article, '')),
+      '[^A-Z0-9]', '', 'g'
+    ) = ANY($1::text[])
+  `, [verifiedArticles]);
+  assert.equal(products.rowCount, verifiedArticles.length);
+
+  for (const product of products.rows) {
+    await pool.query("SELECT classify_mercedes_accessory_category($1)", [product.id]);
+  }
+
+  const assigned = await pool.query(`
+    SELECT REGEXP_REPLACE(
+             UPPER(COALESCE(product.article_normalized, product.article, '')),
+             '[^A-Z0-9]', '', 'g'
+           ) AS article,
+           category.slug,
+           assignment.assignment_source,
+           assignment.confidence
+    FROM products product
+    JOIN product_categories assignment ON assignment.product_id = product.id
+    JOIN categories category ON category.id = assignment.category_id
+    WHERE REGEXP_REPLACE(
+      UPPER(COALESCE(product.article_normalized, product.article, '')),
+      '[^A-Z0-9]', '', 'g'
+    ) = ANY($1::text[])
+      AND assignment.assignment_source = 'ACCESSORY_RULE'
+    ORDER BY article
+  `, [verifiedArticles]);
+
+  assert.deepEqual(assigned.rows, verifiedArticles.sort().map((article) => ({
+    article,
+    slug: "mb-accessories-exterior",
+    assignment_source: "ACCESSORY_RULE",
+    confidence: "100.00",
+  })));
+});
+
+test("неоднозначные A-брызговики остаются только в функциональной категории", async () => {
+  const bodyPartArticles = ["A2046905630", "A2216901930"];
+  const products = await pool.query(`
+    SELECT id
+    FROM products
+    WHERE REGEXP_REPLACE(
+      UPPER(COALESCE(article_normalized, article, '')),
+      '[^A-Z0-9]', '', 'g'
+    ) = ANY($1::text[])
+  `, [bodyPartArticles]);
+  assert.equal(products.rowCount, bodyPartArticles.length);
+
+  for (const product of products.rows) {
+    await pool.query("SELECT classify_product_category($1)", [product.id]);
+  }
+
+  const assigned = await pool.query(`
+    SELECT REGEXP_REPLACE(
+             UPPER(COALESCE(product.article_normalized, product.article, '')),
+             '[^A-Z0-9]', '', 'g'
+           ) AS article,
+           category.slug,
+           assignment.assignment_source
+    FROM products product
+    JOIN product_categories assignment ON assignment.product_id = product.id
+    JOIN categories category ON category.id = assignment.category_id
+    WHERE REGEXP_REPLACE(
+      UPPER(COALESCE(product.article_normalized, product.article, '')),
+      '[^A-Z0-9]', '', 'g'
+    ) = ANY($1::text[])
+    ORDER BY article, assignment.assignment_source, category.slug
+  `, [bodyPartArticles]);
+
+  assert.deepEqual(assigned.rows, bodyPartArticles.sort().map((article) => ({
+    article,
+    slug: "mb-group-69",
+    assignment_source: "AUTO_RULE",
+  })));
+});
+
 test("неизвестный Mercedes A остаётся только в функциональной группе", async () => {
   const article = `A204680${String(Date.now()).slice(-4)}`;
   const inserted = await pool.query(`
