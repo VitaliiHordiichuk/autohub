@@ -301,6 +301,23 @@ test("одинаковый аксессуарный префикс нельзя 
   );
 });
 
+test("A-артикулы нельзя массово объявить аксессуарами по префиксу", async () => {
+  const category = await pool.query(`
+    SELECT id FROM categories WHERE slug = 'mb-accessories-floor-mats'
+  `);
+
+  await assert.rejects(
+    pool.query(`
+      INSERT INTO mercedes_accessory_rules(
+        article_prefix, article_type, match_type, material_subgroup,
+        category_id, priority, confidence, active, notes
+      )
+      VALUES('A20468', 'A', 'PREFIX', 'UNSAFE_TEST', $1, 1, 100, TRUE, 'Must fail')
+    `, [category.rows[0].id]),
+    (error) => error?.code === "23514",
+  );
+});
+
 test("неизвестное семейство B6 попадает только в аксессуарное Другое", async () => {
   const article = `B6998${String(Date.now()).slice(-6)}`;
   const inserted = await pool.query(`
@@ -371,17 +388,6 @@ test("пробелы и регистр не мешают распознать B6
 
 test("Mercedes A может иметь функциональную и аксессуарную категории", async () => {
   const article = "A2046804348";
-  const accessoryCategory = await pool.query(`
-    SELECT id FROM categories WHERE slug = 'mb-accessories-floor-mats'
-  `);
-  await pool.query(`
-    INSERT INTO mercedes_accessory_rules(
-      article_prefix, article_type, match_type, material_subgroup,
-      category_id, priority, confidence, active, notes
-    )
-    VALUES($1, 'A', 'EXACT', 'TEST_FLOOR_MATS', $2, 1, 100, TRUE, 'Integration test')
-    ON CONFLICT(article_type, match_type, article_prefix) DO NOTHING
-  `, [article, accessoryCategory.rows[0].id]);
   const inserted = await pool.query(`
     INSERT INTO products(brand_id, article, article_normalized, name, is_active)
     VALUES($1, $2, $2, 'Килимки Mercedes', TRUE)
@@ -413,32 +419,112 @@ test("Mercedes A может иметь функциональную и аксе�
     ["AUTO_RULE", "ACCESSORY_RULE"],
   );
   assert.equal(adminResult.products[0].category.slug, "mb-group-68");
+
+  const functionalManualCategory = await pool.query(
+    "SELECT id FROM categories WHERE slug = 'other'",
+  );
+  const accessoryManualCategory = await pool.query(
+    "SELECT id FROM categories WHERE slug = 'mb-accessories-luggage'",
+  );
+  const functionalManualId = Number(functionalManualCategory.rows[0].id);
+  const accessoryManualId = Number(accessoryManualCategory.rows[0].id);
+
+  const readAssignments = async () => {
+    const result = await pool.query(`
+      SELECT category.slug, assignment.assignment_source
+      FROM product_categories assignment
+      JOIN categories category ON category.id = assignment.category_id
+      WHERE assignment.product_id = $1
+    `, [productId]);
+    return new Set(result.rows.map(
+      (row) => `${row.slug}:${row.assignment_source}`,
+    ));
+  };
+
+  await AdminCatalogCategoryService.setProductCategory(productId, functionalManualId);
+  assert.deepEqual(await readAssignments(), new Set([
+    "other:MANUAL",
+    "mb-accessories-floor-mats:ACCESSORY_RULE",
+  ]));
+
+  await AdminCatalogCategoryService.setProductCategory(productId, null);
+  assert.deepEqual(await readAssignments(), new Set([
+    "mb-group-68:AUTO_RULE",
+    "mb-accessories-floor-mats:ACCESSORY_RULE",
+  ]));
+
+  await AdminCatalogCategoryService.setProductCategory(productId, accessoryManualId);
+  assert.deepEqual(await readAssignments(), new Set([
+    "mb-group-68:AUTO_RULE",
+    "mb-accessories-luggage:MANUAL",
+  ]));
+
+  await AdminCatalogCategoryService.setProductCategory(productId, functionalManualId);
+  assert.deepEqual(await readAssignments(), new Set([
+    "other:MANUAL",
+    "mb-accessories-luggage:MANUAL",
+  ]));
+
+  const finalAdminResult = await AdminCatalogCategoryService.searchProducts({ search: article });
+  assert.equal(finalAdminResult.products[0].category.slug, "other");
+  assert.deepEqual(
+    finalAdminResult.products[0].assignments.map((assignment) => assignment.slug),
+    ["other", "mb-accessories-luggage"],
+  );
 });
 
-test("ручное назначение имеет приоритет над обоими автоматическими слоями", async () => {
-  const article = `B6695${String(Date.now()).slice(-6)}`;
+test("неизвестный Mercedes A остаётся только в функциональной группе", async () => {
+  const article = `A204680${String(Date.now()).slice(-4)}`;
   const inserted = await pool.query(`
     INSERT INTO products(brand_id, article, article_normalized, name, is_active)
-    VALUES($1, $2, $2, 'Ручное назначение B6', TRUE)
+    VALUES($1, $2, $2, 'Опора тестовая Mercedes', TRUE)
     RETURNING id
   `, [mercedesBrandId, article]);
   const productId = Number(inserted.rows[0].id);
   mercedesAccessoryProductIds.push(productId);
 
-  const manualCategory = await pool.query("SELECT id FROM categories WHERE slug = 'other'");
-  const manualCategoryId = Number(manualCategory.rows[0].id);
-  await AdminCatalogCategoryService.setProductCategory(productId, manualCategoryId);
-  await pool.query("SELECT classify_product_category($1)", [productId]);
-
-  const assignments = await pool.query(`
-    SELECT category_id, assignment_source
-    FROM product_categories
-    WHERE product_id = $1
+  const assigned = await pool.query(`
+    SELECT category.slug, assignment.assignment_source
+    FROM product_categories assignment
+    JOIN categories category ON category.id = assignment.category_id
+    WHERE assignment.product_id = $1
   `, [productId]);
-  assert.deepEqual(assignments.rows, [{
-    category_id: manualCategoryId,
-    assignment_source: "MANUAL",
+
+  assert.deepEqual(assigned.rows, [{
+    slug: "mb-group-68",
+    assignment_source: "AUTO_RULE",
   }]);
+});
+
+test("Mercedes A с однозначным названием получает отдельную аксессуарную группу", async () => {
+  const article = `A204680${String(Date.now() + 1).slice(-4)}`;
+  const inserted = await pool.query(`
+    INSERT INTO products(brand_id, article, article_normalized, name, is_active)
+    VALUES($1, $2, $2, 'Килимки салону гумові', TRUE)
+    RETURNING id
+  `, [mercedesBrandId, article]);
+  const productId = Number(inserted.rows[0].id);
+  mercedesAccessoryProductIds.push(productId);
+
+  const assigned = await pool.query(`
+    SELECT category.slug, assignment.assignment_source, assignment.confidence
+    FROM product_categories assignment
+    JOIN categories category ON category.id = assignment.category_id
+    WHERE assignment.product_id = $1
+  `, [productId]);
+
+  assert.deepEqual(new Set(assigned.rows.map(
+    (row) => `${row.slug}:${row.assignment_source}:${Number(row.confidence)}`,
+  )), new Set([
+    "mb-group-68:AUTO_RULE:100",
+    "mb-accessories-floor-mats:ACCESSORY_RULE:95",
+  ]));
+
+  const adminResult = await AdminCatalogCategoryService.searchProducts({ search: article });
+  const accessory = adminResult.products[0].assignments.find(
+    (assignment) => assignment.assignmentSource === "ACCESSORY_RULE",
+  );
+  assert.equal(accessory?.rule?.matchType, "NAME_REGEX");
 });
 
 test("неактивный товар не увеличивает публичный счётчик группы", async () => {

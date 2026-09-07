@@ -22,11 +22,31 @@ export const PublicCatalogService = {
         SELECT assignment.product_id, assignment.category_id
         FROM product_categories assignment
         WHERE assignment.assignment_source = 'MANUAL'
-          OR NOT EXISTS (
-            SELECT 1
-            FROM product_categories manual_assignment
-            WHERE manual_assignment.product_id = assignment.product_id
-              AND manual_assignment.assignment_source = 'MANUAL'
+          OR (
+            assignment.assignment_source = 'AUTO_RULE'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM product_categories manual_assignment
+              WHERE manual_assignment.product_id = assignment.product_id
+                AND manual_assignment.assignment_source = 'MANUAL'
+                AND NOT category_is_within_tree(
+                  manual_assignment.category_id,
+                  'mb-accessories-b'
+                )
+            )
+          )
+          OR (
+            assignment.assignment_source = 'ACCESSORY_RULE'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM product_categories manual_assignment
+              WHERE manual_assignment.product_id = assignment.product_id
+                AND manual_assignment.assignment_source = 'MANUAL'
+                AND category_is_within_tree(
+                  manual_assignment.category_id,
+                  'mb-accessories-b'
+                )
+            )
           )
       ),
       category_descendants(ancestor_id, descendant_id) AS (
@@ -113,11 +133,31 @@ export const PublicCatalogService = {
         SELECT assignment.product_id, assignment.category_id
         FROM product_categories assignment
         WHERE assignment.assignment_source = 'MANUAL'
-          OR NOT EXISTS (
-            SELECT 1
-            FROM product_categories manual_assignment
-            WHERE manual_assignment.product_id = assignment.product_id
-              AND manual_assignment.assignment_source = 'MANUAL'
+          OR (
+            assignment.assignment_source = 'AUTO_RULE'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM product_categories manual_assignment
+              WHERE manual_assignment.product_id = assignment.product_id
+                AND manual_assignment.assignment_source = 'MANUAL'
+                AND NOT category_is_within_tree(
+                  manual_assignment.category_id,
+                  'mb-accessories-b'
+                )
+            )
+          )
+          OR (
+            assignment.assignment_source = 'ACCESSORY_RULE'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM product_categories manual_assignment
+              WHERE manual_assignment.product_id = assignment.product_id
+                AND manual_assignment.assignment_source = 'MANUAL'
+                AND category_is_within_tree(
+                  manual_assignment.category_id,
+                  'mb-accessories-b'
+                )
+            )
           )
       )
     `;
@@ -247,11 +287,31 @@ export const PublicCatalogService = {
           SELECT assignment.product_id, assignment.category_id
           FROM product_categories assignment
           WHERE assignment.assignment_source = 'MANUAL'
-            OR NOT EXISTS (
-              SELECT 1
-              FROM product_categories manual_assignment
-              WHERE manual_assignment.product_id = assignment.product_id
-                AND manual_assignment.assignment_source = 'MANUAL'
+            OR (
+              assignment.assignment_source = 'AUTO_RULE'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM product_categories manual_assignment
+                WHERE manual_assignment.product_id = assignment.product_id
+                  AND manual_assignment.assignment_source = 'MANUAL'
+                  AND NOT category_is_within_tree(
+                    manual_assignment.category_id,
+                    'mb-accessories-b'
+                  )
+              )
+            )
+            OR (
+              assignment.assignment_source = 'ACCESSORY_RULE'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM product_categories manual_assignment
+                WHERE manual_assignment.product_id = assignment.product_id
+                  AND manual_assignment.assignment_source = 'MANUAL'
+                  AND category_is_within_tree(
+                    manual_assignment.category_id,
+                    'mb-accessories-b'
+                  )
+              )
             )
         ),
         child_counts AS (

@@ -25,9 +25,38 @@ export function effectiveProductCategoryQuery(productAlias = "product") {
       ON category.id = assignment.category_id
       AND category.is_active = TRUE
     WHERE assignment.product_id = ${product}.id
+      AND (
+        assignment.assignment_source = 'MANUAL'
+        OR (
+          assignment.assignment_source = 'AUTO_RULE'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_assignment
+            WHERE manual_assignment.product_id = ${product}.id
+              AND manual_assignment.assignment_source = 'MANUAL'
+              AND NOT category_is_within_tree(
+                manual_assignment.category_id,
+                'mb-accessories-b'
+              )
+          )
+        )
+        OR (
+          assignment.assignment_source = 'ACCESSORY_RULE'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_assignment
+            WHERE manual_assignment.product_id = ${product}.id
+              AND manual_assignment.assignment_source = 'MANUAL'
+              AND category_is_within_tree(
+                manual_assignment.category_id,
+                'mb-accessories-b'
+              )
+          )
+        )
+      )
     ORDER BY
+      CASE WHEN category_is_within_tree(category.id, 'mb-accessories-b') THEN 1 ELSE 0 END,
       CASE WHEN assignment.assignment_source = 'MANUAL' THEN 0 ELSE 1 END,
-      CASE WHEN assignment.assignment_source = 'ACCESSORY_RULE' THEN 1 ELSE 0 END,
       CASE WHEN category.parent_id IS NOT NULL THEN 0 ELSE 1 END,
       assignment.confidence DESC NULLS LAST,
       category.sort_order,

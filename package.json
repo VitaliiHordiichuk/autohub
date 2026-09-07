@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node scripts/test/run-isolated-tests.mjs",
-    "test:isolated": "node scripts/test/run-isolated-tests.mjs"
+    "test:isolated": "node scripts/test/run-isolated-tests.mjs",
+    "report:mercedes-accessories": "node scripts/report-mercedes-a-accessories.mjs"
   },
   "keywords": [],
   "author": "",

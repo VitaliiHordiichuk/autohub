@@ -31,14 +31,28 @@ function slugify(value) {
     .slice(0, 130) || "catalog-group";
 }
 
-function effectiveAssignmentCondition(productAlias = "p") {
+function effectiveAssignmentCondition(productAlias = "p", assignmentAlias = "pc") {
   return `(
-    pc.assignment_source = 'MANUAL'
-    OR NOT EXISTS (
+    ${assignmentAlias}.assignment_source = 'MANUAL'
+    OR (
+      ${assignmentAlias}.assignment_source = 'AUTO_RULE'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM product_categories manual_pc
+        WHERE manual_pc.product_id = ${productAlias}.id
+          AND manual_pc.assignment_source = 'MANUAL'
+          AND NOT category_is_within_tree(manual_pc.category_id, 'mb-accessories-b')
+      )
+    )
+    OR (
+      ${assignmentAlias}.assignment_source = 'ACCESSORY_RULE'
+      AND NOT EXISTS (
       SELECT 1
       FROM product_categories manual_pc
       WHERE manual_pc.product_id = ${productAlias}.id
         AND manual_pc.assignment_source = 'MANUAL'
+          AND category_is_within_tree(manual_pc.category_id, 'mb-accessories-b')
+      )
     )
   )`;
 }
@@ -52,9 +66,9 @@ function mapAssignment(row) {
     nameEn: row.category_name_en || row.category_name,
     assignmentSource: row.assignment_source,
     confidence: row.confidence === null ? null : Number(row.confidence),
-    rule: row.rule_prefix
+    rule: row.rule_match_value
       ? {
-          prefix: row.rule_prefix,
+          prefix: row.rule_match_value,
           matchType: row.rule_match_type,
           materialSubgroup: row.rule_material_subgroup,
           notes: row.rule_notes,
@@ -330,7 +344,7 @@ export const AdminCatalogCategoryService = {
             category.name_en AS category_name_en,
             assignment.assignment_source,
             assignment.confidence,
-            accessory_rule.article_prefix AS rule_prefix,
+            accessory_rule.match_value AS rule_match_value,
             accessory_rule.match_type AS rule_match_type,
             accessory_rule.material_subgroup AS rule_material_subgroup,
             accessory_rule.notes AS rule_notes
@@ -340,53 +354,81 @@ export const AdminCatalogCategoryService = {
             ON category.id = assignment.category_id
             AND category.is_active = TRUE
           LEFT JOIN LATERAL (
-            SELECT rule.*
-            FROM mercedes_accessory_rules rule
-            WHERE assignment.assignment_source = 'ACCESSORY_RULE'
-              AND rule.active = TRUE
-              AND rule.category_id = assignment.category_id
-              AND (
-                (rule.article_type = 'A' AND REGEXP_REPLACE(
+            SELECT candidate.*
+            FROM (
+              SELECT
+                rule.article_prefix AS match_value,
+                rule.match_type,
+                rule.material_subgroup,
+                rule.notes,
+                rule.priority,
+                CASE WHEN rule.match_type = 'EXACT' THEN 0 ELSE 1 END AS source_order,
+                LENGTH(rule.article_prefix) AS specificity,
+                rule.id
+              FROM mercedes_accessory_rules rule
+              WHERE assignment.assignment_source = 'ACCESSORY_RULE'
+                AND rule.active = TRUE
+                AND rule.category_id = assignment.category_id
+                AND (
+                  (rule.article_type = 'A' AND REGEXP_REPLACE(
+                    UPPER(COALESCE(product.article_normalized, product.article, '')),
+                    '[^A-Z0-9]', '', 'g'
+                  ) LIKE 'A%')
+                  OR (rule.article_type = 'B6' AND REGEXP_REPLACE(
+                    UPPER(COALESCE(product.article_normalized, product.article, '')),
+                    '[^A-Z0-9]', '', 'g'
+                  ) LIKE 'B6%')
+                )
+                AND (
+                  (rule.match_type = 'EXACT' AND REGEXP_REPLACE(
+                    UPPER(COALESCE(product.article_normalized, product.article, '')),
+                    '[^A-Z0-9]', '', 'g'
+                  ) = rule.article_prefix)
+                  OR (rule.match_type = 'PREFIX' AND REGEXP_REPLACE(
+                    UPPER(COALESCE(product.article_normalized, product.article, '')),
+                    '[^A-Z0-9]', '', 'g'
+                  ) LIKE rule.article_prefix || '%')
+                )
+
+              UNION ALL
+
+              SELECT
+                name_rule.name_pattern AS match_value,
+                'NAME_REGEX' AS match_type,
+                name_rule.material_subgroup,
+                name_rule.notes,
+                name_rule.priority,
+                2 AS source_order,
+                LENGTH(name_rule.name_pattern) AS specificity,
+                name_rule.id
+              FROM mercedes_accessory_name_rules name_rule
+              WHERE assignment.assignment_source = 'ACCESSORY_RULE'
+                AND name_rule.active = TRUE
+                AND name_rule.category_id = assignment.category_id
+                AND name_rule.article_type = 'A'
+                AND REGEXP_REPLACE(
                   UPPER(COALESCE(product.article_normalized, product.article, '')),
                   '[^A-Z0-9]', '', 'g'
-                ) LIKE 'A%')
-                OR (rule.article_type = 'B6' AND REGEXP_REPLACE(
-                  UPPER(COALESCE(product.article_normalized, product.article, '')),
-                  '[^A-Z0-9]', '', 'g'
-                ) LIKE 'B6%')
-              )
-              AND (
-                (rule.match_type = 'EXACT' AND REGEXP_REPLACE(
-                  UPPER(COALESCE(product.article_normalized, product.article, '')),
-                  '[^A-Z0-9]', '', 'g'
-                ) = rule.article_prefix)
-                OR (rule.match_type = 'PREFIX' AND REGEXP_REPLACE(
-                  UPPER(COALESCE(product.article_normalized, product.article, '')),
-                  '[^A-Z0-9]', '', 'g'
-                ) LIKE rule.article_prefix || '%')
-              )
+                ) LIKE 'A%'
+                AND COALESCE(product.name, '') ~* name_rule.name_pattern
+            ) candidate
             ORDER BY
-              rule.priority,
-              CASE WHEN rule.match_type = 'EXACT' THEN 0 ELSE 1 END,
-              LENGTH(rule.article_prefix) DESC,
-              rule.id
+              candidate.priority,
+              candidate.source_order,
+              candidate.specificity DESC,
+              candidate.id
             LIMIT 1
           ) accessory_rule ON TRUE
           WHERE assignment.product_id = ANY($1::integer[])
-            AND (
-              assignment.assignment_source = 'MANUAL'
-              OR NOT EXISTS (
-                SELECT 1
-                FROM product_categories manual_assignment
-                WHERE manual_assignment.product_id = assignment.product_id
-                  AND manual_assignment.assignment_source = 'MANUAL'
-              )
-            )
+            AND ${effectiveAssignmentCondition("product", "assignment")}
           ORDER BY
             assignment.product_id,
             CASE
+              WHEN category_is_within_tree(category.id, 'mb-accessories-b') THEN 1
+              ELSE 0
+            END,
+            CASE
               WHEN assignment.assignment_source = 'MANUAL' THEN 0
-              WHEN assignment.assignment_source = 'ACCESSORY_RULE' THEN 2
               ELSE 1
             END,
             assignment.confidence DESC NULLS LAST,
@@ -446,24 +488,55 @@ export const AdminCatalogCategoryService = {
       );
       if (!productResult.rowCount) throw new Error("Товар не найден");
 
+      let isAccessoryCategory = false;
       if (categoryId) {
         const categoryResult = await client.query(
-          "SELECT id FROM categories WHERE id = $1 AND is_active = TRUE",
+          `SELECT id, category_is_within_tree(id, 'mb-accessories-b') AS is_accessory
+           FROM categories WHERE id = $1 AND is_active = TRUE`,
           [categoryId]
         );
         if (!categoryResult.rowCount) throw new Error("Группа каталога не найдена");
+        isAccessoryCategory = Boolean(categoryResult.rows[0].is_accessory);
       }
 
-      await client.query("DELETE FROM product_categories WHERE product_id = $1", [productId]);
-      if (categoryId) {
+      if (automatic) {
+        await client.query(`
+          DELETE FROM product_categories
+          WHERE product_id = $1 AND assignment_source = 'MANUAL'
+        `, [productId]);
+      } else if (isAccessoryCategory) {
+        await client.query(`
+          DELETE FROM product_categories
+          WHERE product_id = $1
+            AND (
+              assignment_source = 'ACCESSORY_RULE'
+              OR (
+                assignment_source = 'MANUAL'
+                AND category_is_within_tree(category_id, 'mb-accessories-b')
+              )
+            )
+        `, [productId]);
+      } else {
+        await client.query(`
+          DELETE FROM product_categories
+          WHERE product_id = $1
+            AND (
+              assignment_source = 'AUTO_RULE'
+              OR (
+                assignment_source = 'MANUAL'
+                AND NOT category_is_within_tree(category_id, 'mb-accessories-b')
+              )
+            )
+        `, [productId]);
+      }
+
+      if (!automatic) {
         await client.query(`
           INSERT INTO product_categories(product_id, category_id, assignment_source, confidence)
           VALUES ($1, $2, 'MANUAL', 100)
         `, [productId, categoryId]);
-      } else {
-        await client.query("SELECT classify_product_category($1)", [productId]);
-        await client.query("SELECT apply_catalog_assignment_overrides($1)", [productId]);
       }
+      await client.query("SELECT classify_product_category($1)", [productId]);
 
       await client.query("COMMIT");
       return { productId, categoryId, assignmentSource: categoryId ? "MANUAL" : "AUTO_RULE" };
