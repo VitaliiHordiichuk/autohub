@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { normalizeProductName } from "../services/ProductNameService.js";
+import { calculatePriceChangePercent } from "../services/ImportPolicyService.js";
 
 export const ProductRepository = {
   async findByNormalizedArticle(articleNormalized) {
@@ -758,8 +759,9 @@ async updateOfferStock(
     Number(oldPrice) !== Number(purchasePrice)
   ) {
 
-    const changePercent =
-      ((Number(purchasePrice) - oldPrice) / oldPrice) * 100;
+    // Match the import report: a zero baseline has no percentage, and a
+    // very small baseline must not overflow price_history.change_percent.
+    const changePercent = calculatePriceChangePercent(oldPrice, purchasePrice);
 
 
     await db.query(
@@ -787,7 +789,7 @@ async updateOfferStock(
         offerId,
         oldPrice,
         purchasePrice,
-        changePercent.toFixed(2)
+        changePercent
       ]
     );
 

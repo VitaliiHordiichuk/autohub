@@ -159,6 +159,7 @@ try {
   };
 
   const res = {
+    set() { return this; },
     status(code) {
       statusCode = code;
       return this;

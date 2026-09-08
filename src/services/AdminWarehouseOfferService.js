@@ -16,6 +16,10 @@ import {
   ArticleNumberService,
 } from "./ArticleNumberService.js";
 
+import {
+  calculatePriceChangePercent as calculateChangePercent,
+} from "./ImportPolicyService.js";
+
 const ALLOWED_STATUSES =
   new Set([
     "ALL",
@@ -405,31 +409,6 @@ function pricesDiffer(
 
   return Number(oldPrice) !==
     Number(newPrice);
-}
-
-
-function calculateChangePercent(
-  oldPrice,
-  newPrice
-) {
-  if (
-    oldPrice === null ||
-    newPrice === null ||
-    Number(oldPrice) === 0
-  ) {
-    return null;
-  }
-
-  return Number(
-    (
-      (
-        Number(newPrice) -
-        Number(oldPrice)
-      ) /
-      Number(oldPrice) *
-      100
-    ).toFixed(2)
-  );
 }
 
 

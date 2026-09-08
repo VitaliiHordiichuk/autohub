@@ -25,6 +25,37 @@ const ANALYTICS_SESSION_ID =
 const MANAGER_ANALYTICS_SESSION_ID =
   "api-search-manager-excluded-test";
 
+test("product rendering is available without polluting searches; bots and null are excluded", async () => {
+  const session = `product-view-${Date.now()}`;
+  const headers = { "X-Analytics-Session": session };
+  const product = await fetch(`${baseUrl}/api/search/product?article=${SEARCH_FIXTURE.originalArticle}`, { headers });
+  assert.equal(product.status, 200);
+  assert.equal((await product.json()).productCard.product.article, SEARCH_FIXTURE.originalArticle);
+  await fetch(`${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}`, { headers: { ...headers, "User-Agent": "Googlebot/2.1" } });
+  for (const article of ["null", "undefined"]) {
+    const response = await fetch(`${baseUrl}/api/search?article=${article}`, { headers });
+    assert.equal(response.status, 400);
+  }
+  const count = await pool.query("SELECT COUNT(*)::integer AS count FROM search_events WHERE visitor_session_id=$1", [session]);
+  assert.equal(count.rows[0].count, 0);
+});
+
+test("submitted text search returns the same product as suggestions and records TEXT once", async () => {
+  const session = `text-query-${Date.now()}`;
+  const headers = { "X-Analytics-Session": session };
+  const query = SEARCH_FIXTURE.originalArticle;
+  const result = await fetch(`${baseUrl}/api/search/text?q=${query}&locale=uk`, { headers });
+  assert.equal(result.status, 200);
+  const body = await result.json();
+  assert.ok(body.products.some(p => p.article === query));
+  const suggestions = await (await fetch(`${baseUrl}/api/search/suggestions?q=${query}&locale=uk`)).json();
+  assert.ok(suggestions.suggestions.some(p => p.article === query));
+  await fetch(`${baseUrl}/api/search/text?q=${query}&locale=uk&page=2`, { headers });
+  const events = await pool.query("SELECT search_rule FROM search_events WHERE visitor_session_id=$1", [session]);
+  assert.equal(events.rows.length, 1);
+  assert.equal(events.rows[0].search_rule, "TEXT");
+});
+
 
 before(async () => {
   const managerRole = await pool.query(`

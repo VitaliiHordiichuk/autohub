@@ -252,8 +252,16 @@ export function shouldRecordSearchAnalytics(req) {
     .trim()
     .toUpperCase();
 
-  return role !== "ADMIN" &&
-    role !== "MANAGER";
+  const userAgent = String(req?.headers?.["user-agent"] || "");
+  const purpose = String(req?.headers?.purpose || req?.headers?.["sec-purpose"] || "");
+  // This is noise filtering, not authentication or proof of crawler identity.
+  const automated = /bot\b|crawler|spider|Google-InspectionTool|HeadlessChrome|facebookexternalhit|bingpreview|lighthouse/i.test(userAgent);
+  return role !== "ADMIN" && role !== "MANAGER" && !automated && !/prefetch/i.test(purpose);
+}
+
+export function isMeaningfulSearchQuery(value) {
+  return typeof value === "string" && value.trim().length > 0
+    && value.length <= 255 && !/^(null|undefined)$/i.test(value.trim());
 }
 
 
@@ -452,7 +460,7 @@ export const SearchAnalyticsService = {
     requestedLocale = null,
   }) {
     if (
-      !shouldRecordSearchAnalytics(
+      !isMeaningfulSearchQuery(article) || !shouldRecordSearchAnalytics(
         req
       )
     ) {

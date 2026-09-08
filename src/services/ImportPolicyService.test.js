@@ -107,6 +107,28 @@ test(
   }
 );
 
+test("zero or missing prices do not produce a fictional percentage", () => {
+  for (const oldPrice of [0, "0.00", null, undefined, NaN, Infinity, -1]) {
+    assert.equal(calculatePriceChangePercent(oldPrice, 7204.5), null);
+  }
+  for (const newPrice of [null, undefined, NaN, Infinity]) {
+    assert.equal(calculatePriceChangePercent(100, newPrice), null);
+  }
+  assert.equal(calculatePriceChangePercent(0, 0), null);
+  assert.equal(calculatePriceChangePercent(100, 0), -100);
+  assert.equal(calculatePriceChangePercent(100, 100), 0);
+  assert.equal(classifyPriceChange({ changePercent: null, dropThreshold: 30, riseThreshold: 40 }), "IMPORTED");
+});
+
+test("tiny old prices stay within the percent field limit and still trigger a rise alert", () => {
+  assert.equal(calculatePriceChangePercent(0.01, 100), 999900);
+  for (const price of [100.01, 7204.5, 157585.5, 79999999.99]) {
+    const changePercent = calculatePriceChangePercent(0.01, price);
+    assert.equal(changePercent, 999999.99);
+    assert.equal(classifyPriceChange({ changePercent, dropThreshold: 30, riseThreshold: 40 }), "PRICE_RISE_ALERT");
+  }
+});
+
 test(
   "проверяет пороги изменения цены",
   () => {

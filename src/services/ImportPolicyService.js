@@ -85,6 +85,12 @@ export function calculatePriceChangePercent(
   oldPrice,
   newPrice
 ) {
+  // Missing prices are not zero prices. In particular, resetting a manual
+  // price to an absent automatic price must not be recorded as a 100% drop.
+  if (oldPrice == null || newPrice == null) {
+    return null;
+  }
+
   const oldValue = Number(oldPrice);
   const newValue = Number(newPrice);
 

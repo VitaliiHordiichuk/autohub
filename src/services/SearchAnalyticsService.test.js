@@ -4,7 +4,21 @@ import test from "node:test";
 import {
   resolveSearchLocation,
   shouldRecordSearchAnalytics,
+  isMeaningfulSearchQuery,
 } from "./SearchAnalyticsService.js";
+
+test("crawler and prefetch traffic does not become customer searches", () => {
+  for (const userAgent of ["Googlebot/2.1", "Google-InspectionTool/1.0", "bingbot/2.0", "Mozilla HeadlessChrome/130", "facebookexternalhit/1.1"]) {
+    assert.equal(shouldRecordSearchAnalytics({ headers: { "user-agent": userAgent } }), false, userAgent);
+  }
+  assert.equal(shouldRecordSearchAnalytics({ headers: { "user-agent": "Mozilla/5.0 Chrome/130 Safari/537.36" } }), true);
+  assert.equal(shouldRecordSearchAnalytics({ headers: { "sec-purpose": "prefetch;prerender" } }), false);
+  for (const value of [null, undefined, "null", " NULL ", "undefined", "", "  ", {}, ["A123"], "a".repeat(256)]) {
+    assert.equal(isMeaningfulSearchQuery(value), false);
+  }
+  assert.equal(isMeaningfulSearchQuery("колодки"), true);
+  assert.equal(isMeaningfulSearchQuery("A2711800109"), true);
+});
 
 
 test("trusted location headers take priority", () => {
