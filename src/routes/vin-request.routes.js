@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { requireAuth,requireRole } from "../middleware/auth.middleware.js";
-import { createVinRequest,decodeVinRequest,listClientVinRequests,getClientVinRequest,getVinPhoneVerification,addClientVinMessage,dismissClientVinRecommendation,listManagerVinRequests,getVinSummary,setVinClientBlock,updateVinRequest,addVinRecommendation,removeVinRecommendation,getVinSettings,updateVinSettings,listSupportedVinBrands,listAdminVinBrands,addAdminVinBrand,toggleAdminVinBrand } from "../controllers/vin-request.controller.js";
+import { createVinRequest,createGuestVinRequest,decodeVinRequest,listClientVinRequests,getClientVinRequest,getVinPhoneVerification,addClientVinMessage,dismissClientVinRecommendation,listManagerVinRequests,getVinSummary,setVinClientBlock,updateVinRequest,addVinRecommendation,removeVinRecommendation,getVinSettings,updateVinSettings,listSupportedVinBrands,listAdminVinBrands,addAdminVinBrand,toggleAdminVinBrand } from "../controllers/vin-request.controller.js";
 export const publicVinBrandRouter=Router();publicVinBrandRouter.get('/',listSupportedVinBrands);
+export const publicVinRequestRouter=Router();publicVinRequestRouter.post('/',createGuestVinRequest);
 export const adminVinBrandRouter=Router();adminVinBrandRouter.use(requireAuth,requireRole('ADMIN'));adminVinBrandRouter.get('/',listAdminVinBrands);adminVinBrandRouter.post('/',addAdminVinBrand);adminVinBrandRouter.patch('/:brandId',toggleAdminVinBrand);
 export const clientVinRequestRouter=Router();
 clientVinRequestRouter.use(requireAuth);

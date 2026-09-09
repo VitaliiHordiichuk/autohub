@@ -8,6 +8,7 @@ import { TelegramConnectionService } from "../src/services/TelegramConnectionSer
 
 let userId;
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const guestPhone = `+38099${String(Date.now()).slice(-7)}`;
 
 before(async () => {
   await pool.query("UPDATE vin_request_settings SET mode='CHAT',updated_by=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=1");
@@ -22,6 +23,7 @@ before(async () => {
 
 after(async () => {
   await pool.query("UPDATE vin_request_settings SET mode='CHAT',updated_by=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=1");
+  await pool.query("DELETE FROM vin_requests WHERE user_id IS NULL AND contact_phone=$1", [guestPhone]);
   if (userId) {
     await pool.query(
       "DELETE FROM vin_request_recommendations WHERE vin_request_id IN(SELECT id FROM vin_requests WHERE user_id=$1)",
@@ -182,6 +184,53 @@ test("клиент закрывает предложенную деталь, н�
     [recommendation.rows[0].id]
   );
   assert.ok(stored.rows[0]?.dismissed_at);
+});
+
+test("гостевой VIN-запрос создаётся по телефону и доступен менеджеру", async () => {
+  const brand = await pool.query(
+    "SELECT id FROM vehicle_brands WHERE is_vin_supported=TRUE ORDER BY id LIMIT 1"
+  );
+  assert.ok(brand.rows[0]);
+
+  const created = await VinRequestService.createGuest({
+    guestName: "Guest Customer",
+    vehicleBrandId: Number(brand.rows[0].id),
+    vin: "WDD2120471A387679",
+    requestText: "Front brake pads for this vehicle",
+    contactPhone: guestPhone,
+  });
+
+  assert.equal(created.status, "NEW");
+  const stored = await pool.query(
+    "SELECT user_id,guest_name,contact_phone FROM vin_requests WHERE id=$1",
+    [created.id]
+  );
+  assert.equal(stored.rows[0].user_id, null);
+  assert.equal(stored.rows[0].guest_name, "Guest Customer");
+  assert.equal(stored.rows[0].contact_phone, guestPhone);
+
+  const staffList = await VinRequestService.listForStaff({ status: "NEW", userId });
+  const visible = staffList.find((request) => Number(request.id) === created.id);
+  assert.equal(visible?.customer_name, "Guest Customer");
+
+  const updated = await VinRequestService.update({
+    requestId: created.id,
+    status: "IN_PROGRESS",
+    message: "Customer contacted by phone",
+    changedBy: userId,
+  });
+  assert.equal(updated.status, "IN_PROGRESS");
+  assert.equal(updated.messages.at(-1)?.message, "Customer contacted by phone");
+
+  await assert.rejects(
+    VinRequestService.createGuest({
+      vehicleBrandId: Number(brand.rows[0].id),
+      vin: "WDD2120471A387679",
+      requestText: "Front brake pads for this vehicle",
+      contactPhone: guestPhone,
+    }),
+    (error) => error?.code === "DUPLICATE_REQUEST"
+  );
 });
 
 test("режим одного запроса в сутки отключает переписку и повторное создание", async () => {

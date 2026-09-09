@@ -3,7 +3,12 @@ import { pool } from "../config/db.js";
 const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_name, u.last_name, u.phone AS user_phone,
   (u.vin_chat_blocked_at IS NOT NULL) AS vin_chat_blocked,
   u.vin_chat_blocked_at, u.vin_chat_block_reason,
-  CONCAT_WS(' ',u.first_name,u.last_name) AS customer_name,
+  COALESCE(
+    NULLIF(BTRIM(CONCAT_WS(' ',u.first_name,u.last_name)),''),
+    NULLIF(BTRIM(vr.guest_name),''),
+    u.email,
+    'Гість'
+  ) AS customer_name,
   COALESCE((SELECT JSON_AGG(JSON_BUILD_OBJECT(
     'id',m.id,'message',m.message,'created_at',m.created_at,
     'sender_user_id',m.sender_user_id,'sender_role',COALESCE(m.sender_role,sr.name),
@@ -35,12 +40,17 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
   LEFT JOIN LATERAL (SELECT COALESCE(SUM(sr.quantity),0) AS reserved_quantity FROM stock_reservations sr
     WHERE sr.product_offer_id=po.id AND (sr.status='ORDER_PENDING' OR (sr.status='ACTIVE' AND (sr.order_id IS NOT NULL OR sr.reserved_until IS NULL OR sr.reserved_until>CURRENT_TIMESTAMP)))) reservations ON TRUE
   WHERE rec.vin_request_id=vr.id),'[]'::json) AS recommendations
-  FROM vin_requests vr JOIN users u ON u.id=vr.user_id LEFT JOIN vehicle_brands vb ON vb.id=vr.vehicle_brand_id`;
+  FROM vin_requests vr LEFT JOIN users u ON u.id=vr.user_id LEFT JOIN vehicle_brands vb ON vb.id=vr.vehicle_brand_id`;
 
 export const VinRequestRepository = {
   async create({userId,vehicleBrandId,vin,requestText,contactPhone},db=pool){
     const result=await db.query(`INSERT INTO vin_requests(user_id,vehicle_brand_id,vin,request_text,contact_phone)
       VALUES($1,$2,$3,$4,$5) RETURNING *`,[userId,vehicleBrandId,vin,requestText,contactPhone]);
+    return result.rows[0];
+  },
+  async createGuest({guestName,vehicleBrandId,vin,requestText,contactPhone},db=pool){
+    const result=await db.query(`INSERT INTO vin_requests(user_id,guest_name,vehicle_brand_id,vin,request_text,contact_phone)
+      VALUES(NULL,$1,$2,$3,$4,$5) RETURNING *`,[guestName,vehicleBrandId,vin,requestText,contactPhone]);
     return result.rows[0];
   },
   async listForUser(userId,db=pool){
@@ -89,6 +99,15 @@ export const VinRequestRepository = {
       COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '15 minutes'
         AND vin=$2 AND LOWER(BTRIM(request_text))=LOWER(BTRIM($3)))::integer AS duplicate_count
       FROM vin_requests WHERE user_id=$1`,[userId,vin,requestText]);
+    return result.rows[0];
+  },
+  async guestCreateStats({contactPhone,vin,requestText},db=pool){
+    const result=await db.query(`SELECT
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '1 hour')::integer AS hour_count,
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '24 hours')::integer AS day_count,
+      COUNT(*) FILTER(WHERE created_at>CURRENT_TIMESTAMP-INTERVAL '15 minutes'
+        AND vin=$2 AND LOWER(BTRIM(request_text))=LOWER(BTRIM($3)))::integer AS duplicate_count
+      FROM vin_requests WHERE user_id IS NULL AND contact_phone=$1`,[contactPhone,vin,requestText]);
     return result.rows[0];
   },
   async phoneVerificationStatus(userId,db=pool){

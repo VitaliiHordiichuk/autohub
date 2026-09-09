@@ -63,7 +63,7 @@ import { clientSearchHistoryRouter } from "./routes/client-search-history.routes
 import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
 import { telegramConnectionRouter } from "./routes/telegram-connection.routes.js";
-import { clientVinRequestRouter, managerVinRequestRouter,publicVinBrandRouter,adminVinBrandRouter,adminVinSettingsRouter } from "./routes/vin-request.routes.js";
+import { clientVinRequestRouter, managerVinRequestRouter,publicVinBrandRouter,publicVinRequestRouter,adminVinBrandRouter,adminVinSettingsRouter } from "./routes/vin-request.routes.js";
 import {
   adminHomepageRouter,
   publicHomepageRouter,
@@ -125,6 +125,7 @@ app.use("/api/notifications", notificationRouter);
 app.use("/api/account/telegram", telegramConnectionRouter);
 app.use("/api/account/vin-requests", clientVinRequestRouter);
 app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
+app.use("/api/vin-requests",publicVinRequestRouter);
 app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 app.use("/api/seo", seoRouter);
 app.use("/api/products", productPlaceholderRouter);

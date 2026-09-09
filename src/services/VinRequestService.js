@@ -10,6 +10,7 @@ const modes=new Set(['CHAT','DAILY_REQUEST','DISABLED']);
 function id(value){const n=Number(value);if(!Number.isInteger(n)||n<=0)throw new Error('Некоректний номер VIN-запиту');return n;}
 function normalizeVin(value){const vin=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin))throw new Error('VIN має містити 17 символів без I, O та Q');return vin;}
 function text(value){const v=String(value||'').trim();if(v.length<5)throw new Error('Опишіть, яка деталь вам потрібна');if(v.length>3000)throw new Error('Опис надто довгий');return v;}
+function guestName(value){const clean=String(value||'').trim();if(clean.length>120)throw serviceError('Ім’я надто довге',400,'GUEST_NAME_TOO_LONG');return clean||null;}
 function normalizePhone(value){const raw=String(value||'').trim();if(!raw)return null;const digits=raw.replace(/\D/g,'');let normalized=digits;if(/^0\d{9}$/.test(digits))normalized=`38${digits}`;else if(/^\d{9}$/.test(digits))normalized=`380${digits}`;if(!/^380\d{9}$/.test(normalized))throw new Error('Вкажіть український номер у форматі +380 XX XXX XX XX');return `+${normalized}`;}
 function safePhone(value){try{return normalizePhone(value);}catch{return null;}}
 function serviceError(message,statusCode=400,code='VIN_REQUEST_ERROR'){const error=new Error(message);error.statusCode=statusCode;error.code=code;return error;}
@@ -44,6 +45,28 @@ export const VinRequestService={
       requestId:created.id,event:'NEW_REQUEST',message:cleanText,
     }).catch((error)=>console.error('Не вдалося надіслати Telegram-сповіщення про VIN-запит:',error.message));
     return created;
+  },
+  async createGuest({guestName:name,vehicleBrandId,vin,requestText,contactPhone,website}){
+    if(String(website||'').trim())throw serviceError('Не вдалося надіслати запит',400,'VIN_REQUEST_REJECTED');
+    const brandId=id(vehicleBrandId),cleanVin=normalizeVin(vin),cleanText=text(requestText),cleanPhone=normalizePhone(contactPhone),cleanName=guestName(name);
+    if(!cleanPhone)throw serviceError('Вкажіть номер телефону для зв’язку',400,'CONTACT_PHONE_REQUIRED');
+    const created=await transaction(async(db)=>{
+      await db.query('SELECT pg_advisory_xact_lock(hashtext($1),$2)',[cleanPhone,55102]);
+      const settings=await VinRequestRepository.settings(db);
+      if(settings.mode==='DISABLED')throw serviceError('VIN-запити тимчасово вимкнені. Спробуйте пізніше або зв’яжіться з нами телефоном.',503,'VIN_REQUESTS_DISABLED');
+      const brand=await VinRequestRepository.supportedBrand(brandId,db);if(!brand)throw serviceError('Перепрошуємо, цією маркою ми поки не займаємося');
+      const stats=await VinRequestRepository.guestCreateStats({contactPhone:cleanPhone,vin:cleanVin,requestText:cleanText},db);
+      if(Number(stats.duplicate_count)>0)throw serviceError('Такий запит уже надіслано. Менеджер незабаром його побачить 😊',429,'DUPLICATE_REQUEST');
+      if(settings.mode==='DAILY_REQUEST'&&Number(stats.day_count)>=1)throw serviceError('Один VIN-запит на сьогодні вже прийнято 😊 Наступний можна надіслати через 24 години.',429,'DAILY_REQUEST_LIMIT');
+      if(settings.mode==='CHAT'&&(Number(stats.hour_count)>=3||Number(stats.day_count)>=10))throw serviceError('Зробімо невелику паузу 😊 Надто багато VIN-запитів за короткий час.',429,'REQUEST_RATE_LIMIT');
+      const row=await VinRequestRepository.createGuest({guestName:cleanName,vehicleBrandId:brandId,vin:cleanVin,requestText:cleanText,contactPhone:cleanPhone},db);
+      await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin,guest:true}},db);
+      return row;
+    });
+    void TelegramNotificationService.sendVinActivityToStaff({
+      requestId:created.id,event:'NEW_REQUEST',message:cleanText,
+    }).catch((error)=>console.error('Не вдалося надіслати Telegram-сповіщення про гостьовий VIN-запит:',error.message));
+    return{id:Number(created.id),status:created.status,createdAt:created.created_at};
   },
   async decode({vehicleBrandId,vin}){
     const settings=await VinRequestRepository.settings();
@@ -111,12 +134,12 @@ export const VinRequestService={
     if(cleanMessage)await VinRequestRepository.addMessage({requestId:numericId,senderUserId:changedBy,message:cleanMessage});
     const cleanResponse=cleanMessage||current.manager_response;
     const updated=await VinRequestRepository.update({id:numericId,status:normalized,response:cleanResponse,answeredBy:changedBy,messageAdded:Boolean(cleanMessage)});
-    if(normalized!==current.status||Boolean(cleanMessage)){
+    if(current.user_id&&(normalized!==current.status||Boolean(cleanMessage))){
       await NotificationRepository.createForUser({userId:Number(current.user_id),eventKey:`vin:${numericId}:update:${updated.updated_at}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:normalized}});
     }
     return present(await VinRequestRepository.findById(numericId),changedBy);
   },
-  async addRecommendation({requestId,productId,productOfferId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const added=await VinRequestRepository.addRecommendation({requestId:numericId,productId:id(productId),productOfferId:id(productOfferId),addedBy:changedBy});if(!added)throw new Error('Товар уже прикріплено або пропозицію не знайдено');await NotificationRepository.createForUser({userId:Number(current.user_id),eventKey:`vin:${numericId}:recommendation:${added.id}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:current.status}});return present(await VinRequestRepository.findById(numericId),changedBy);},
+  async addRecommendation({requestId,productId,productOfferId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const added=await VinRequestRepository.addRecommendation({requestId:numericId,productId:id(productId),productOfferId:id(productOfferId),addedBy:changedBy});if(!added)throw new Error('Товар уже прикріплено або пропозицію не знайдено');if(current.user_id)await NotificationRepository.createForUser({userId:Number(current.user_id),eventKey:`vin:${numericId}:recommendation:${added.id}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:current.status}});return present(await VinRequestRepository.findById(numericId),changedBy);},
   async removeRecommendation({requestId,recommendationId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const removed=await VinRequestRepository.removeRecommendation({requestId:numericId,recommendationId:id(recommendationId)});if(!removed)throw new Error('Прикріплений товар не знайдено');return present(await VinRequestRepository.findById(numericId),changedBy);},
   async dismissRecommendation({requestId,recommendationId,userId}){const numericId=id(requestId);const current=await VinRequestRepository.findForUser(numericId,userId);if(!current)throw serviceError('VIN-запит не знайдено',404,'VIN_REQUEST_NOT_FOUND');const dismissed=await VinRequestRepository.dismissRecommendationForUser({requestId:numericId,recommendationId:id(recommendationId),userId});if(!dismissed)throw serviceError('Запропоновану деталь не знайдено',404,'VIN_RECOMMENDATION_NOT_FOUND');return present(await VinRequestRepository.findForUser(numericId,userId),userId);},
   settings(){return VinRequestRepository.settings();},
