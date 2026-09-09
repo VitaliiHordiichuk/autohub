@@ -15,7 +15,10 @@ export async function getCategoryProducts(req, res) {
   try {
     const pricingContext = await CustomerPricingService.getContext(req.auth?.userId ?? null);
     const result = await PublicCatalogService.getCategoryProducts({
-      slug: req.params.slug, locale: req.query.locale, page: req.query.page, pricingContext,
+      slug: req.params.slug, locale: req.query.locale, page: req.query.page,
+      query: req.query.q, availability: req.query.availability,
+      minPrice: req.query.minPrice, maxPrice: req.query.maxPrice,
+      sort: req.query.sort, pricingContext,
     });
     if (!result) return res.status(404).json({ success: false, error: "Категорію не знайдено" });
     return res.json({ success: true, ...result });

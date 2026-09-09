@@ -722,6 +722,62 @@ test("каталог сначала показывает наличие, а фо
   ]);
   assert.equal(result.products[2].hasRealImage, false);
 
+  const availableOnly = await PublicCatalogService.getCategoryProducts({
+    slug: childCategorySlug,
+    locale: "ru",
+    availability: "available",
+  });
+  assert.deepEqual(availableOnly.products.map((product) => Number(product.id)), [
+    ids.availableWithoutPhoto,
+  ]);
+
+  const unavailableOnly = await PublicCatalogService.getCategoryProducts({
+    slug: childCategorySlug,
+    locale: "ru",
+    availability: "unavailable",
+  });
+  assert.deepEqual(new Set(unavailableOnly.products.map((product) => Number(product.id))),
+    new Set([ids.unavailableWithPhoto, ids.unavailableWithoutPhoto]));
+
+  const articleMatch = await PublicCatalogService.getCategoryProducts({
+    slug: childCategorySlug,
+    locale: "ru",
+    query: fixtures[1].article.toLowerCase(),
+  });
+  assert.deepEqual(articleMatch.products.map((product) => Number(product.id)), [
+    ids.unavailableWithPhoto,
+  ]);
+
+  await pool.query(`
+    INSERT INTO product_offers(
+      product_id, quantity, purchase_price, retail_price,
+      source_type, is_available, is_hidden
+    ) VALUES
+      ($1, 5, 5, 10, 'OWN_STOCK', TRUE, FALSE),
+      ($2, 5, 15, 30, 'OWN_STOCK', TRUE, FALSE)
+  `, [ids.unavailableWithPhoto, ids.unavailableWithoutPhoto]);
+
+  const priceSorted = await PublicCatalogService.getCategoryProducts({
+    slug: childCategorySlug,
+    locale: "ru",
+    availability: "available",
+    minPrice: 10,
+    maxPrice: 30,
+    sort: "price_asc",
+  });
+  assert.deepEqual(priceSorted.products.map((product) => Number(product.id)), [
+    ids.unavailableWithPhoto,
+    ids.availableWithoutPhoto,
+    ids.unavailableWithoutPhoto,
+  ]);
+  assert.deepEqual(priceSorted.filters, {
+    query: "",
+    availability: "available",
+    minPrice: 10,
+    maxPrice: 30,
+    sort: "price_asc",
+  });
+
   const effectiveCategory = await EffectiveProductCategoryService.getByProductId(
     ids.unavailableWithPhoto,
   );
