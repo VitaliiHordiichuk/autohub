@@ -6,8 +6,6 @@ import {
 const ALLOWED_DAYS = new Set([
   7,
   30,
-  90,
-  365,
 ]);
 
 const ALLOWED_STATUSES = new Set([

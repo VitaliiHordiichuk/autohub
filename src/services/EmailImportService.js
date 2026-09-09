@@ -423,6 +423,7 @@ async function claimAttachment(
         await EmailImportFileRepository.createCompletedReference({
           ...recordData,
           importId: completedSameFile.import_id,
+          hasSuccessfulImport: true,
         });
 
       return {
@@ -456,6 +457,7 @@ async function claimAttachment(
       await EmailImportFileRepository.createCompletedReference({
         ...recordData,
         importId: sameHash.import_id,
+        hasSuccessfulImport: true,
       });
 
     return {

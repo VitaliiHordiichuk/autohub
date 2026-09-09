@@ -52,12 +52,12 @@ export const EmailImportFileRepository = {
       `
         SELECT eif.*
         FROM email_import_files eif
-        JOIN imports i ON i.id = eif.import_id
+        LEFT JOIN imports i ON i.id = eif.import_id
         WHERE eif.warehouse_supplier_import_id = $1
           AND eif.attachment_sha256 = $2
           AND eif.status = 'COMPLETED'
-          AND i.status IN ('COMPLETED', 'COMPLETED_WITH_ERRORS')
-          AND i.success_rows > 0
+          AND ((i.status IN ('COMPLETED', 'COMPLETED_WITH_ERRORS') AND i.success_rows > 0)
+            OR (eif.import_id IS NULL AND eif.has_successful_import = TRUE))
         ORDER BY eif.id DESC
         LIMIT 1
       `,
@@ -189,11 +189,15 @@ export const EmailImportFileRepository = {
       attachmentSha256,
       importId,
       receivedAt,
+      hasSuccessfulImport = false,
     },
     db = null
   ) {
     const result = await getDb(db).query(
       `
+        WITH report AS (
+          SELECT id,status,success_rows FROM imports WHERE id=$9 FOR KEY SHARE
+        )
         INSERT INTO email_import_files (
           warehouse_supplier_import_id,
           supplier_import_settings_id,
@@ -207,7 +211,8 @@ export const EmailImportFileRepository = {
           import_id,
           received_at,
           processed_at,
-          error_message
+          error_message,
+          has_successful_import
         )
         VALUES (
           $1,
@@ -219,10 +224,14 @@ export const EmailImportFileRepository = {
           $7,
           $8,
           'COMPLETED',
-          $9,
+          (SELECT id FROM report),
           $10,
           CURRENT_TIMESTAMP,
-          NULL
+          NULL,
+          CASE WHEN NOT EXISTS (SELECT 1 FROM report) THEN $11::boolean ELSE EXISTS (
+            SELECT 1 FROM report
+              WHERE status IN ('COMPLETED','COMPLETED_WITH_ERRORS') AND success_rows>0
+          ) END
         )
         ON CONFLICT (
           warehouse_supplier_import_id,
@@ -234,6 +243,7 @@ export const EmailImportFileRepository = {
           import_id = EXCLUDED.import_id,
           processed_at = CURRENT_TIMESTAMP,
           error_message = NULL,
+          has_successful_import = EXCLUDED.has_successful_import,
           updated_at = CURRENT_TIMESTAMP
         RETURNING *
       `,
@@ -248,6 +258,7 @@ export const EmailImportFileRepository = {
         attachmentSha256,
         importId || null,
         receivedAt || null,
+        hasSuccessfulImport,
       ]
     );
 
@@ -261,6 +272,7 @@ export const EmailImportFileRepository = {
         UPDATE email_import_files
         SET
           status = 'PROCESSING',
+          has_successful_import = FALSE,
           error_message = NULL,
           processed_at = NULL,
           attempt_count = attempt_count + 1,
@@ -289,6 +301,8 @@ export const EmailImportFileRepository = {
         SET
           status = 'COMPLETED',
           import_id = $2,
+          has_successful_import = EXISTS (SELECT 1 FROM imports WHERE id=$2
+            AND status IN ('COMPLETED','COMPLETED_WITH_ERRORS') AND success_rows>0),
           error_message = NULL,
           processed_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
@@ -314,6 +328,7 @@ export const EmailImportFileRepository = {
         UPDATE email_import_files
         SET
           status = 'FAILED',
+          has_successful_import = FALSE,
           error_message = $2,
           processed_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP

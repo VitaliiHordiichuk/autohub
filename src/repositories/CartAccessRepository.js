@@ -1,6 +1,11 @@
 import { pool } from "../config/db.js";
 
 export const CartAccessRepository = {
+  async touchGuestActivity(cartId, db = pool) {
+    // Keep active guest carts without writing a new row version on every poll.
+    await db.query(`UPDATE carts SET updated_at=CURRENT_TIMESTAMP
+      WHERE id=$1 AND user_id IS NULL AND updated_at < CURRENT_TIMESTAMP - INTERVAL '1 hour'`, [cartId]);
+  },
   async createForUser(userId, db = pool) {
     const sql = `
       INSERT INTO carts (

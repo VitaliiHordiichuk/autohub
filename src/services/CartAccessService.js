@@ -135,6 +135,7 @@ export const CartAccessService = {
       );
     }
 
+    await CartAccessRepository.touchGuestActivity(cart.id, db);
     return cart;
   },
 };

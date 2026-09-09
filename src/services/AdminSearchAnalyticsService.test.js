@@ -18,7 +18,7 @@ test(
         limit: "50",
       }),
       {
-        days: 90,
+        days: 30,
         status: "NOT_FOUND",
         search: "A271",
         date: "",
