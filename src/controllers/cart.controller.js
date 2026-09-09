@@ -1,4 +1,5 @@
 import { CartService } from "../services/CartService.js";
+import { FunnelAnalyticsService } from "../services/FunnelAnalyticsService.js";
 
 function guestTokenFromRequest(req) {
   const token = req.get("X-Cart-Token");
@@ -43,6 +44,31 @@ export async function addCartItem(req, res) {
           guestTokenFromRequest(req),
         productOfferId,
         quantity,
+      });
+
+    const addedItem =
+      result.items.find(
+        (item) =>
+          Number(item.productOfferId) ===
+          Number(productOfferId)
+      );
+
+    await FunnelAnalyticsService
+      .recordEvent({
+        req,
+        eventType: "ADD_TO_CART",
+        productId:
+          addedItem?.productId,
+        productOfferId,
+        cartId:
+          result.cart.id,
+        source: "CART_API",
+      })
+      .catch((error) => {
+        console.error(
+          "Ошибка записи добавления в корзину:",
+          error
+        );
       });
 
     return res.status(201).json({

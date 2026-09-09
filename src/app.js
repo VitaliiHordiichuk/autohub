@@ -17,6 +17,7 @@ import { adminWarehouseRouter } from "./routes/admin-warehouse.routes.js";
 import { adminSupplierRouter } from "./routes/admin-supplier.routes.js";
 import { adminBrandRouter } from "./routes/admin-brand.routes.js";
 import { adminSearchAnalyticsRouter } from "./routes/admin-search-analytics.routes.js";
+import { funnelAnalyticsRouter } from "./routes/funnel-analytics.routes.js";
 import { adminArticleNumberRouter } from "./routes/admin-article-number.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import {
@@ -199,6 +200,7 @@ app.get("/test", async (req, res) => {
 });
 
 app.use("/api/search", searchRouter);
+app.use("/api/analytics/funnel", funnelAnalyticsRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/checkout", checkoutRouter);

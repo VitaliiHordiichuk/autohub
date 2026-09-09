@@ -1,7 +1,9 @@
 import { VinRequestService } from "../services/VinRequestService.js";
+import { FunnelAnalyticsService } from "../services/FunnelAnalyticsService.js";
 function fail(res,error){return res.status(Number(error.statusCode)||400).json({success:false,error:error.message,code:error.code||'VIN_REQUEST_ERROR'});}
-export async function createVinRequest(req,res){try{return res.status(201).json({success:true,request:await VinRequestService.create({userId:req.auth.userId,...req.body})});}catch(e){return fail(res,e);}}
-export async function createGuestVinRequest(req,res){try{return res.status(201).json({success:true,request:await VinRequestService.createGuest(req.body)});}catch(e){return fail(res,e);}}
+async function recordVinRequest(req,request,source){await FunnelAnalyticsService.recordEvent({req,eventType:'VIN_REQUEST_CREATED',vinRequestId:request.id,source}).catch((error)=>console.error('Ошибка записи VIN-заявки в аналитику:',error));}
+export async function createVinRequest(req,res){try{const request=await VinRequestService.create({userId:req.auth.userId,...req.body});await recordVinRequest(req,request,'VIN_ACCOUNT');return res.status(201).json({success:true,request});}catch(e){return fail(res,e);}}
+export async function createGuestVinRequest(req,res){try{const request=await VinRequestService.createGuest(req.body);await recordVinRequest(req,request,'VIN_GUEST');return res.status(201).json({success:true,request});}catch(e){return fail(res,e);}}
 export async function decodeVinRequest(req,res){try{return res.json({success:true,decode:await VinRequestService.decode(req.body)});}catch(e){return res.status(Number(e.statusCode)||400).json({success:false,error:e.message,code:e.code||'VIN_DECODE_FAILED',make:e.make||null});}}
 export async function listClientVinRequests(req,res){try{return res.json({success:true,requests:await VinRequestService.listForUser(req.auth.userId)});}catch(e){return fail(res,e);}}
 export async function getClientVinRequest(req,res){try{return res.json({success:true,request:await VinRequestService.getForUser(req.params.requestId,req.auth.userId)});}catch(e){return fail(res,e);}}

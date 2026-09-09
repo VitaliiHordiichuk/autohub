@@ -19,6 +19,7 @@ let server;
 let baseUrl;
 let userId;
 let eventId;
+let funnelEventIds = [];
 let token;
 
 const testQuery =
@@ -120,6 +121,39 @@ before(async () => {
     eventResult.rows[0].id
   );
 
+  const funnelResult =
+    await pool.query(
+      `
+        INSERT INTO funnel_events (
+          event_type,
+          visitor_session_id,
+          user_id,
+          created_at
+        )
+        SELECT
+          event_type,
+          'analytics-test-session',
+          $1,
+          CURRENT_TIMESTAMP
+        FROM UNNEST(
+          ARRAY[
+            'PRODUCT_VIEW',
+            'ADD_TO_CART',
+            'CHECKOUT_STARTED',
+            'ORDER_CREATED',
+            'VIN_REQUEST_CREATED'
+          ]::text[]
+        ) AS event_type
+        RETURNING id;
+      `,
+      [userId]
+    );
+
+  funnelEventIds =
+    funnelResult.rows.map(
+      (row) => Number(row.id)
+    );
+
   token = jwt.sign(
     {
       sub: String(userId),
@@ -177,6 +211,16 @@ after(async () => {
         WHERE id = $1;
       `,
       [eventId]
+    );
+  }
+
+  if (funnelEventIds.length) {
+    await pool.query(
+      `
+        DELETE FROM funnel_events
+        WHERE id = ANY($1::bigint[]);
+      `,
+      [funnelEventIds]
     );
   }
 
@@ -244,6 +288,30 @@ test(
           item.id === eventId &&
           item.user?.id === userId
       )
+    );
+
+    assert.deepEqual(
+      body.funnel.stages.map(
+        (stage) => stage.key
+      ),
+      [
+        "SEARCH",
+        "PRODUCT_VIEW",
+        "ADD_TO_CART",
+        "CHECKOUT_STARTED",
+        "ORDER_CREATED",
+      ]
+    );
+
+    assert.ok(
+      body.funnel.stages.every(
+        (stage) =>
+          stage.visitors >= 1
+      )
+    );
+
+    assert.ok(
+      body.funnel.vinRequest.visitors >= 1
     );
   }
 );

@@ -88,6 +88,50 @@ function nullableNumber(value) {
 }
 
 
+function percentage(value, total) {
+  if (!total) {
+    return null;
+  }
+
+  return Number(
+    (
+      (value / total) * 100
+    ).toFixed(1)
+  );
+}
+
+
+function mapFunnelStage({
+  key,
+  events,
+  visitors,
+  previousVisitors,
+  searchVisitors,
+}) {
+  return {
+    key,
+    events,
+    visitors,
+    conversionFromPrevious:
+      previousVisitors === null
+        ? null
+        : percentage(
+            visitors,
+            previousVisitors
+          ),
+    conversionFromSearch:
+      key === "SEARCH"
+        ? searchVisitors > 0
+          ? 100
+          : null
+        : percentage(
+            visitors,
+            searchVisitors
+          ),
+  };
+}
+
+
 function mapQueryRow(row) {
   return {
     query:
@@ -668,14 +712,346 @@ export const AdminSearchAnalyticsRepository = {
           ]
         );
 
+      const funnelResult =
+        await client.query(
+          `
+            WITH scoped_events AS (
+              SELECT
+                'SEARCH'::text AS event_type,
+                se.visitor_session_id,
+                se.user_id,
+                se.created_at
+              FROM search_events se
+              WHERE se.event_type = 'SEARCH'
+                AND (
+                  (
+                    $2::date IS NULL
+                    AND se.created_at >=
+                      CURRENT_TIMESTAMP -
+                      ($1::integer * INTERVAL '1 day')
+                  )
+                  OR (
+                    $2::date IS NOT NULL
+                    AND (
+                      se.created_at
+                        AT TIME ZONE 'UTC'
+                        AT TIME ZONE 'Europe/Kyiv'
+                    )::date = $2::date
+                  )
+                )
+
+              UNION ALL
+
+              SELECT
+                fe.event_type::text,
+                fe.visitor_session_id,
+                fe.user_id,
+                fe.created_at
+              FROM funnel_events fe
+              WHERE (
+                (
+                  $2::date IS NULL
+                  AND fe.created_at >=
+                    CURRENT_TIMESTAMP -
+                    ($1::integer * INTERVAL '1 day')
+                )
+                OR (
+                  $2::date IS NOT NULL
+                  AND (
+                    fe.created_at
+                      AT TIME ZONE 'UTC'
+                      AT TIME ZONE 'Europe/Kyiv'
+                  )::date = $2::date
+                )
+              )
+            ),
+            identified AS (
+              SELECT
+                event_type,
+                created_at,
+                CASE
+                  WHEN visitor_session_id IS NOT NULL
+                    THEN 'session:' || visitor_session_id
+                  WHEN user_id IS NOT NULL
+                    THEN 'user:' || user_id::text
+                  ELSE NULL
+                END AS visitor_key
+              FROM scoped_events
+            ),
+            trackable AS (
+              SELECT *
+              FROM identified
+              WHERE visitor_key IS NOT NULL
+            ),
+            first_search AS (
+              SELECT
+                visitor_key,
+                MIN(created_at) AS search_at
+              FROM trackable
+              WHERE event_type = 'SEARCH'
+              GROUP BY visitor_key
+            ),
+            product_reached AS (
+              SELECT
+                search.visitor_key,
+                search.search_at,
+                (
+                  SELECT MIN(event.created_at)
+                  FROM trackable event
+                  WHERE event.visitor_key =
+                    search.visitor_key
+                    AND event.event_type =
+                      'PRODUCT_VIEW'
+                    AND event.created_at >=
+                      search.search_at
+                ) AS product_at
+              FROM first_search search
+            ),
+            cart_reached AS (
+              SELECT
+                product.*,
+                (
+                  SELECT MIN(event.created_at)
+                  FROM trackable event
+                  WHERE event.visitor_key =
+                    product.visitor_key
+                    AND event.event_type =
+                      'ADD_TO_CART'
+                    AND event.created_at >=
+                      product.product_at
+                ) AS cart_at
+              FROM product_reached product
+            ),
+            checkout_reached AS (
+              SELECT
+                cart.*,
+                (
+                  SELECT MIN(event.created_at)
+                  FROM trackable event
+                  WHERE event.visitor_key =
+                    cart.visitor_key
+                    AND event.event_type =
+                      'CHECKOUT_STARTED'
+                    AND event.created_at >=
+                      cart.cart_at
+                ) AS checkout_at
+              FROM cart_reached cart
+            ),
+            order_reached AS (
+              SELECT
+                checkout.*,
+                (
+                  SELECT MIN(event.created_at)
+                  FROM trackable event
+                  WHERE event.visitor_key =
+                    checkout.visitor_key
+                    AND event.event_type =
+                      'ORDER_CREATED'
+                    AND event.created_at >=
+                      checkout.checkout_at
+                ) AS order_at
+              FROM checkout_reached checkout
+            ),
+            vin_reached AS (
+              SELECT
+                product.visitor_key,
+                (
+                  SELECT MIN(event.created_at)
+                  FROM trackable event
+                  WHERE event.visitor_key =
+                    product.visitor_key
+                    AND event.event_type =
+                      'VIN_REQUEST_CREATED'
+                    AND event.created_at >=
+                      product.product_at
+                ) AS vin_request_at
+              FROM product_reached product
+            )
+            SELECT
+              (
+                SELECT COUNT(*)
+                FROM scoped_events
+                WHERE event_type = 'SEARCH'
+              ) AS search_events,
+              (
+                SELECT COUNT(*)
+                FROM scoped_events
+                WHERE event_type = 'PRODUCT_VIEW'
+              ) AS product_events,
+              (
+                SELECT COUNT(*)
+                FROM scoped_events
+                WHERE event_type = 'ADD_TO_CART'
+              ) AS cart_events,
+              (
+                SELECT COUNT(*)
+                FROM scoped_events
+                WHERE event_type = 'CHECKOUT_STARTED'
+              ) AS checkout_events,
+              (
+                SELECT COUNT(*)
+                FROM scoped_events
+                WHERE event_type = 'ORDER_CREATED'
+              ) AS order_events,
+              (
+                SELECT COUNT(*)
+                FROM scoped_events
+                WHERE event_type = 'VIN_REQUEST_CREATED'
+              ) AS vin_request_events,
+              (
+                SELECT COUNT(*)
+                FROM first_search
+              ) AS search_visitors,
+              (
+                SELECT COUNT(*)
+                FROM product_reached
+                WHERE product_at IS NOT NULL
+              ) AS product_visitors,
+              (
+                SELECT COUNT(*)
+                FROM cart_reached
+                WHERE cart_at IS NOT NULL
+              ) AS cart_visitors,
+              (
+                SELECT COUNT(*)
+                FROM checkout_reached
+                WHERE checkout_at IS NOT NULL
+              ) AS checkout_visitors,
+              (
+                SELECT COUNT(*)
+                FROM order_reached
+                WHERE order_at IS NOT NULL
+              ) AS order_visitors,
+              (
+                SELECT COUNT(*)
+                FROM vin_reached
+                WHERE vin_request_at IS NOT NULL
+              ) AS vin_request_visitors;
+          `,
+          [
+            days,
+            date || null,
+          ]
+        );
+
       const summary =
         summaryResult.rows[0] || {};
+
+      const funnel =
+        funnelResult.rows[0] || {};
+
+      const searchVisitors =
+        numeric(
+          funnel.search_visitors
+        );
+
+      const productVisitors =
+        numeric(
+          funnel.product_visitors
+        );
+
+      const cartVisitors =
+        numeric(
+          funnel.cart_visitors
+        );
+
+      const checkoutVisitors =
+        numeric(
+          funnel.checkout_visitors
+        );
+
+      const orderVisitors =
+        numeric(
+          funnel.order_visitors
+        );
+
+      const vinRequestVisitors =
+        numeric(
+          funnel.vin_request_visitors
+        );
 
       const total = numeric(
         countResult.rows[0]?.total
       );
 
       return {
+        funnel: {
+          stages: [
+            mapFunnelStage({
+              key: "SEARCH",
+              events:
+                numeric(
+                  funnel.search_events
+                ),
+              visitors:
+                searchVisitors,
+              previousVisitors: null,
+              searchVisitors,
+            }),
+            mapFunnelStage({
+              key: "PRODUCT_VIEW",
+              events:
+                numeric(
+                  funnel.product_events
+                ),
+              visitors:
+                productVisitors,
+              previousVisitors:
+                searchVisitors,
+              searchVisitors,
+            }),
+            mapFunnelStage({
+              key: "ADD_TO_CART",
+              events:
+                numeric(
+                  funnel.cart_events
+                ),
+              visitors:
+                cartVisitors,
+              previousVisitors:
+                productVisitors,
+              searchVisitors,
+            }),
+            mapFunnelStage({
+              key: "CHECKOUT_STARTED",
+              events:
+                numeric(
+                  funnel.checkout_events
+                ),
+              visitors:
+                checkoutVisitors,
+              previousVisitors:
+                cartVisitors,
+              searchVisitors,
+            }),
+            mapFunnelStage({
+              key: "ORDER_CREATED",
+              events:
+                numeric(
+                  funnel.order_events
+                ),
+              visitors:
+                orderVisitors,
+              previousVisitors:
+                checkoutVisitors,
+              searchVisitors,
+            }),
+          ],
+          vinRequest:
+            mapFunnelStage({
+              key: "VIN_REQUEST_CREATED",
+              events:
+                numeric(
+                  funnel.vin_request_events
+                ),
+              visitors:
+                vinRequestVisitors,
+              previousVisitors:
+                productVisitors,
+              searchVisitors,
+            }),
+        },
+
         summary: {
           searches:
             numeric(summary.searches),

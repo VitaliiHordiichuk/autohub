@@ -62,7 +62,7 @@ function requestHeaders(req) {
 }
 
 
-function resolveSessionId(req) {
+export function resolveAnalyticsSessionId(req) {
   const headers =
     requestHeaders(req);
 
@@ -497,7 +497,7 @@ export const SearchAnalyticsService = {
       return await SearchAnalyticsRepository
         .createSearchEvent({
           visitorSessionId:
-            resolveSessionId(req),
+            resolveAnalyticsSessionId(req),
 
           userId:
             req?.auth?.userId ??

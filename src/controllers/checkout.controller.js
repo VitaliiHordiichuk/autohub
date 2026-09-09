@@ -1,5 +1,6 @@
 import { StartCheckout } from "../use-cases/checkout/StartCheckout.js";
 import { SubmitOrder } from "../use-cases/checkout/SubmitOrder.js";
+import { FunnelAnalyticsService } from "../services/FunnelAnalyticsService.js";
 
 function guestTokenFromRequest(req) {
   const token = req.get("X-Cart-Token");
@@ -36,6 +37,22 @@ export async function startCheckout(
           req.auth?.userId ?? null,
         guestToken:
           guestTokenFromRequest(req),
+      });
+
+    await FunnelAnalyticsService
+      .recordEvent({
+        req,
+        eventType: "CHECKOUT_STARTED",
+        cartId: result.cartId,
+        checkoutId:
+          result.checkoutId,
+        source: "CHECKOUT",
+      })
+      .catch((error) => {
+        console.error(
+          "Ошибка записи начала оформления:",
+          error
+        );
       });
 
     return res.status(201).json({
@@ -79,6 +96,22 @@ export async function submitOrder(
         delivery,
         saveDeliveryProfile:
           Boolean(saveDeliveryProfile),
+      });
+
+    await FunnelAnalyticsService
+      .recordEvent({
+        req,
+        eventType: "ORDER_CREATED",
+        checkoutId,
+        orderId:
+          result.order.id,
+        source: "CHECKOUT",
+      })
+      .catch((error) => {
+        console.error(
+          "Ошибка записи созданного заказа:",
+          error
+        );
       });
 
     return res.status(201).json({

@@ -1,7 +1,7 @@
 import { pool } from '../config/db.js';
 
 export const RETENTION_POLICY = Object.freeze({
-  importsPerProfile: 5, searchDays: 30, priceDays: 90,
+  importsPerProfile: 5, searchDays: 30, funnelDays: 30, priceDays: 90,
   readNotificationDays: 30, unreadNotificationDays: 90,
   loginDays: 30, securityDays: 90, expiredTokenDays: 7, abandonedCartDays: 30,
 });
@@ -57,6 +57,7 @@ const abandonedCart = `t.user_id IS NULL
 // stock movements and review decisions) are deliberately absent.
 const rules = [
   ['search_events', age('t.created_at', RETENTION_POLICY.searchDays)],
+  ['funnel_events', age('t.created_at', RETENTION_POLICY.funnelDays)],
   ['price_history', age('t.created_at', RETENTION_POLICY.priceDays)],
   ['user_notifications', `(t.read_at IS NOT NULL AND ${age('t.read_at', RETENTION_POLICY.readNotificationDays)})
     OR (t.read_at IS NULL AND ${age('t.created_at', RETENTION_POLICY.unreadNotificationDays)})`],
