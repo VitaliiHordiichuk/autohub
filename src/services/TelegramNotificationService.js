@@ -16,7 +16,7 @@ function formatMoney(value) {
 }
 
 function localeOf(value) {
-  return value === "en" ? "en" : "uk";
+  return value === "en" || value === "ru" ? value : "uk";
 }
 
 async function sendMessage(chatId, payload) {
@@ -30,55 +30,145 @@ async function sendMessage(chatId, payload) {
   if (!response.ok || !data.ok) throw new Error(data.description || "Telegram sendMessage error");
 }
 
+export function buildVinStaffNotification({
+  request,
+  event,
+  message = "",
+  locale = "uk",
+  frontendUrl = "http://localhost:3000",
+}) {
+  const normalizedLocale = localeOf(locale);
+  const copy = {
+    uk: {
+      newRequest: "Новий VIN-запит",
+      newMessage: "Нове повідомлення у VIN-запиті",
+      customer: "Клієнт",
+      phone: "Телефон",
+      brand: "Марка",
+      missing: "Не вказано",
+      noText: "Без тексту",
+      open: "Відкрити VIN-запит",
+    },
+    en: {
+      newRequest: "New VIN request",
+      newMessage: "New message in VIN request",
+      customer: "Customer",
+      phone: "Phone",
+      brand: "Make",
+      missing: "Not provided",
+      noText: "No message",
+      open: "Open VIN request",
+    },
+    ru: {
+      newRequest: "Новый VIN-запрос",
+      newMessage: "Новое сообщение в VIN-запросе",
+      customer: "Клиент",
+      phone: "Телефон",
+      brand: "Марка",
+      missing: "Не указано",
+      noText: "Без текста",
+      open: "Открыть VIN-запрос",
+    },
+  }[normalizedLocale];
+  const customerName = [request.first_name, request.last_name]
+    .filter(Boolean)
+    .join(" ")
+    || request.guest_name
+    || request.email
+    || copy.missing;
+  const phone = request.contact_phone || request.user_phone || null;
+  const isMessage = event === "CLIENT_MESSAGE";
+  const body = String(isMessage ? message : request.request_text).trim();
+  const shortened = body.length > 700 ? `${body.slice(0, 697)}…` : body;
+  const text = [
+    isMessage
+      ? `💬 <b>${copy.newMessage} №${Number(request.id)}</b>`
+      : `🔎 <b>${copy.newRequest} №${Number(request.id)}</b>`,
+    `${copy.customer}: ${escapeHtml(customerName)}`,
+    ...(phone ? [`${copy.phone}: <code>${escapeHtml(phone)}</code>`] : []),
+    ...(request.vehicle_brand_name
+      ? [`${copy.brand}: ${escapeHtml(request.vehicle_brand_name)}`]
+      : []),
+    `VIN: <code>${escapeHtml(request.vin)}</code>`,
+    "",
+    escapeHtml(shortened || copy.noText),
+  ].join("\n");
+  const publicUrl = String(frontendUrl || "http://localhost:3000").replace(/\/$/, "");
+  const canOpen = /^https:\/\//i.test(publicUrl);
+  const requestUrl = `${publicUrl}/${normalizedLocale}/admin/vin-requests?request=${Number(request.id)}`;
+
+  return {
+    text,
+    ...(canOpen ? {
+      reply_markup: {
+        inline_keyboard: [[{ text: copy.open, url: requestUrl }]],
+      },
+    } : {}),
+  };
+}
+
 export const TelegramNotificationService = {
-  async sendVinActivityToStaff({ requestId, event, message = "" }, db = pool) {
-    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN) return;
+  async sendVinActivityToStaff(
+    { requestId, event, message = "" },
+    db = pool,
+    transport = sendMessage
+  ) {
+    const usesTelegramApi = transport === sendMessage;
+    if (
+      usesTelegramApi
+      && (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN)
+    ) {
+      return { recipients: 0, sent: 0, failed: 0, skipped: true };
+    }
     const [connections, requestResult] = await Promise.all([
       db.query(`
-        SELECT DISTINCT c.telegram_chat_id
+        SELECT DISTINCT ON (c.telegram_chat_id)
+          c.telegram_chat_id,
+          c.preferred_locale
         FROM user_telegram_connections c
         JOIN users u ON u.id = c.user_id
         JOIN roles r ON r.id = u.role_id
         WHERE c.notifications_enabled = TRUE
           AND u.is_active = TRUE
-          AND r.name IN ('ADMIN', 'MANAGER')`),
+          AND r.name IN ('ADMIN', 'MANAGER')
+        ORDER BY c.telegram_chat_id, c.user_id`),
       db.query(`
-        SELECT vr.id, vr.vin, vr.request_text, u.first_name, u.last_name, u.email
+        SELECT
+          vr.id,
+          vr.vin,
+          vr.request_text,
+          vr.contact_phone,
+          vr.guest_name,
+          vb.name AS vehicle_brand_name,
+          u.first_name,
+          u.last_name,
+          u.email,
+          u.phone AS user_phone
         FROM vin_requests vr
-        JOIN users u ON u.id = vr.user_id
+        LEFT JOIN users u ON u.id = vr.user_id
+        LEFT JOIN vehicle_brands vb ON vb.id = vr.vehicle_brand_id
         WHERE vr.id = $1`, [Number(requestId)]),
     ]);
-    if (!connections.rows.length || !requestResult.rows[0]) return;
+    if (!connections.rows.length || !requestResult.rows[0]) {
+      return {
+        recipients: connections.rows.length,
+        sent: 0,
+        failed: 0,
+        skipped: true,
+      };
+    }
 
     const request = requestResult.rows[0];
-    const customerName = [request.first_name, request.last_name].filter(Boolean).join(" ")
-      || request.email
-      || "Не вказано";
-    const isMessage = event === "CLIENT_MESSAGE";
-    const body = String(isMessage ? message : request.request_text).trim();
-    const shortened = body.length > 700 ? `${body.slice(0, 697)}…` : body;
-    const text = [
-      isMessage
-        ? `💬 <b>Нове повідомлення у VIN-запиті №${Number(request.id)}</b>`
-        : `🔎 <b>Новий VIN-запит №${Number(request.id)}</b>`,
-      `Клієнт: ${escapeHtml(customerName)}`,
-      `VIN: <code>${escapeHtml(request.vin)}</code>`,
-      "",
-      escapeHtml(shortened || "Без тексту"),
-    ].join("\n");
     const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");
-    const canOpen = /^https:\/\//i.test(frontendUrl);
-    const requestUrl = `${frontendUrl}/uk/admin/vin-requests?request=${Number(request.id)}`;
-    const deliveries = await Promise.allSettled(connections.rows.map((row) => sendMessage(
+    const deliveries = await Promise.allSettled(connections.rows.map((row) => transport(
       row.telegram_chat_id,
-      {
-        text,
-        ...(canOpen ? {
-          reply_markup: {
-            inline_keyboard: [[{ text: "Відкрити VIN-запит", url: requestUrl }]],
-          },
-        } : {}),
-      }
+      buildVinStaffNotification({
+        request,
+        event,
+        message,
+        locale: row.preferred_locale,
+        frontendUrl,
+      })
     )));
     deliveries.forEach((delivery) => {
       if (delivery.status === "rejected") {
@@ -88,6 +178,14 @@ export const TelegramNotificationService = {
         );
       }
     });
+    const failed = deliveries.filter((delivery) => delivery.status === "rejected").length;
+
+    return {
+      recipients: deliveries.length,
+      sent: deliveries.length - failed,
+      failed,
+      skipped: false,
+    };
   },
 
   async sendNewOrder({
