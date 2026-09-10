@@ -77,6 +77,9 @@ import {
   adminSiteContactRouter,
   siteContactRouter,
 } from "./routes/site-contact.routes.js";
+import {
+  novaPoshtaRouter,
+} from "./routes/nova-poshta.routes.js";
 
 export const app = express();
 
@@ -131,6 +134,7 @@ app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 app.use("/api/seo", seoRouter);
 app.use("/api/products", productPlaceholderRouter);
 app.use("/api/site/contact", siteContactRouter);
+app.use("/api/shipping/nova-poshta", novaPoshtaRouter);
 app.use("/api/admin/products", adminProductRouter);
 
 app.use(
