@@ -363,6 +363,27 @@ function applyWarehousePriorities(
 }
 
 
+export function presentOffers(
+  offers,
+  pricingContext = null,
+  locale = "uk"
+) {
+  const mappedOffers =
+    (offers || []).map(
+      (offer) =>
+        mapOffer(
+          offer,
+          pricingContext,
+          locale
+        )
+    );
+
+  return applyWarehousePriorities(
+    mappedOffers
+  );
+}
+
+
 export const OfferService = {
   async getOffersByProductId(
     productId,
@@ -375,11 +396,10 @@ export const OfferService = {
           productId
         );
 
-    const mappedOffers =
-      offers.map((offer) => mapOffer(offer, pricingContext, locale));
-
-    return applyWarehousePriorities(
-      mappedOffers
+    return presentOffers(
+      offers,
+      pricingContext,
+      locale
     );
   },
 };

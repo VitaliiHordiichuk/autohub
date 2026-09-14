@@ -80,6 +80,7 @@ import {
 import {
   novaPoshtaRouter,
 } from "./routes/nova-poshta.routes.js";
+import { googleMerchantRouter } from "./routes/google-merchant.routes.js";
 
 export const app = express();
 
@@ -132,6 +133,7 @@ app.use("/api/vin-vehicle-brands",publicVinBrandRouter);
 app.use("/api/vin-requests",publicVinRequestRouter);
 app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 app.use("/api/seo", seoRouter);
+app.use("/api/google", googleMerchantRouter);
 app.use("/api/products", productPlaceholderRouter);
 app.use("/api/site/contact", siteContactRouter);
 app.use("/api/shipping/nova-poshta", novaPoshtaRouter);
