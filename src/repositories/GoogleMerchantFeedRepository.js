@@ -37,6 +37,8 @@ export const GoogleMerchantFeedRepository = {
         END AS merchant_name_provider,
         uk_translation.description AS merchant_description,
         COALESCE(b.name, pm.name) AS merchant_brand,
+        pt.name AS merchant_product_type,
+        categories.merchant_categories,
         images.image_urls AS merchant_image_urls,
 
         po.id,
@@ -76,6 +78,8 @@ export const GoogleMerchantFeedRepository = {
         ON b.id = p.brand_id
       LEFT JOIN part_manufacturers pm
         ON pm.id = p.manufacturer_id
+      LEFT JOIN product_types pt
+        ON pt.id = p.product_type_id
       LEFT JOIN product_translations uk_translation
         ON uk_translation.product_id = p.id
         AND uk_translation.language_code = 'uk'
@@ -90,6 +94,35 @@ export const GoogleMerchantFeedRepository = {
       LEFT JOIN product_translations default_translation
         ON default_translation.product_id = p.id
         AND default_translation.language_code = default_language.code
+      LEFT JOIN LATERAL (
+        SELECT JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'id', category.id,
+            'slug', category.slug,
+            'name', category.name,
+            'name_uk', category.name_uk,
+            'parent_slug', parent.slug,
+            'parent_name', parent.name,
+            'parent_name_uk', parent.name_uk,
+            'assignment_source', assignment.assignment_source,
+            'confidence', assignment.confidence
+          )
+          ORDER BY
+            CASE WHEN assignment.assignment_source = 'MANUAL' THEN 0 ELSE 1 END,
+            CASE WHEN category.parent_id IS NOT NULL THEN 0 ELSE 1 END,
+            assignment.confidence DESC NULLS LAST,
+            category.sort_order,
+            category.id
+        ) AS merchant_categories
+        FROM product_categories assignment
+        JOIN categories category
+          ON category.id = assignment.category_id
+          AND category.is_active = TRUE
+        LEFT JOIN categories parent
+          ON parent.id = category.parent_id
+          AND parent.is_active = TRUE
+        WHERE assignment.product_id = p.id
+      ) categories ON TRUE
       LEFT JOIN LATERAL (
         SELECT ARRAY_AGG(pi.url ORDER BY pi.priority, pi.id) AS image_urls
         FROM product_images pi

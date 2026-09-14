@@ -4,6 +4,7 @@ import { CustomerPricingService } from "./CustomerPricingService.js";
 import { presentOffers } from "./OfferService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { GoogleProductCategoryService } from "./GoogleProductCategoryService.js";
 
 
 const SITE_URL = "https://maka.com.ua";
@@ -196,6 +197,8 @@ export function buildGoogleMerchantItems(
     );
     const title = buildMerchantTitle({ brand, name, article });
     if (!title) continue;
+    const googleProductCategory =
+      GoogleProductCategoryService.categoryFor(product);
 
     items.push({
       id: `maka-${productId}`,
@@ -214,6 +217,7 @@ export function buildGoogleMerchantItems(
       condition: "new",
       brand,
       mpn: article,
+      googleProductCategory,
     });
   }
 
@@ -241,6 +245,12 @@ export function renderGoogleMerchantFeed(items) {
     merchantElement("condition", item.condition),
     merchantElement("brand", item.brand),
     merchantElement("mpn", item.mpn),
+    ...(item.googleProductCategory
+      ? [merchantElement(
+          "google_product_category",
+          item.googleProductCategory
+        )]
+      : []),
     "    </item>",
   ].join("\n")).join("\n");
 

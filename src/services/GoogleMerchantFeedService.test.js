@@ -19,6 +19,18 @@ function candidate(overrides = {}) {
     merchant_name_provider: "MANUAL",
     merchant_description: null,
     merchant_brand: "MANN-FILTER",
+    merchant_product_type: null,
+    merchant_categories: [{
+      id: 13,
+      slug: "filter-oil",
+      name: "Масляные фильтры",
+      name_uk: "Масляні фільтри",
+      parent_slug: "filters",
+      parent_name: "Фильтры",
+      parent_name_uk: "Фільтри",
+      assignment_source: "AUTO_RULE",
+      confidence: 90,
+    }],
     merchant_image_urls: [
       "https://images.example.test/products/101/main.webp",
     ],
@@ -64,6 +76,7 @@ test("builds one stable Google item with the guest retail price", () => {
     condition: "new",
     brand: "MANN-FILTER",
     mpn: "HU718/5X",
+    googleProductCategory: "5613",
   });
 });
 
@@ -140,9 +153,11 @@ test("renders valid RSS structure, namespace and required merchant elements", ()
     "condition",
     "brand",
     "mpn",
+    "google_product_category",
   ]) {
     assert.match(xml, new RegExp(`<g:${element}>[^<]+<\\/g:${element}>`));
   }
+  assert.doesNotMatch(xml, /<g:product_type>/);
   assert.doesNotMatch(xml, /undefined|null|NaN|\[object Object\]/);
 });
 
@@ -240,6 +255,27 @@ test("excludes products without a brand or canonical article", () => {
   assert.equal(buildGoogleMerchantItems([
     candidate({ merchant_article: "" }),
   ]).length, 0);
+});
+
+
+test("keeps an unknown category item without inventing a Google category", () => {
+  const item = buildGoogleMerchantItems([
+    candidate({
+      merchant_categories: [{
+        slug: "other",
+        name_uk: "Інше",
+        parent_slug: null,
+      }],
+    }),
+  ])[0];
+  const xml = renderGoogleMerchantFeed([item]);
+
+  assert.ok(item);
+  assert.equal(item.googleProductCategory, null);
+  assert.equal("productType" in item, false);
+  assert.doesNotMatch(xml, /<g:google_product_category>/);
+  assert.doesNotMatch(xml, /<g:product_type>/);
+  assert.match(xml, /<item>/);
 });
 
 

@@ -3,6 +3,11 @@ import assert from "node:assert/strict";
 
 import { pool } from "../src/config/db.js";
 import { GoogleMerchantFeedService } from "../src/services/GoogleMerchantFeedService.js";
+import { GoogleMerchantFeedRepository } from "../src/repositories/GoogleMerchantFeedRepository.js";
+import {
+  GOOGLE_PRODUCT_CATEGORY,
+  googleProductCategoryFor,
+} from "../src/services/GoogleProductCategoryService.js";
 import { PublicSeoService } from "../src/services/PublicSeoService.js";
 import { SEARCH_FIXTURE } from "./helpers/search-fixture.js";
 
@@ -132,4 +137,36 @@ test("manual and automatic feed prices match the public product card", async () 
   assert.ok(automaticItem);
   assert.equal(publicAutomatic.offer.price, 523.45);
   assert.equal(automaticItem.price, `${publicAutomatic.offer.price.toFixed(2)} UAH`);
+});
+
+
+test("batch feed data classifies real parts and a real Collection shirt", async () => {
+  const expected = new Map([
+    ["A0024668801", GOOGLE_PRODUCT_CATEGORY.vehiclePartsAndAccessories],
+    ["A6540900070", GOOGLE_PRODUCT_CATEGORY.vehiclePartsAndAccessories],
+    ["B66959811", GOOGLE_PRODUCT_CATEGORY.shirtsAndTops],
+  ]);
+  const products = await pool.query(`
+    SELECT id, article
+    FROM products
+    WHERE article = ANY($1::text[])
+    ORDER BY article
+  `, [[...expected.keys()]]);
+
+  assert.equal(products.rows.length, expected.size);
+
+  const rows = await GoogleMerchantFeedRepository.findCandidates(
+    pool,
+    { productIds: products.rows.map((product) => product.id) }
+  );
+
+  for (const product of products.rows) {
+    const row = rows.find((candidate) =>
+      Number(candidate.merchant_product_id) === Number(product.id));
+    assert.ok(row, `Feed candidate ${product.article} not found`);
+    assert.equal(
+      googleProductCategoryFor(row),
+      expected.get(product.article)
+    );
+  }
 });
