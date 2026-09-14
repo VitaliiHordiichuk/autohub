@@ -127,4 +127,31 @@ export const SearchAnalyticsRepository = {
       client.release();
     }
   },
+
+  async updateMissingLocation({
+    searchEventId,
+    city,
+    countryCode,
+  }) {
+    await pool.query(
+      `
+        UPDATE search_events
+        SET
+          city = COALESCE(
+            NULLIF(BTRIM(city), ''),
+            $2
+          ),
+          country_code = COALESCE(
+            NULLIF(BTRIM(country_code), ''),
+            $3
+          )
+        WHERE id = $1;
+      `,
+      [
+        searchEventId,
+        city,
+        countryCode,
+      ]
+    );
+  },
 };

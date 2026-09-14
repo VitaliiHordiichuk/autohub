@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  enrichSearchLocation,
   resolveSearchLocation,
   shouldRecordSearchAnalytics,
   isMeaningfulSearchQuery,
@@ -104,6 +105,69 @@ test("Cloudflare location headers are recognized", () => {
     city: "Kyiv",
     countryCode: "UA",
   });
+});
+
+
+test("missing local city can be enriched without replacing the known country", async () => {
+  const location = {
+    clientIp: "8.8.8.8",
+    city: null,
+    countryCode: "UA",
+  };
+
+  const result = await enrichSearchLocation(
+    location,
+    async () => ({
+      city: "Kharkiv",
+      countryCode: "UA",
+    })
+  );
+
+  assert.deepEqual(result, {
+    clientIp: "8.8.8.8",
+    city: "Kharkiv",
+    countryCode: "UA",
+  });
+});
+
+
+test("external city is ignored when providers disagree on the country", async () => {
+  const location = {
+    clientIp: "8.8.8.8",
+    city: null,
+    countryCode: "UA",
+  };
+
+  const result = await enrichSearchLocation(
+    location,
+    async () => ({
+      city: "Mountain View",
+      countryCode: "US",
+    })
+  );
+
+  assert.equal(result, location);
+});
+
+
+test("existing city avoids an external lookup", async () => {
+  let calls = 0;
+  const location = {
+    clientIp: "8.8.8.8",
+    city: "Kyiv",
+    countryCode: "UA",
+  };
+
+  const result = await enrichSearchLocation(
+    location,
+    async () => {
+      calls += 1;
+      return null;
+    }
+  );
+
+  assert.equal(result, location);
+  assert.equal(calls, 0);
 });
 
 

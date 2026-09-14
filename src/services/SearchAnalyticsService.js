@@ -8,6 +8,10 @@ import {
   SearchAnalyticsRepository,
 } from "../repositories/SearchAnalyticsRepository.js";
 
+import {
+  IpGeolocationService,
+} from "./IpGeolocationService.js";
+
 
 function firstHeaderValue(value) {
   if (Array.isArray(value)) {
@@ -242,6 +246,90 @@ export function resolveSearchLocation(req) {
         )
       )?.toUpperCase() || null,
   };
+}
+
+
+export async function enrichSearchLocation(
+  location,
+  lookup = (ip) => IpGeolocationService.lookup(ip)
+) {
+  if (
+    location?.city ||
+    !location?.clientIp
+  ) {
+    return location;
+  }
+
+  const external = await lookup(
+    location.clientIp
+  );
+
+  if (!external) {
+    return location;
+  }
+
+  const externalCountryCode =
+    cleanText(
+      external.countryCode,
+      10
+    )?.toUpperCase() || null;
+
+  if (
+    location.countryCode &&
+    externalCountryCode &&
+    location.countryCode.toUpperCase() !==
+      externalCountryCode
+  ) {
+    return location;
+  }
+
+  return {
+    ...location,
+    city:
+      cleanText(
+        external.city,
+        150
+      ) || location.city,
+    countryCode:
+      (
+        location.countryCode ||
+        externalCountryCode
+      )?.toUpperCase() || null,
+  };
+}
+
+
+function enrichStoredSearchLocation(
+  searchEventId,
+  location
+) {
+  if (
+    location.city ||
+    !location.clientIp
+  ) {
+    return;
+  }
+
+  void enrichSearchLocation(location)
+    .then((enriched) => {
+      if (!enriched?.city) {
+        return null;
+      }
+
+      return SearchAnalyticsRepository
+        .updateMissingLocation({
+          searchEventId,
+          city: enriched.city,
+          countryCode:
+            enriched.countryCode,
+        });
+    })
+    .catch((error) => {
+      console.error(
+        "Ошибка уточнения геолокации поиска:",
+        error.message
+      );
+    });
 }
 
 
@@ -494,7 +582,7 @@ export const SearchAnalyticsService = {
             null
         ).length;
 
-      return await SearchAnalyticsRepository
+      const searchEventId = await SearchAnalyticsRepository
         .createSearchEvent({
           visitorSessionId:
             resolveAnalyticsSessionId(req),
@@ -574,6 +662,13 @@ export const SearchAnalyticsService = {
 
           results,
         });
+
+      enrichStoredSearchLocation(
+        searchEventId,
+        location
+      );
+
+      return searchEventId;
     } catch (error) {
       console.error(
         "Ошибка записи поисковой аналитики:",
