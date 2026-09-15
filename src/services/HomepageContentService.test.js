@@ -4,44 +4,137 @@ import assert from "node:assert/strict";
 import {
   HomepageContentService,
   annualDateIsWithin,
-  rotatingBannerIndex,
   selectHomepageBanner,
 } from "./HomepageContentService.js";
-
-test("резервні банери змінюються по черзі щодня", () => {
-  const first = rotatingBannerIndex("2026-08-25", 4);
-  const second = rotatingBannerIndex("2026-08-26", 4);
-  assert.equal(second, (first + 1) % 4);
-  assert.equal(rotatingBannerIndex("2026-08-25", 0), -1);
-});
 
 test("банер активного періоду має пріоритет над резервними", async () => {
   const scheduled = { id: 12, starts_on: "2026-08-24", ends_on: "2026-08-28" };
   let queryCount = 0;
   const db = {
-    async query() {
+    async query(sql) {
       queryCount += 1;
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) return { rows: [] };
+      if (sql.includes("INSERT INTO homepage_banner_daily_selections")) {
+        return { rows: [{ banner_id: scheduled.id }] };
+      }
       return { rows: [scheduled] };
     },
   };
 
   assert.equal(await selectHomepageBanner("2026-08-25", db), scheduled);
-  assert.equal(queryCount, 1);
+  assert.equal(queryCount, 3);
 });
 
 test("поза активним періодом вибирається тільки банер без дат", async () => {
-  const fallbackRows = [{ id: 2 }, { id: 5 }, { id: 9 }];
+  const nextBanner = { id: 5 };
   let queryCount = 0;
+  let insertValues = null;
   const db = {
-    async query() {
+    async query(sql, values) {
       queryCount += 1;
-      return queryCount < 3 ? { rows: [] } : { rows: fallbackRows };
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) return { rows: [] };
+      if (sql.includes("INSERT INTO homepage_banner_daily_selections")) {
+        insertValues = values;
+        return { rows: [{ banner_id: 5 }] };
+      }
+      if (sql.includes("WITH last_rotation")) return { rows: [nextBanner] };
+      return { rows: [] };
     },
   };
-  const expected = fallbackRows[rotatingBannerIndex("2026-08-25", fallbackRows.length)];
 
-  assert.equal(await selectHomepageBanner("2026-08-25", db), expected);
-  assert.equal(queryCount, 3);
+  assert.equal(await selectHomepageBanner("2026-08-25", db), nextBanner);
+  assert.equal(queryCount, 5);
+  assert.deepEqual(insertValues, ["2026-08-25", 5, "ROTATION", 5]);
+});
+
+test("звичайна черга йде до наступного наявного номера і пропускає прогалини", async () => {
+  let rotationQuery = "";
+  let rotationValues = null;
+  const db = {
+    async query(sql, values) {
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) return { rows: [] };
+      if (sql.includes("starts_on <= $1::date")) return { rows: [] };
+      if (sql.includes("repeats_annually = TRUE")) return { rows: [] };
+      if (sql.includes("WITH last_rotation")) {
+        rotationQuery = sql;
+        rotationValues = values;
+        return { rows: [{ id: 7 }] };
+      }
+      if (sql.includes("INSERT INTO homepage_banner_daily_selections")) {
+        return { rows: [{ banner_id: 7 }] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  assert.deepEqual(await selectHomepageBanner("2026-09-18", db), { id: 7 });
+  assert.ok(rotationQuery.includes("banner.id > rotation.last_id"));
+  assert.ok(rotationQuery.includes("banner.id"));
+  assert.deepEqual(rotationValues, ["2026-09-18"]);
+});
+
+test("банер з датою не пересуває звичайну чергу", async () => {
+  const scheduled = { id: 40 };
+  let insertValues = null;
+  const db = {
+    async query(sql, values) {
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) return { rows: [] };
+      if (sql.includes("starts_on <= $1::date")) return { rows: [scheduled] };
+      if (sql.includes("INSERT INTO homepage_banner_daily_selections")) {
+        insertValues = values;
+        return { rows: [{ banner_id: scheduled.id }] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  assert.equal(await selectHomepageBanner("2026-09-17", db), scheduled);
+  assert.deepEqual(insertValues, ["2026-09-17", 40, "SCHEDULED", null]);
+});
+
+test("вибраний банер не змінюється протягом київської календарної дати", async () => {
+  const stored = {
+    daily_banner_id: 19,
+    id: 19,
+    title_uk: "Зафіксований факт дня",
+  };
+  let queryCount = 0;
+  const db = {
+    async query(sql, values) {
+      queryCount += 1;
+      assert.ok(sql.includes("FROM homepage_banner_daily_selections selection"));
+      assert.deepEqual(values, ["2026-09-16"]);
+      return { rows: [stored] };
+    },
+  };
+
+  assert.equal(await selectHomepageBanner("2026-09-16", db), stored);
+  assert.equal(await selectHomepageBanner("2026-09-16", db), stored);
+  assert.equal(queryCount, 2);
+});
+
+test("одночасні запити використовують перший зафіксований банер", async () => {
+  const candidate = { id: 2 };
+  const concurrent = { daily_banner_id: 9, id: 9 };
+  let dailyReads = 0;
+  const db = {
+    async query(sql) {
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) {
+        dailyReads += 1;
+        return { rows: dailyReads === 1 ? [] : [concurrent] };
+      }
+      if (sql.includes("INSERT INTO homepage_banner_daily_selections")) {
+        return { rows: [] };
+      }
+      if (sql.includes("starts_on <= $1::date")) return { rows: [] };
+      if (sql.includes("repeats_annually = TRUE")) return { rows: [] };
+      if (sql.includes("WITH last_rotation")) return { rows: [candidate] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  assert.equal(await selectHomepageBanner("2026-09-16", db), concurrent);
+  assert.equal(dailyReads, 2);
 });
 
 test("щорічний банер працює без прив'язки до року", async () => {
@@ -65,14 +158,18 @@ test("щорічний банер має пріоритет над резерв�
   };
   let queryCount = 0;
   const db = {
-    async query() {
+    async query(sql) {
       queryCount += 1;
-      return queryCount === 2 ? { rows: [annual] } : { rows: [] };
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) return { rows: [] };
+      if (sql.includes("INSERT INTO homepage_banner_daily_selections")) {
+        return { rows: [{ banner_id: annual.id }] };
+      }
+      return queryCount === 3 ? { rows: [annual] } : { rows: [] };
     },
   };
 
   assert.equal(await selectHomepageBanner("2032-08-25", db), annual);
-  assert.equal(queryCount, 2);
+  assert.equal(queryCount, 4);
 });
 
 test("період банера можна повністю очистити без видалення банера", async () => {

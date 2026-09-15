@@ -219,13 +219,21 @@ function bannerPeriod(data, current = null) {
   return { startsOn, endsOn, repeatsAnnually: false };
 }
 
-export function rotatingBannerIndex(displayDate, bannerCount) {
-  if (!Number.isInteger(bannerCount) || bannerCount <= 0) return -1;
-  const dayNumber = Math.floor(Date.parse(`${displayDate}T00:00:00Z`) / 86_400_000);
-  return ((dayNumber % bannerCount) + bannerCount) % bannerCount;
+async function readDailyBannerSelection(displayDate, db) {
+  const result = await db.query(`
+    SELECT selection.banner_id AS daily_banner_id, banner.*
+    FROM homepage_banner_daily_selections selection
+    LEFT JOIN homepage_banners banner ON banner.id = selection.banner_id
+    WHERE selection.display_date = $1::date`, [displayDate]);
+  const row = result.rows[0];
+  if (!row) return { exists: false, banner: null };
+  return {
+    exists: true,
+    banner: row.daily_banner_id === null ? null : row,
+  };
 }
 
-export async function selectHomepageBanner(displayDate, db = pool) {
+async function selectScheduledHomepageBanner(displayDate, db) {
   const scheduledResult = await db.query(`
     SELECT * FROM homepage_banners
     WHERE is_active = TRUE
@@ -247,17 +255,60 @@ export async function selectHomepageBanner(displayDate, db = pool) {
     ORDER BY updated_at DESC, id DESC`, []);
   const annualBanner = annualResult.rows.find((row) =>
     annualDateIsWithin(displayDate, row.starts_on, row.ends_on));
-  if (annualBanner) return annualBanner;
+  return annualBanner || null;
+}
 
-  const fallbackResult = await db.query(`
-    SELECT * FROM homepage_banners
-    WHERE is_active = TRUE
-      AND COALESCE(repeats_annually, FALSE) = FALSE
-      AND starts_on IS NULL
-      AND ends_on IS NULL
-    ORDER BY id`, []);
-  const index = rotatingBannerIndex(displayDate, fallbackResult.rows.length);
-  return index >= 0 ? fallbackResult.rows[index] : null;
+async function selectNextRotatingHomepageBanner(displayDate, db) {
+  const result = await db.query(`
+    WITH last_rotation AS (
+      SELECT rotation_position
+      FROM homepage_banner_daily_selections
+      WHERE display_date < $1::date
+        AND selection_type = 'ROTATION'
+        AND rotation_position IS NOT NULL
+      ORDER BY display_date DESC
+      LIMIT 1
+    )
+    SELECT banner.*
+    FROM homepage_banners banner
+    CROSS JOIN (
+      SELECT COALESCE((SELECT rotation_position FROM last_rotation), 0) AS last_id
+    ) rotation
+    WHERE banner.is_active = TRUE
+      AND COALESCE(banner.repeats_annually, FALSE) = FALSE
+      AND banner.starts_on IS NULL
+      AND banner.ends_on IS NULL
+    ORDER BY
+      CASE WHEN banner.id > rotation.last_id THEN 0 ELSE 1 END,
+      banner.id
+    LIMIT 1`, [displayDate]);
+  return result.rows[0] || null;
+}
+
+export async function selectHomepageBanner(displayDate, db = pool) {
+  const storedSelection = await readDailyBannerSelection(displayDate, db);
+  if (storedSelection.exists) return storedSelection.banner;
+
+  const scheduled = await selectScheduledHomepageBanner(displayDate, db);
+  const candidate = scheduled || await selectNextRotatingHomepageBanner(displayDate, db);
+  const selectionType = scheduled ? "SCHEDULED" : candidate ? "ROTATION" : "EMPTY";
+  const inserted = await db.query(`
+    INSERT INTO homepage_banner_daily_selections(
+      display_date, banner_id, selection_type, rotation_position
+    )
+    VALUES ($1::date, $2, $3, $4)
+    ON CONFLICT (display_date) DO NOTHING
+    RETURNING banner_id`, [
+      displayDate,
+      candidate?.id ?? null,
+      selectionType,
+      selectionType === "ROTATION" ? candidate.id : null,
+    ]);
+
+  if (inserted.rows[0]) return candidate;
+
+  const concurrentSelection = await readDailyBannerSelection(displayDate, db);
+  return concurrentSelection.banner;
 }
 
 function storageConfig() {
