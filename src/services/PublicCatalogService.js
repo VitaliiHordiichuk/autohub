@@ -173,9 +173,11 @@ export const PublicCatalogService = {
         JOIN category_scope parent ON child.parent_id = parent.id
         WHERE child.is_active = TRUE
       ),
-      visible_assignments AS (
-        SELECT assignment.product_id, assignment.category_id
-        FROM product_categories assignment
+      category_product_ids AS MATERIALIZED (
+        SELECT DISTINCT assignment.product_id
+        FROM category_scope scope
+        JOIN product_categories assignment
+          ON assignment.category_id = scope.id
         WHERE assignment.assignment_source = 'MANUAL'
           OR (
             assignment.assignment_source = 'AUTO_RULE'
@@ -219,7 +221,9 @@ export const PublicCatalogService = {
           END AS name_provider,
           COALESCE(offer_metrics.has_available_offer,FALSE) AS has_available_offer,
           offer_metrics.minimum_available_price
-        FROM products p
+        FROM category_product_ids category_product
+        JOIN products p
+          ON p.id = category_product.product_id
         LEFT JOIN product_translations requested_translation
           ON requested_translation.product_id=p.id AND requested_translation.language_code=$2
         LEFT JOIN LATERAL (
@@ -264,11 +268,6 @@ export const PublicCatalogService = {
           HAVING COUNT(*)>0
         ) offer_metrics ON TRUE
         WHERE p.is_active=TRUE
-          AND EXISTS (
-            SELECT 1 FROM visible_assignments assignment
-            JOIN category_scope scope ON scope.id=assignment.category_id
-            WHERE assignment.product_id=p.id
-          )
           AND (
             NULLIF($3::text,'') IS NULL
             OR POSITION(LOWER($3) IN LOWER(COALESCE(requested_translation.name,default_translation.name,p.name)))>0
@@ -287,13 +286,12 @@ export const PublicCatalogService = {
     `;
     const filterParameters = [row.id, locale, normalizedQuery, normalizedArticleQuery,
       normalizedAvailability, normalizedMinPrice, normalizedMaxPrice, discountPercent, isVip];
-    const [countResult, productResult, childrenResult] = await Promise.all([
-      db.query(`${filteredProductsSql}
-        SELECT COUNT(*)::integer AS count FROM filtered_products`, filterParameters),
+    const [productResult, childrenResult] = await Promise.all([
       db.query(`${filteredProductsSql}
       SELECT p.id, p.article, p.article_normalized,
              filtered.display_name AS name,
              filtered.name_provider,
+             COUNT(*) OVER()::integer AS filtered_count,
              b.name AS brand_name,
              pm.name AS manufacturer,
              (SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id
@@ -325,9 +323,12 @@ export const PublicCatalogService = {
             ON child.parent_id = scope.category_id
             AND child.is_active = TRUE
         ),
-        visible_assignments AS (
-          SELECT assignment.product_id, assignment.category_id
-          FROM product_categories assignment
+        scoped_assignments AS MATERIALIZED (
+          SELECT scope.root_child_id,
+                 assignment.product_id
+          FROM child_scope scope
+          JOIN product_categories assignment
+            ON assignment.category_id = scope.category_id
           WHERE assignment.assignment_source = 'MANUAL'
             OR (
               assignment.assignment_source = 'AUTO_RULE'
@@ -357,12 +358,11 @@ export const PublicCatalogService = {
             )
         ),
         child_counts AS (
-          SELECT scope.root_child_id,
+          SELECT assignment.root_child_id,
                  COUNT(DISTINCT assignment.product_id)::integer AS product_count
-          FROM child_scope scope
-          JOIN visible_assignments assignment ON assignment.category_id = scope.category_id
+          FROM scoped_assignments assignment
           JOIN products product ON product.id = assignment.product_id AND product.is_active = TRUE
-          GROUP BY scope.root_child_id
+          GROUP BY assignment.root_child_id
         )
         SELECT
           child.id,
@@ -379,7 +379,49 @@ export const PublicCatalogService = {
         ORDER BY child.sort_order, child.id
       `, [row.id]),
     ]);
-    const products = await Promise.all(productResult.rows.map(async (product) => {
+
+    let total =
+      Number(
+        productResult.rows[0]
+          ?.filtered_count || 0
+      );
+
+    if (
+      productResult.rows.length === 0 &&
+      normalizedPage > 1
+    ) {
+      const countResult =
+        await db.query(
+          `${filteredProductsSql}
+          SELECT COUNT(*)::integer AS count
+          FROM filtered_products`,
+          filterParameters
+        );
+
+      total =
+        Number(
+          countResult.rows[0]
+            ?.count || 0
+        );
+    }
+
+    const productRows =
+      productResult.rows.map((row) => {
+        const product = { ...row };
+        delete product.filtered_count;
+        return product;
+      });
+
+    const offersByProductId =
+      await OfferService.getOffersByProductIds(
+        productRows.map(
+          (product) => Number(product.id)
+        ),
+        pricingContext,
+        locale
+      );
+
+    const products = productRows.map((product) => {
       const name = publicProductName(product.name, product.name_provider);
       const image = ProductPlaceholderService.getProductImage({
         ...product,
@@ -395,9 +437,12 @@ export const PublicCatalogService = {
         image_urls: image.imageUrls,
         hasRealImage: image.hasRealImage,
         isPlaceholder: image.isPlaceholder,
-        offers: await OfferService.getOffersByProductId(product.id, pricingContext, locale),
+        offers:
+          offersByProductId.get(
+            Number(product.id)
+          ) || [],
       };
-    }));
+    });
     return {
       category: {
         id: Number(row.id), slug: row.slug, name: localizedName(row, locale),
@@ -416,8 +461,8 @@ export const PublicCatalogService = {
           })),
       },
       products,
-      pagination: { page: normalizedPage, pageSize: limit, total: Number(countResult.rows[0].count),
-        pages: Math.max(1, Math.ceil(Number(countResult.rows[0].count) / limit)) },
+      pagination: { page: normalizedPage, pageSize: limit, total,
+        pages: Math.max(1, Math.ceil(total / limit)) },
       filters: {
         query: normalizedQuery,
         availability: normalizedAvailability,

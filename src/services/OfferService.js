@@ -385,21 +385,76 @@ export function presentOffers(
 
 
 export const OfferService = {
+  async getOffersByProductIds(
+    productIds,
+    pricingContext = null,
+    locale = "uk"
+  ) {
+    const normalizedProductIds = [
+      ...new Set(
+        (productIds || [])
+          .map((productId) => Number(productId))
+          .filter((productId) => Number.isInteger(productId) && productId > 0)
+      ),
+    ];
+
+    const offersByProductId = new Map(
+      normalizedProductIds.map(
+        (productId) => [productId, []]
+      )
+    );
+
+    if (normalizedProductIds.length === 0) {
+      return offersByProductId;
+    }
+
+    const offers =
+      await ProductRepository
+        .findOffersByProductIds(
+          normalizedProductIds
+        );
+
+    for (const offer of offers) {
+      const productId =
+        Number(offer.product_id);
+
+      const productOffers =
+        offersByProductId.get(productId);
+
+      if (productOffers) {
+        productOffers.push(offer);
+      }
+    }
+
+    for (const productId of normalizedProductIds) {
+      offersByProductId.set(
+        productId,
+        presentOffers(
+          offersByProductId.get(productId),
+          pricingContext,
+          locale
+        )
+      );
+    }
+
+    return offersByProductId;
+  },
+
   async getOffersByProductId(
     productId,
     pricingContext = null,
     locale = "uk"
   ) {
-    const offers =
-      await ProductRepository
-        .findOffersByProductId(
-          productId
+    const offersByProductId =
+      await OfferService
+        .getOffersByProductIds(
+          [productId],
+          pricingContext,
+          locale
         );
 
-    return presentOffers(
-      offers,
-      pricingContext,
-      locale
-    );
+    return offersByProductId.get(
+      Number(productId)
+    ) || [];
   },
 };

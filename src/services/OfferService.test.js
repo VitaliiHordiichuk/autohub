@@ -180,3 +180,54 @@ test(
     );
   }
 );
+
+
+test(
+  "группирует предложения нескольких товаров",
+  async () => {
+    const originalProduct =
+      await ProductRepository
+        .findByNormalizedArticle(
+          SEARCH_FIXTURE
+            .originalNormalized
+        );
+
+    const analogProduct =
+      await ProductRepository
+        .findByNormalizedArticle(
+          SEARCH_FIXTURE
+            .analogNormalized
+        );
+
+    assert.ok(originalProduct);
+    assert.ok(analogProduct);
+
+    const offersByProductId =
+      await OfferService
+        .getOffersByProductIds([
+          originalProduct.id,
+          analogProduct.id,
+        ]);
+
+    assert.equal(
+      offersByProductId
+        .get(Number(originalProduct.id))
+        .length,
+      0
+    );
+
+    assert.equal(
+      offersByProductId
+        .get(Number(analogProduct.id))
+        .length,
+      1
+    );
+
+    assert.equal(
+      offersByProductId
+        .get(Number(analogProduct.id))[0]
+        .sourceType,
+      "OWN_STOCK"
+    );
+  }
+);

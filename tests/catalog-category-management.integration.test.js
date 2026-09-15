@@ -798,4 +798,26 @@ test("каталог сначала показывает наличие, а фо
     name: `Тестовая подгруппа ${suffix}`,
     productCount: 3,
   }]);
+
+  const beyondLastPage =
+    await PublicCatalogService.getCategoryProducts({
+      slug: childCategorySlug,
+      locale: "ru",
+      page: 999,
+    });
+
+  assert.deepEqual(
+    beyondLastPage.products,
+    []
+  );
+
+  assert.equal(
+    beyondLastPage.pagination.total,
+    3
+  );
+
+  assert.equal(
+    beyondLastPage.pagination.pages,
+    1
+  );
 });

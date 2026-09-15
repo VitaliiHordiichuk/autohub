@@ -90,6 +90,53 @@ test(
 
 
 test(
+  "находит предложения нескольких товаров одним запросом",
+  async () => {
+    const originalProduct =
+      await ProductRepository
+        .findByNormalizedArticle(
+          SEARCH_FIXTURE
+            .originalNormalized
+        );
+
+    const analogProduct =
+      await ProductRepository
+        .findByNormalizedArticle(
+          SEARCH_FIXTURE
+            .analogNormalized
+        );
+
+    assert.ok(originalProduct);
+    assert.ok(analogProduct);
+
+    const offers =
+      await ProductRepository
+        .findOffersByProductIds([
+          originalProduct.id,
+          analogProduct.id,
+          analogProduct.id,
+        ]);
+
+    assert.equal(
+      offers.length,
+      1
+    );
+
+    assert.equal(
+      Number(offers[0].product_id),
+      Number(analogProduct.id)
+    );
+
+    assert.deepEqual(
+      await ProductRepository
+        .findOffersByProductIds([]),
+      []
+    );
+  }
+);
+
+
+test(
   "возвращает эффективную ручную цену предложения",
   async () => {
     const product =

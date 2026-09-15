@@ -42,7 +42,19 @@ export const ProductRepository = {
     return result.rows[0] ?? null;
   },
   
-  async findOffersByProductId(productId) {
+  async findOffersByProductIds(productIds) {
+    const normalizedProductIds = [
+      ...new Set(
+        (productIds || [])
+          .map((productId) => Number(productId))
+          .filter((productId) => Number.isInteger(productId) && productId > 0)
+      ),
+    ];
+
+    if (normalizedProductIds.length === 0) {
+      return [];
+    }
+
     const sql = `
       SELECT
         po.id,
@@ -125,7 +137,7 @@ export const ProductRepository = {
           )
       ) reservations ON TRUE
 
-      WHERE po.product_id = $1
+      WHERE po.product_id = ANY($1::integer[])
         AND po.is_available = TRUE
         AND po.is_hidden = FALSE
         AND GREATEST(
@@ -144,6 +156,8 @@ export const ProductRepository = {
         )
 
       ORDER BY
+        po.product_id,
+
         CASE
           WHEN s.type = 'OWN'
             OR (
@@ -174,10 +188,16 @@ export const ProductRepository = {
     const result =
       await pool.query(
         sql,
-        [productId]
+        [normalizedProductIds]
       );
 
     return result.rows;
+  },
+
+  async findOffersByProductId(productId) {
+    return ProductRepository.findOffersByProductIds([
+      productId,
+    ]);
   },
 
 async findMercedesFamilyByBase(articleBase) {
