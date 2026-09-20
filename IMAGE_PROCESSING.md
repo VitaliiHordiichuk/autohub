@@ -4,7 +4,7 @@ Product uploads keep the untouched original in Cloudflare R2 and enqueue an asyn
 
 ## Deploy
 
-1. Apply database migrations through `083_add_product_image_quality_metadata.sql` before starting the new backend.
+1. Apply database migrations through `084_add_product_image_branding_mode.sql` before starting the new backend.
 2. Restart the backend. On startup it resumes up to 20 interrupted image jobs and checks for more once per minute.
 
 No Docker container, external image API or per-image payment is required.
@@ -18,6 +18,18 @@ No Docker container, external image API or per-image payment is required.
 - proportional scaling capped at `MAX_UPSCALE = 1.5` so small originals are never enlarged more than 1.5 times;
 - WebP quality 89;
 - optional MAKA branding selected by the configured branding mode.
+
+## Automatic crop and composition
+
+Processing version 4 normalizes the product composition before branding. It samples the four outer corners and only enables automatic cropping when the outer background is sufficiently uniform. The processor then finds the content boundary, removes the external empty area and rebuilds equal white margins around the detected product. A non-uniform photographic background safely falls back to the full original bounds instead of risking removal of a product part.
+
+- `TARGET_FILL_RATIO = 0.85`: the dominant side of a sufficiently large product aims for 85% of the 1500 px canvas (1275 px);
+- `CROP_PADDING_RATIO = 0.08`: an 8% safe white margin is added on every side of the detected product before it is centred;
+- `MAX_UPSCALE = 1.5`: the detected product region is never enlarged by more than 1.5 times.
+
+The target ratio is therefore best effort. A small source remains below 85% when reaching it would exceed the upscale limit. Horizontal and vertical products keep their proportions, remain fully visible and are centred on the 1500 × 1500 white canvas. The crop and composition step runs before `CLEAN`, `STAMP_ONLY` or `FULL_BRANDED`, so every branding mode uses the same prepared product image.
+
+The quality status still uses the oriented original dimensions, not the cropped region or final canvas. No existing image is reprocessed automatically. A later maintenance command can reuse `detectProductBounds` and `normalizeProductComposition` to process selected originals explicitly. Merchant and storefront URLs keep their existing behaviour and receive the new composition only for new uploads or manual reprocessing.
 
 The existing database columns ending in `_1600` remain as the primary processed-image slot for backward compatibility. New files stored in that slot are physically 1500 × 1500 and use a `-1500.webp` object key.
 
@@ -46,6 +58,8 @@ await processProductImage(input, {
 An explicit function option takes priority over the environment. The `FULL_BRANDED` grid uses a 620 × 420 px step instead of the previous 360 × 245 px step, and its opacity is 0.28 instead of 0.45. The bottom stamp keeps its previous size and position.
 
 Changing the mode does not reprocess existing files. It applies only to later uploads and images explicitly sent for reprocessing.
+
+The admin interface sends the selected mode with upload and reprocess requests. Migration `084_add_product_image_branding_mode.sql` stores that choice on the image so an asynchronous or recovered job always uses the requested mode. Existing images are marked `FULL_BRANDED` without being reprocessed.
 
 ## Quality metadata
 

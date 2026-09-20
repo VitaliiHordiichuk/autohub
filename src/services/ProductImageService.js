@@ -3,7 +3,9 @@ import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } fro
 import { pool } from "../config/db.js";
 import {
   PROCESSED_IMAGE_SIZE,
+  PRODUCT_IMAGE_PROCESSING_VERSION,
   ProductImageProcessor,
+  resolveImageBrandingMode,
 } from "./ProductImageProcessor.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
 
@@ -37,6 +39,13 @@ function positiveId(value, label) {
   return result;
 }
 
+function resolveModeAndDatabase(brandingMode, database) {
+  if (brandingMode && typeof brandingMode.query === "function") {
+    return { brandingMode: undefined, db: brandingMode };
+  }
+  return { brandingMode, db: database };
+}
+
 async function bodyToBuffer(body) {
   if (!body) throw new Error("Пустой ответ хранилища");
   if (typeof body.transformToByteArray === "function") return Buffer.from(await body.transformToByteArray());
@@ -65,7 +74,8 @@ async function runProcessing(imageId, db = pool) {
   const id = positiveId(imageId, "imageId");
   const rowResult = await db.query(`SELECT pi.id,pi.product_id,pi.original_storage_key,
       pi.processed_storage_key_1600,pi.processed_storage_key_1200,
-      pi.processed_storage_key_800,pi.processed_storage_key_400,p.article
+      pi.processed_storage_key_800,pi.processed_storage_key_400,
+      pi.image_branding_mode,p.article
     FROM product_images pi
     JOIN products p ON p.id=pi.product_id
     WHERE pi.id=$1`, [id]);
@@ -77,7 +87,9 @@ async function runProcessing(imageId, db = pool) {
   const uploadedKeys = [];
   try {
     const source = await r2.send(new GetObjectCommand({ Bucket: config.bucket, Key: row.original_storage_key }));
-    const processed = await ProductImageProcessor.process(await bodyToBuffer(source.Body));
+    const processed = await ProductImageProcessor.process(await bodyToBuffer(source.Body), {
+      brandingMode: row.image_branding_mode,
+    });
     const revision = randomUUID();
     const articleSlug = imageArticleSlug(row.article, row.product_id);
     const keys = {};
@@ -101,7 +113,7 @@ async function runProcessing(imageId, db = pool) {
       processed_storage_key_1600=$6,processed_storage_key_1200=$7,
       processed_storage_key_800=$8,processed_storage_key_400=$9,
       original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
-      image_quality_status=$14,processing_version=3,
+      image_quality_status=$14,processing_version=${PRODUCT_IMAGE_PROCESSING_VERSION},
       processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
       processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
       WHERE id=$1`, [id, publicUrl(config, keys[1600]), publicUrl(config, keys[1200]),
@@ -157,13 +169,17 @@ export const ProductImageService = {
     const result = await db.query(`SELECT id,product_id,url,source,priority,created_at,
       original_url,processed_url_1600,processed_url_1200,processed_url_800,processed_url_400,
       processing_status,display_mode,processing_error,processed_at,
-      original_width,original_height,processed_width,processed_height,image_quality_status
+      original_width,original_height,processed_width,processed_height,image_quality_status,
+      image_branding_mode
       FROM product_images WHERE product_id=$1 ORDER BY priority,id`, [positiveId(productId, "productId")]);
     return result.rows;
   },
 
-  async upload(productId, files, db = pool) {
+  async upload(productId, files, brandingMode, database = pool) {
+    const request = resolveModeAndDatabase(brandingMode, database);
+    const db = request.db;
     const id = positiveId(productId, "productId");
+    const resolvedBrandingMode = resolveImageBrandingMode(request.brandingMode);
     if (!files?.length) throw new Error("Выбери хотя бы одно изображение");
     const exists = await db.query("SELECT article FROM products WHERE id=$1", [id]);
     if (!exists.rows[0]) throw new Error("Товар не найден");
@@ -183,8 +199,10 @@ export const ProductImageService = {
       let result;
       try {
         result = await db.query(`INSERT INTO product_images(
-          product_id,url,source,priority,storage_key,original_url,original_storage_key,processing_status,display_mode)
-          VALUES($1,$2,'R2',$3,$4,$2,$4,'PROCESSING','ORIGINAL') RETURNING *`, [id, url, ++priority, storageKey]);
+          product_id,url,source,priority,storage_key,original_url,original_storage_key,
+          processing_status,display_mode,image_branding_mode)
+          VALUES($1,$2,'R2',$3,$4,$2,$4,'PROCESSING','ORIGINAL',$5) RETURNING *`,
+        [id, url, ++priority, storageKey, resolvedBrandingMode]);
       } catch (error) {
         await r2.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: storageKey })).catch(() => {});
         throw error;
@@ -217,10 +235,14 @@ export const ProductImageService = {
     return this.list(product, db);
   },
 
-  async reprocess(productId, imageId, db = pool) {
+  async reprocess(productId, imageId, brandingMode, database = pool) {
+    const request = resolveModeAndDatabase(brandingMode, database);
+    const db = request.db;
     const product = positiveId(productId, "productId"); const image = positiveId(imageId, "imageId");
-    const result = await db.query(`UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL
-      WHERE id=$1 AND product_id=$2 RETURNING id`, [image, product]);
+    const resolvedBrandingMode = resolveImageBrandingMode(request.brandingMode);
+    const result = await db.query(`UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL,
+      image_branding_mode=$3 WHERE id=$1 AND product_id=$2 RETURNING id`,
+    [image, product, resolvedBrandingMode]);
     if (!result.rows[0]) throw new Error("Изображение не найдено");
     enqueue(image);
     return this.list(product, db);
