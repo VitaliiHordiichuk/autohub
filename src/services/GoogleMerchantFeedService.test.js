@@ -95,6 +95,8 @@ test("loads the whole feed with one batch database query", async () => {
   assert.equal(items.length, 1);
   assert.equal(queries.length, 1);
   assert.match(queries[0].sql, /FROM products p/);
+  assert.match(queries[0].sql, /WHEN pi\.processing_status = 'PROCESSED'/);
+  assert.match(queries[0].sql, /COALESCE\(pi\.processed_url_1600, pi\.url, pi\.original_url\)/);
   assert.deepEqual(queries[0].parameters, [null]);
 });
 

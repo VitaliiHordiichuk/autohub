@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { pool } from "../config/db.js";
-import { ProductImageProcessor } from "./ProductImageProcessor.js";
+import {
+  PROCESSED_IMAGE_SIZE,
+  ProductImageProcessor,
+} from "./ProductImageProcessor.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
 
 const mimeExtensions = new Map([
@@ -74,15 +77,21 @@ async function runProcessing(imageId, db = pool) {
   const uploadedKeys = [];
   try {
     const source = await r2.send(new GetObjectCommand({ Bucket: config.bucket, Key: row.original_storage_key }));
-    const variants = await ProductImageProcessor.process(await bodyToBuffer(source.Body));
+    const processed = await ProductImageProcessor.process(await bodyToBuffer(source.Body));
     const revision = randomUUID();
     const articleSlug = imageArticleSlug(row.article, row.product_id);
     const keys = {};
-    for (const size of [1600, 1200, 800, 400]) {
-      const key = `products/${row.product_id}/processed/${articleSlug}-photo-${id}-${revision}-${size}.webp`;
-      await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: variants[size],
+    const variantSlots = [
+      { slot: 1600, outputSize: PROCESSED_IMAGE_SIZE },
+      { slot: 1200, outputSize: 1200 },
+      { slot: 800, outputSize: 800 },
+      { slot: 400, outputSize: 400 },
+    ];
+    for (const { slot, outputSize } of variantSlots) {
+      const key = `products/${row.product_id}/processed/${articleSlug}-photo-${id}-${revision}-${outputSize}.webp`;
+      await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: processed.variants[outputSize],
         ContentType: "image/webp", CacheControl: "public, max-age=31536000, immutable" }));
-      keys[size] = key;
+      keys[slot] = key;
       uploadedKeys.push(key);
     }
     const oldKeys = [row.processed_storage_key_1600, row.processed_storage_key_1200,
@@ -91,11 +100,16 @@ async function runProcessing(imageId, db = pool) {
       processed_url_1600=$2,processed_url_1200=$3,processed_url_800=$4,processed_url_400=$5,
       processed_storage_key_1600=$6,processed_storage_key_1200=$7,
       processed_storage_key_800=$8,processed_storage_key_400=$9,
+      original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
+      image_quality_status=$14,processing_version=2,
       processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
       processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
       WHERE id=$1`, [id, publicUrl(config, keys[1600]), publicUrl(config, keys[1200]),
       publicUrl(config, keys[800]), publicUrl(config, keys[400]),
-      keys[1600], keys[1200], keys[800], keys[400]]);
+      keys[1600], keys[1200], keys[800], keys[400],
+      processed.metadata.originalWidth, processed.metadata.originalHeight,
+      processed.metadata.processedWidth, processed.metadata.processedHeight,
+      processed.metadata.qualityStatus]);
     await removeKeys(oldKeys);
   } catch (error) {
     await removeKeys(uploadedKeys);
@@ -142,7 +156,8 @@ export const ProductImageService = {
   async list(productId, db = pool) {
     const result = await db.query(`SELECT id,product_id,url,source,priority,created_at,
       original_url,processed_url_1600,processed_url_1200,processed_url_800,processed_url_400,
-      processing_status,display_mode,processing_error,processed_at
+      processing_status,display_mode,processing_error,processed_at,
+      original_width,original_height,processed_width,processed_height,image_quality_status
       FROM product_images WHERE product_id=$1 ORDER BY priority,id`, [positiveId(productId, "productId")]);
     return result.rows;
   },

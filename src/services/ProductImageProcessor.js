@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 import sharp from "sharp";
 
-const MASTER_SIZE = 1600;
+export const PROCESSED_IMAGE_SIZE = 1500;
+export const MAX_UPSCALE = 1.5;
+export const WEBP_QUALITY = 89;
+
+const RESPONSIVE_SIZES = [1200, 800, 400];
 const logoPath = new URL("../assets/product-watermark.svg", import.meta.url);
 
 function patternSvg(logoDataUri, width, height) {
@@ -40,45 +44,115 @@ function protectionSvg(width, height) {
   </svg>`);
 }
 
-async function createMaster(input) {
-  const oriented = await sharp(input, { failOn: "warning", limitInputPixels: 80_000_000 })
+export function classifyImageQuality(width, height) {
+  const smallerDimension = Math.min(Number(width) || 0, Number(height) || 0);
+  if (smallerDimension >= 1000) return "GOOD";
+  if (smallerDimension >= 500) return "OK";
+  return "LOW_RESOLUTION";
+}
+
+export function calculateContainedDimensions(width, height) {
+  const sourceWidth = Number(width);
+  const sourceHeight = Number(height);
+  if (!Number.isFinite(sourceWidth) || sourceWidth <= 0
+    || !Number.isFinite(sourceHeight) || sourceHeight <= 0) {
+    throw new Error("Не удалось определить размеры исходного изображения");
+  }
+
+  const scale = Math.min(
+    PROCESSED_IMAGE_SIZE / sourceWidth,
+    PROCESSED_IMAGE_SIZE / sourceHeight,
+    MAX_UPSCALE,
+  );
+
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+    scale,
+  };
+}
+
+async function createProcessedMaster(input) {
+  const normalized = await sharp(input, {
+    failOn: "warning",
+    limitInputPixels: 80_000_000,
+  })
     .rotate()
     .toColorspace("srgb")
     .flatten({ background: "#ffffff" })
     .png()
-    .toBuffer();
-  const photo = await sharp(oriented)
-    .resize({ width: MASTER_SIZE, height: MASTER_SIZE, fit: "inside", withoutEnlargement: false })
+    .toBuffer({ resolveWithObject: true });
+
+  const originalWidth = normalized.info.width;
+  const originalHeight = normalized.info.height;
+  const contained = calculateContainedDimensions(originalWidth, originalHeight);
+  const resized = await sharp(normalized.data)
+    .resize({
+      width: contained.width,
+      height: contained.height,
+      fit: "inside",
+      withoutEnlargement: false,
+    })
     .png()
-    .toBuffer();
-  const photoMeta = await sharp(photo).metadata();
-  const width = photoMeta.width || MASTER_SIZE;
-  const height = photoMeta.height || MASTER_SIZE;
+    .toBuffer({ resolveWithObject: true });
+
+  const left = Math.floor((PROCESSED_IMAGE_SIZE - resized.info.width) / 2);
+  const top = Math.floor((PROCESSED_IMAGE_SIZE - resized.info.height) / 2);
   const logo = await readFile(logoPath);
   const logoDataUri = `data:image/svg+xml;base64,${logo.toString("base64")}`;
 
-  return sharp(photo)
+  const master = await sharp({
+    create: {
+      width: PROCESSED_IMAGE_SIZE,
+      height: PROCESSED_IMAGE_SIZE,
+      channels: 3,
+      background: "#ffffff",
+    },
+  })
     .composite([
-      { input: patternSvg(logoDataUri, width, height), left: 0, top: 0 },
-      { input: protectionSvg(width, height), left: 0, top: 0 },
+      { input: resized.data, left, top },
+      { input: patternSvg(logoDataUri, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE), left: 0, top: 0 },
+      { input: protectionSvg(PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE), left: 0, top: 0 },
     ])
     .png()
     .toBuffer();
+
+  return {
+    master,
+    metadata: {
+      originalWidth,
+      originalHeight,
+      processedWidth: PROCESSED_IMAGE_SIZE,
+      processedHeight: PROCESSED_IMAGE_SIZE,
+      contentWidth: resized.info.width,
+      contentHeight: resized.info.height,
+      scale: contained.scale,
+      qualityStatus: classifyImageQuality(originalWidth, originalHeight),
+    },
+  };
 }
 
 async function encodeWebp(master, size) {
-  const quality = size >= 1200 ? 84 : size >= 800 ? 82 : 78;
   return sharp(master)
-    .resize({ width: size, height: size, fit: "inside", withoutEnlargement: false })
-    .webp({ quality, effort: 5, smartSubsample: true })
+    .resize({ width: size, height: size, fit: "fill", withoutEnlargement: true })
+    .webp({ quality: WEBP_QUALITY, effort: 5, smartSubsample: true })
     .toBuffer();
 }
 
+export async function processProductImage(input) {
+  const source = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  const { master, metadata } = await createProcessedMaster(source);
+  const sizes = [PROCESSED_IMAGE_SIZE, ...RESPONSIVE_SIZES];
+  const encoded = await Promise.all(
+    sizes.map(async (size) => [size, await encodeWebp(master, size)]),
+  );
+
+  return {
+    variants: Object.fromEntries(encoded),
+    metadata,
+  };
+}
+
 export const ProductImageProcessor = {
-  async process(input) {
-    const master = await createMaster(input);
-    const sizes = [1600, 1200, 800, 400];
-    const encoded = await Promise.all(sizes.map(async (size) => [size, await encodeWebp(master, size)]));
-    return Object.fromEntries(encoded);
-  },
+  process: processProductImage,
 };
