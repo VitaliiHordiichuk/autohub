@@ -4,19 +4,36 @@ import sharp from "sharp";
 export const PROCESSED_IMAGE_SIZE = 1500;
 export const MAX_UPSCALE = 1.5;
 export const WEBP_QUALITY = 89;
+export const IMAGE_BRANDING_MODE = Object.freeze({
+  CLEAN: "CLEAN",
+  STAMP_ONLY: "STAMP_ONLY",
+  FULL_BRANDED: "FULL_BRANDED",
+});
+export const DEFAULT_IMAGE_BRANDING_MODE = IMAGE_BRANDING_MODE.FULL_BRANDED;
+export const FULL_BRANDED_PATTERN = Object.freeze({
+  horizontalStep: 620,
+  verticalStep: 420,
+  width: 270,
+  height: 73,
+  opacity: 0.28,
+  rotation: -18,
+});
 
 const RESPONSIVE_SIZES = [1200, 800, 400];
 const logoPath = new URL("../assets/product-watermark.svg", import.meta.url);
 
 function patternSvg(logoDataUri, width, height) {
   const tiles = [];
-  const rows = Math.ceil(height / 245) + 2;
-  const columns = Math.ceil(width / 360) + 2;
+  const rows = Math.ceil(height / FULL_BRANDED_PATTERN.verticalStep) + 2;
+  const columns = Math.ceil(width / FULL_BRANDED_PATTERN.horizontalStep) + 2;
   for (let row = -1; row < rows; row += 1) {
     for (let column = -1; column < columns; column += 1) {
-      const x = column * 360 + (row % 2 ? 180 : 0);
-      const y = row * 245;
-      tiles.push(`<image href="${logoDataUri}" x="${x}" y="${y}" width="285" height="77" opacity="0.45" transform="rotate(-18 ${x + 142} ${y + 38})"/>`);
+      const x = column * FULL_BRANDED_PATTERN.horizontalStep
+        + (row % 2 ? FULL_BRANDED_PATTERN.horizontalStep / 2 : 0);
+      const y = row * FULL_BRANDED_PATTERN.verticalStep;
+      const centerX = x + FULL_BRANDED_PATTERN.width / 2;
+      const centerY = y + FULL_BRANDED_PATTERN.height / 2;
+      tiles.push(`<image href="${logoDataUri}" x="${x}" y="${y}" width="${FULL_BRANDED_PATTERN.width}" height="${FULL_BRANDED_PATTERN.height}" opacity="${FULL_BRANDED_PATTERN.opacity}" transform="rotate(${FULL_BRANDED_PATTERN.rotation} ${centerX} ${centerY})"/>`);
     }
   }
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${tiles.join("")}</svg>`);
@@ -51,6 +68,16 @@ export function classifyImageQuality(width, height) {
   return "LOW_RESOLUTION";
 }
 
+export function resolveImageBrandingMode(mode, environment = process.env) {
+  const configured = String(
+    mode ?? environment.PRODUCT_IMAGE_BRANDING_MODE ?? DEFAULT_IMAGE_BRANDING_MODE,
+  ).trim().toUpperCase();
+  if (!Object.values(IMAGE_BRANDING_MODE).includes(configured)) {
+    throw new Error(`Некорректный режим брендирования изображения: ${configured}`);
+  }
+  return configured;
+}
+
 export function calculateContainedDimensions(width, height) {
   const sourceWidth = Number(width);
   const sourceHeight = Number(height);
@@ -72,7 +99,7 @@ export function calculateContainedDimensions(width, height) {
   };
 }
 
-async function createProcessedMaster(input) {
+async function prepareBaseCanvas(input) {
   const normalized = await sharp(input, {
     failOn: "warning",
     limitInputPixels: 80_000_000,
@@ -98,10 +125,7 @@ async function createProcessedMaster(input) {
 
   const left = Math.floor((PROCESSED_IMAGE_SIZE - resized.info.width) / 2);
   const top = Math.floor((PROCESSED_IMAGE_SIZE - resized.info.height) / 2);
-  const logo = await readFile(logoPath);
-  const logoDataUri = `data:image/svg+xml;base64,${logo.toString("base64")}`;
-
-  const master = await sharp({
+  const baseCanvas = await sharp({
     create: {
       width: PROCESSED_IMAGE_SIZE,
       height: PROCESSED_IMAGE_SIZE,
@@ -111,14 +135,12 @@ async function createProcessedMaster(input) {
   })
     .composite([
       { input: resized.data, left, top },
-      { input: patternSvg(logoDataUri, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE), left: 0, top: 0 },
-      { input: protectionSvg(PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE), left: 0, top: 0 },
     ])
     .png()
     .toBuffer();
 
   return {
-    master,
+    baseCanvas,
     metadata: {
       originalWidth,
       originalHeight,
@@ -132,6 +154,37 @@ async function createProcessedMaster(input) {
   };
 }
 
+async function applyBranding(baseCanvas, mode) {
+  if (mode === IMAGE_BRANDING_MODE.CLEAN) {
+    return { image: baseCanvas, layers: [] };
+  }
+
+  const composites = [];
+  const layers = [];
+  if (mode === IMAGE_BRANDING_MODE.FULL_BRANDED) {
+    const logo = await readFile(logoPath);
+    const logoDataUri = `data:image/svg+xml;base64,${logo.toString("base64")}`;
+    composites.push({
+      input: patternSvg(logoDataUri, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE),
+      left: 0,
+      top: 0,
+    });
+    layers.push("REPEATING_WATERMARK");
+  }
+
+  composites.push({
+    input: protectionSvg(PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE),
+    left: 0,
+    top: 0,
+  });
+  layers.push("STAMP");
+
+  return {
+    image: await sharp(baseCanvas).composite(composites).png().toBuffer(),
+    layers,
+  };
+}
+
 async function encodeWebp(master, size) {
   return sharp(master)
     .resize({ width: size, height: size, fit: "fill", withoutEnlargement: true })
@@ -139,17 +192,23 @@ async function encodeWebp(master, size) {
     .toBuffer();
 }
 
-export async function processProductImage(input) {
+export async function processProductImage(input, { brandingMode } = {}) {
   const source = Buffer.isBuffer(input) ? input : Buffer.from(input);
-  const { master, metadata } = await createProcessedMaster(source);
+  const resolvedBrandingMode = resolveImageBrandingMode(brandingMode);
+  const { baseCanvas, metadata } = await prepareBaseCanvas(source);
+  const branded = await applyBranding(baseCanvas, resolvedBrandingMode);
   const sizes = [PROCESSED_IMAGE_SIZE, ...RESPONSIVE_SIZES];
   const encoded = await Promise.all(
-    sizes.map(async (size) => [size, await encodeWebp(master, size)]),
+    sizes.map(async (size) => [size, await encodeWebp(branded.image, size)]),
   );
 
   return {
     variants: Object.fromEntries(encoded),
-    metadata,
+    metadata: {
+      ...metadata,
+      brandingMode: resolvedBrandingMode,
+      brandingLayers: branded.layers,
+    },
   };
 }
 

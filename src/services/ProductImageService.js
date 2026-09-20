@@ -101,7 +101,7 @@ async function runProcessing(imageId, db = pool) {
       processed_storage_key_1600=$6,processed_storage_key_1200=$7,
       processed_storage_key_800=$8,processed_storage_key_400=$9,
       original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
-      image_quality_status=$14,processing_version=2,
+      image_quality_status=$14,processing_version=3,
       processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
       processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
       WHERE id=$1`, [id, publicUrl(config, keys[1600]), publicUrl(config, keys[1200]),
