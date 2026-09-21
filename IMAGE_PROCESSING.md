@@ -101,6 +101,17 @@ The Merchant feed uses the following safe image order:
 
 It never falls back to `processed_url_1600` or the public `url`, because either can contain `STAMP_ONLY` or `FULL_BRANDED` overlays. Existing images receive a dedicated Merchant URL only after explicit reprocessing; until then the feed uses their untouched original.
 
+## Storefront, search indexing and social images
+
+The public product SEO endpoint keeps storefront and indexing images separate:
+
+- `product.images` contains the existing public gallery URLs. These are used by the visible product gallery and may use the administrator-selected `CLEAN`, `STAMP_ONLY` or `FULL_BRANDED` site version;
+- `product.seoImages` contains only `merchant_url_1500`, falling back to `original_url` for the same image row. It never falls back to the public `url` or any processed site variant;
+- Product and WebPage structured data use `product.seoImages`, so Google Search receives the same clean-or-original image policy as Google Merchant;
+- Open Graph and Twitter metadata continue to use the public gallery images for social sharing.
+
+If neither a Merchant CLEAN URL nor an original URL exists, the SEO endpoint returns no indexing image for that row. The frontend then omits the Product entity instead of exposing a branded processed image as a Google product image.
+
 ## Controlled Merchant image backfill
 
 Existing rows without a complete Merchant image pair can be processed in explicit batches. The command is never started by a migration, application startup or scheduler.

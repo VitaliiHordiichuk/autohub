@@ -40,6 +40,61 @@ test("SEO товару містить Product-дані, категорію, зв
   assert.ok(result.analogArticles.includes(SEARCH_FIXTURE.analogArticle));
 });
 
+test("SEO-зображення товару використовують Merchant CLEAN, потім ORIGINAL, але не сайтову версію", async () => {
+  const productResult = await pool.query(`
+    SELECT id
+    FROM products
+    WHERE article_normalized = $1
+    LIMIT 1
+  `, [SEARCH_FIXTURE.originalNormalized]);
+  const productId = productResult.rows[0]?.id;
+  assert.ok(productId, "Тестовий товар повинен існувати");
+
+  const siteUrl = "https://images.example.test/processed/seo-site-branded.webp";
+  const cleanUrl = "https://images.example.test/merchant/seo-clean-1500.webp";
+  const originalUrl = "https://images.example.test/originals/seo-original.jpg";
+  const imageResult = await pool.query(`
+    INSERT INTO product_images(
+      product_id, url, source, priority, original_url, merchant_url_1500
+    )
+    VALUES($1, $2, 'R2', -1000, $3, $4)
+    RETURNING id
+  `, [productId, siteUrl, originalUrl, cleanUrl]);
+  const imageId = imageResult.rows[0].id;
+
+  try {
+    const withClean = await PublicSeoService.getProduct({
+      article: SEARCH_FIXTURE.originalArticle,
+      locale: "uk",
+    });
+    assert.equal(withClean.product.seoImages[0], cleanUrl);
+    assert.equal(withClean.product.images[0], siteUrl);
+    assert.equal(withClean.product.images.includes(cleanUrl), false);
+
+    await pool.query(`
+      UPDATE product_images SET merchant_url_1500 = NULL WHERE id = $1
+    `, [imageId]);
+    const withOriginal = await PublicSeoService.getProduct({
+      article: SEARCH_FIXTURE.originalArticle,
+      locale: "uk",
+    });
+    assert.equal(withOriginal.product.seoImages[0], originalUrl);
+    assert.equal(withOriginal.product.images[0], siteUrl);
+
+    await pool.query(`
+      UPDATE product_images SET original_url = NULL WHERE id = $1
+    `, [imageId]);
+    const withoutSafeVersion = await PublicSeoService.getProduct({
+      article: SEARCH_FIXTURE.originalArticle,
+      locale: "uk",
+    });
+    assert.equal(withoutSafeVersion.product.seoImages.includes(siteUrl), false);
+    assert.equal(withoutSafeVersion.product.images[0], siteUrl);
+  } finally {
+    await pool.query("DELETE FROM product_images WHERE id = $1", [imageId]);
+  }
+});
+
 test("SEO sitemap містить товар і робочу сторінку бренду", async () => {
   const sitemap = await PublicSeoService.getSitemap();
   const product = sitemap.products.find((item) => item.article === SEARCH_FIXTURE.originalArticle);

@@ -132,7 +132,7 @@ export const PublicSeoService = {
     if (!product) return null;
 
     const locale = publicLocale(requestedLocale);
-    const [pricingContext, translationsResult, categoryResult, articleLinksResult] = await Promise.all([
+    const [pricingContext, translationsResult, categoryResult, articleLinksResult, seoImagesResult] = await Promise.all([
       CustomerPricingService.getContext(null, db),
       db.query(`
         SELECT language_code, name, description, provider
@@ -167,6 +167,19 @@ export const PublicSeoService = {
           )
         ORDER BY links.link_type, links.id
       `, [product.brand_id, product.article_normalized]),
+      db.query(`
+        SELECT COALESCE(
+          NULLIF(BTRIM(pi.merchant_url_1500), ''),
+          NULLIF(BTRIM(pi.original_url), '')
+        ) AS image_url
+        FROM product_images pi
+        WHERE pi.product_id = $1
+          AND COALESCE(
+            NULLIF(BTRIM(pi.merchant_url_1500), ''),
+            NULLIF(BTRIM(pi.original_url), '')
+          ) IS NOT NULL
+        ORDER BY pi.priority, pi.id
+      `, [product.id]),
     ]);
 
     const card = await ProductCardService.build(product, pricingContext);
@@ -200,6 +213,9 @@ export const PublicSeoService = {
         && normalizedValue !== normalizeArticle(publicCard.product.article)
         && values.findIndex((candidate) => normalizeArticle(candidate) === normalizedValue) === index;
     });
+    const seoImages = [...new Set(
+      seoImagesResult.rows.map((row) => row.image_url).filter(Boolean)
+    )];
 
     return {
       locale,
@@ -226,6 +242,7 @@ export const PublicSeoService = {
           } : null,
         } : null,
         images: publicCard.product.imageUrls || [],
+        seoImages,
         placeholderImageUrl: ProductPlaceholderService.productPlaceholderUrl(publicCard.product),
         hasRealImage: publicCard.product.hasRealImage === true,
         alternateNames: [...new Set(
