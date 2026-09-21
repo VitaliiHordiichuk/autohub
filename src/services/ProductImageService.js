@@ -58,8 +58,52 @@ function publicUrl(config, key) {
   return `${config.publicBaseUrl}/${key}`;
 }
 
+export function createProductImageStorage() {
+  const config = storageConfig();
+  const r2 = client(config);
+  return {
+    async read(storageKey) {
+      const source = await r2.send(new GetObjectCommand({
+        Bucket: config.bucket,
+        Key: storageKey,
+      }));
+      return bodyToBuffer(source.Body);
+    },
+    async uploadWebp(storageKey, body) {
+      await r2.send(new PutObjectCommand({
+        Bucket: config.bucket,
+        Key: storageKey,
+        Body: body,
+        ContentType: "image/webp",
+        CacheControl: "public, max-age=31536000, immutable",
+      }));
+    },
+    async remove(storageKey) {
+      await r2.send(new DeleteObjectCommand({
+        Bucket: config.bucket,
+        Key: storageKey,
+      }));
+    },
+    publicUrl(storageKey) {
+      return publicUrl(config, storageKey);
+    },
+  };
+}
+
 function imageArticleSlug(article, productId) {
   return normalizeArticle(article).toLowerCase() || `product-${productId}`;
+}
+
+export function buildMerchantImageStorageKey({
+  productId,
+  imageId,
+  article,
+  revision = randomUUID(),
+}) {
+  const product = positiveId(productId, "productId");
+  const image = positiveId(imageId, "imageId");
+  const articleSlug = imageArticleSlug(article, product);
+  return `products/${product}/merchant/${articleSlug}-photo-${image}-${revision}-clean-${PROCESSED_IMAGE_SIZE}.webp`;
 }
 
 async function removeKeys(keys) {
@@ -107,7 +151,12 @@ export async function processProductImageRecord(imageId, db = pool) {
       keys[slot] = key;
       uploadedKeys.push(key);
     }
-    const merchantKey = `products/${row.product_id}/merchant/${articleSlug}-photo-${id}-${revision}-clean-${PROCESSED_IMAGE_SIZE}.webp`;
+    const merchantKey = buildMerchantImageStorageKey({
+      productId: row.product_id,
+      imageId: id,
+      article: row.article,
+      revision,
+    });
     await r2.send(new PutObjectCommand({
       Bucket: config.bucket,
       Key: merchantKey,

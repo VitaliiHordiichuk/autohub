@@ -100,3 +100,32 @@ The Merchant feed uses the following safe image order:
 2. `original_url`.
 
 It never falls back to `processed_url_1600` or the public `url`, because either can contain `STAMP_ONLY` or `FULL_BRANDED` overlays. Existing images receive a dedicated Merchant URL only after explicit reprocessing; until then the feed uses their untouched original.
+
+## Controlled Merchant image backfill
+
+Existing rows without a complete Merchant image pair can be processed in explicit batches. The command is never started by a migration, application startup or scheduler.
+
+Preview the first batch without reading or writing R2 and without changing the database:
+
+```bash
+npm run backfill:merchant-images -- --dry-run --limit=50 --cursor=0
+```
+
+Run a real batch:
+
+```bash
+npm run backfill:merchant-images -- --limit=50 --cursor=0
+```
+
+Supported parameters:
+
+- `--limit`: number of missing Merchant images to scan, from 1 to 500; default 50;
+- `--cursor`: only scan image IDs greater than this value; default 0;
+- `--dry-run`: report candidates and skip reasons without processing, uploading or database writes;
+- `--help`: print command usage.
+
+The report contains `scanned`, `eligible`, `processed`, `skipped`, `failed`, per-reason counters and `nextCursor`. Use the reported cursor for the next forward batch. A failed image remains without a Merchant URL and is therefore retried by starting again with a cursor below its ID, commonly `--cursor=0`.
+
+The backfill reads only the untouched `original_storage_key`, applies the shared Merchant-only normalization pipeline, uploads a new immutable CLEAN file under `products/<productId>/merchant/`, and updates only `merchant_url_1500` and `merchant_storage_key_1500`. It does not alter or delete originals, site processed files, `image_branding_mode`, `display_mode` or product data. Rows already containing both Merchant fields are idempotently skipped, including when another backfill process completes the same row concurrently.
+
+One inaccessible or invalid image does not stop the rest of the batch. The final report distinguishes `already_has_merchant`, `missing_original`, `original_not_accessible`, `processing_error`, `upload_error` and `db_update_error`. If an upload succeeds but the guarded database update fails or loses a race, the newly uploaded object is removed and the existing row is preserved.

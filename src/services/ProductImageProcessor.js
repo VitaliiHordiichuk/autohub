@@ -330,26 +330,43 @@ async function encodeWebp(master, size) {
     .toBuffer();
 }
 
+async function encodeMerchantBranch(baseCanvas, metadata) {
+  return {
+    variant: await encodeWebp(baseCanvas, PROCESSED_IMAGE_SIZE),
+    metadata: {
+      ...metadata,
+      brandingMode: IMAGE_BRANDING_MODE.CLEAN,
+      brandingLayers: [],
+    },
+  };
+}
+
+export async function processMerchantProductImage(input) {
+  const source = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  const { baseCanvas, metadata } = await prepareBaseCanvas(source);
+  return encodeMerchantBranch(baseCanvas, metadata);
+}
+
 export async function processProductImage(input, { brandingMode } = {}) {
   const source = Buffer.isBuffer(input) ? input : Buffer.from(input);
   const resolvedBrandingMode = resolveImageBrandingMode(brandingMode);
   const { baseCanvas, metadata } = await prepareBaseCanvas(source);
   const branded = await applyBranding(baseCanvas, resolvedBrandingMode);
   const sizes = [PROCESSED_IMAGE_SIZE, ...RESPONSIVE_SIZES];
-  const [encoded, separateMerchantVariant] = await Promise.all([
+  const [encoded, separateMerchant] = await Promise.all([
     Promise.all(
       sizes.map(async (size) => [size, await encodeWebp(branded.image, size)]),
     ),
     resolvedBrandingMode === IMAGE_BRANDING_MODE.CLEAN
       ? Promise.resolve(null)
-      : encodeWebp(baseCanvas, PROCESSED_IMAGE_SIZE),
+      : encodeMerchantBranch(baseCanvas, metadata),
   ]);
   const variants = Object.fromEntries(encoded);
 
   return {
     variants,
-    merchant: {
-      variant: separateMerchantVariant || variants[PROCESSED_IMAGE_SIZE],
+    merchant: separateMerchant || {
+      variant: variants[PROCESSED_IMAGE_SIZE],
       metadata: {
         ...metadata,
         brandingMode: IMAGE_BRANDING_MODE.CLEAN,
@@ -366,4 +383,5 @@ export async function processProductImage(input, { brandingMode } = {}) {
 
 export const ProductImageProcessor = {
   process: processProductImage,
+  processMerchant: processMerchantProductImage,
 };

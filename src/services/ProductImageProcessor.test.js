@@ -16,6 +16,7 @@ import {
   classifyImageQuality,
   detectProductBounds,
   processProductImage,
+  processMerchantProductImage,
   resolveImageBrandingMode,
 } from "./ProductImageProcessor.js";
 
@@ -218,6 +219,7 @@ test("uses the same safe composition for the clean Merchant branch", async () =>
   const result = await processProductImage(input, {
     brandingMode: IMAGE_BRANDING_MODE.FULL_BRANDED,
   });
+  const merchantOnly = await processMerchantProductImage(input);
   const merchantVisible = await darkPixelBounds(result.merchant.variant);
 
   assert.equal(result.merchant.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
@@ -229,6 +231,9 @@ test("uses the same safe composition for the clean Merchant branch", async () =>
   assert.ok(Math.abs(merchantVisible.width / merchantVisible.height - 1200 / 800) < 0.03);
   assert.ok(Math.abs((merchantVisible.left + merchantVisible.width / 2) - PROCESSED_IMAGE_SIZE / 2) <= 2);
   assert.ok(Math.abs((merchantVisible.top + merchantVisible.height / 2) - PROCESSED_IMAGE_SIZE / 2) <= 2);
+  assert.equal(merchantOnly.variant.equals(result.merchant.variant), true);
+  assert.equal(merchantOnly.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+  assert.deepEqual(merchantOnly.metadata.brandingLayers, []);
 });
 
 test("keeps full bounds when the outer background is not uniform", async () => {
