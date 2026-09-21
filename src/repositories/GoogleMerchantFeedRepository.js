@@ -125,12 +125,10 @@ export const GoogleMerchantFeedRepository = {
       ) categories ON TRUE
       LEFT JOIN LATERAL (
         SELECT ARRAY_AGG(
-          CASE
-            WHEN pi.processing_status = 'PROCESSED'
-            THEN COALESCE(pi.processed_url_1600, pi.url, pi.original_url)
-            ELSE COALESCE(pi.original_url, pi.url)
-          END
+          COALESCE(pi.merchant_url_1500, pi.original_url)
           ORDER BY pi.priority, pi.id
+        ) FILTER (
+          WHERE COALESCE(pi.merchant_url_1500, pi.original_url) IS NOT NULL
         ) AS image_urls
         FROM product_images pi
         WHERE pi.product_id = p.id

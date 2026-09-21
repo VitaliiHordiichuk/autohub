@@ -210,6 +210,27 @@ test("brings a large high-quality product to the target fill", async () => {
   assert.ok(Math.abs(result.metadata.fillRatio - TARGET_FILL_RATIO) < 0.002);
 });
 
+test("uses the same safe composition for the clean Merchant branch", async () => {
+  const input = await objectFixture({
+    width: 2200, height: 1600,
+    objectLeft: 500, objectTop: 400, objectWidth: 1200, objectHeight: 800,
+  });
+  const result = await processProductImage(input, {
+    brandingMode: IMAGE_BRANDING_MODE.FULL_BRANDED,
+  });
+  const merchantVisible = await darkPixelBounds(result.merchant.variant);
+
+  assert.equal(result.merchant.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+  assert.deepEqual(result.merchant.metadata.brandingLayers, []);
+  assert.equal(result.merchant.metadata.contentWidth, 1275);
+  assert.equal(result.merchant.metadata.contentHeight, 850);
+  assert.ok(Math.abs(result.merchant.metadata.fillRatio - TARGET_FILL_RATIO) < 0.002);
+  assert.ok(result.merchant.metadata.scale <= MAX_UPSCALE);
+  assert.ok(Math.abs(merchantVisible.width / merchantVisible.height - 1200 / 800) < 0.03);
+  assert.ok(Math.abs((merchantVisible.left + merchantVisible.width / 2) - PROCESSED_IMAGE_SIZE / 2) <= 2);
+  assert.ok(Math.abs((merchantVisible.top + merchantVisible.height / 2) - PROCESSED_IMAGE_SIZE / 2) <= 2);
+});
+
 test("keeps full bounds when the outer background is not uniform", async () => {
   const corner = async (background) => sharp({
     create: { width: 240, height: 180, channels: 3, background },
@@ -248,9 +269,16 @@ test("supports clean, stamp-only and less dense full branding modes", async () =
 
   for (const result of [clean, stampOnly, fullBranded]) {
     const metadata = await sharp(result.variants[PROCESSED_IMAGE_SIZE]).metadata();
+    const merchantMetadata = await sharp(result.merchant.variant).metadata();
     assert.equal(metadata.width, PROCESSED_IMAGE_SIZE);
     assert.equal(metadata.height, PROCESSED_IMAGE_SIZE);
+    assert.equal(merchantMetadata.format, "webp");
+    assert.equal(merchantMetadata.width, PROCESSED_IMAGE_SIZE);
+    assert.equal(merchantMetadata.height, PROCESSED_IMAGE_SIZE);
     assert.equal(result.metadata.autoCropApplied, true);
+    assert.equal(result.merchant.metadata.autoCropApplied, true);
+    assert.equal(result.merchant.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+    assert.deepEqual(result.merchant.metadata.brandingLayers, []);
     assert.deepEqual(result.metadata.detectedBounds, { left: 300, top: 350, width: 800, height: 300 });
   }
 
@@ -262,6 +290,21 @@ test("supports clean, stamp-only and less dense full branding modes", async () =
   assert.deepEqual(fullBranded.metadata.brandingLayers, ["REPEATING_WATERMARK", "STAMP"]);
   assert.equal(clean.variants[PROCESSED_IMAGE_SIZE].equals(stampOnly.variants[PROCESSED_IMAGE_SIZE]), false);
   assert.equal(stampOnly.variants[PROCESSED_IMAGE_SIZE].equals(fullBranded.variants[PROCESSED_IMAGE_SIZE]), false);
+  assert.equal(clean.merchant.variant.equals(clean.variants[PROCESSED_IMAGE_SIZE]), true);
+  assert.equal(clean.merchant.variant.equals(stampOnly.merchant.variant), true);
+  assert.equal(clean.merchant.variant.equals(fullBranded.merchant.variant), true);
+  assert.equal(fullBranded.merchant.variant.equals(fullBranded.variants[PROCESSED_IMAGE_SIZE]), false);
+
+  const merchantCorner = await sharp(fullBranded.merchant.variant)
+    .extract({ left: 0, top: 0, width: 80, height: 80 })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  assert.equal(
+    [...merchantCorner].every((channel) => channel >= 245),
+    true,
+    "Merchant image must retain a clean white canvas without site branding",
+  );
 
   assert.equal(FULL_BRANDED_PATTERN.horizontalStep, 620);
   assert.equal(FULL_BRANDED_PATTERN.verticalStep, 420);

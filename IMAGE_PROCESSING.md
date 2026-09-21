@@ -4,7 +4,7 @@ Product uploads keep the untouched original in Cloudflare R2 and enqueue an asyn
 
 ## Deploy
 
-1. Apply database migrations through `084_add_product_image_branding_mode.sql` before starting the new backend.
+1. Apply database migrations through `085_add_product_image_merchant_version.sql` before starting the new backend.
 2. Restart the backend. On startup it resumes up to 20 interrupted image jobs and checks for more once per minute.
 
 No Docker container, external image API or per-image payment is required.
@@ -13,6 +13,7 @@ No Docker container, external image API or per-image payment is required.
 
 - untouched original in `products/<productId>/originals/`;
 - square WebP variants at 1500, 1200, 800 and 400 px in `products/<productId>/processed/`;
+- a separate clean 1500 px Google Merchant WebP in `products/<productId>/merchant/`;
 - automatic EXIF orientation correction and metadata removal in processed copies;
 - 1500 × 1500 white canvas with the source centered and fully visible;
 - proportional scaling capped at `MAX_UPSCALE = 1.5` so small originals are never enlarged more than 1.5 times;
@@ -29,7 +30,7 @@ Processing version 4 normalizes the product composition before branding. It samp
 
 The target ratio is therefore best effort. A small source remains below 85% when reaching it would exceed the upscale limit. Horizontal and vertical products keep their proportions, remain fully visible and are centred on the 1500 × 1500 white canvas. The crop and composition step runs before `CLEAN`, `STAMP_ONLY` or `FULL_BRANDED`, so every branding mode uses the same prepared product image.
 
-The quality status still uses the oriented original dimensions, not the cropped region or final canvas. No existing image is reprocessed automatically. A later maintenance command can reuse `detectProductBounds` and `normalizeProductComposition` to process selected originals explicitly. Merchant and storefront URLs keep their existing behaviour and receive the new composition only for new uploads or manual reprocessing.
+The quality status still uses the oriented original dimensions, not the cropped region or final canvas. No existing image is reprocessed automatically. A later maintenance command can reuse `detectProductBounds` and `normalizeProductComposition` to process selected originals explicitly. New uploads and manual reprocessing create both the storefront and Merchant branches from the untouched original.
 
 The existing database columns ending in `_1600` remain as the primary processed-image slot for backward compatibility. New files stored in that slot are physically 1500 × 1500 and use a `-1500.webp` object key.
 
@@ -69,4 +70,33 @@ New and reprocessed photos record the oriented original dimensions, processed di
 - `OK`: the smaller original dimension is 500–999 px;
 - `LOW_RESOLUTION`: the smaller original dimension is below 500 px.
 
-Low resolution is informational and never blocks upload or processing. Merchant Center receives the processed URL after successful processing and falls back to the untouched original while processing or after a failure.
+Low resolution is informational and never blocks upload or processing.
+
+## Storefront and Google Merchant branches
+
+The shared normalization step runs once from the original and then splits into two independent outputs:
+
+```text
+ORIGINAL
+   |
+   +-- normalize composition / auto-crop / padding / MAX_UPSCALE
+          |
+          +-- SITE: CLEAN / STAMP_ONLY / FULL_BRANDED
+          |
+          +-- GOOGLE MERCHANT: CLEAN only
+```
+
+The storefront keeps the administrator-selected branding mode and writes its responsive files under `products/<productId>/processed/`. Google Merchant always encodes the normalized pre-branding canvas as a separate physical 1500 × 1500 WebP under:
+
+```text
+products/<productId>/merchant/<article>-photo-<imageId>-<revision>-clean-1500.webp
+```
+
+Migration `085_add_product_image_merchant_version.sql` adds nullable `merchant_url_1500` and `merchant_storage_key_1500` columns. It does not backfill or reprocess existing rows. A new upload creates the original, all selected site variants and the Merchant CLEAN file in the same asynchronous job. Reprocessing creates new immutable URLs for both branches, updates the database only after every upload succeeds, and removes the superseded object keys afterward.
+
+The Merchant feed uses the following safe image order:
+
+1. `merchant_url_1500`;
+2. `original_url`.
+
+It never falls back to `processed_url_1600` or the public `url`, because either can contain `STAMP_ONLY` or `FULL_BRANDED` overlays. Existing images receive a dedicated Merchant URL only after explicit reprocessing; until then the feed uses their untouched original.

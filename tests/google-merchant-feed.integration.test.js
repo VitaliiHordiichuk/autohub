@@ -12,8 +12,13 @@ import { PublicSeoService } from "../src/services/PublicSeoService.js";
 import { SEARCH_FIXTURE } from "./helpers/search-fixture.js";
 
 
-const testImageUrl =
-  `https://images.example.test/merchant-${Date.now()}.webp`;
+const imageRevision = Date.now();
+const testSiteImageUrl =
+  `https://images.example.test/processed/site-${imageRevision}.webp`;
+const testOriginalImageUrl =
+  `https://images.example.test/originals/original-${imageRevision}.jpg`;
+const testMerchantImageUrl =
+  `https://images.example.test/merchant/clean-${imageRevision}-1500.webp`;
 let productId;
 let offerId;
 let originalOffer;
@@ -47,9 +52,12 @@ before(async () => {
   originalOffer = row;
 
   await pool.query(`
-    INSERT INTO product_images(product_id, url, source, priority)
-    VALUES ($1, $2, 'TEST', -1000)
-  `, [productId, testImageUrl]);
+    INSERT INTO product_images(
+      product_id, url, source, priority, original_url,
+      processed_url_1600, merchant_url_1500, processing_status, display_mode
+    )
+    VALUES ($1, $2, 'TEST', -1000, $3, $2, $4, 'PROCESSED', 'PROCESSED')
+  `, [productId, testSiteImageUrl, testOriginalImageUrl, testMerchantImageUrl]);
 });
 
 
@@ -79,10 +87,49 @@ after(async () => {
   if (productId) {
     await pool.query(
       "DELETE FROM product_images WHERE product_id = $1 AND url = $2",
-      [productId, testImageUrl]
+      [productId, testSiteImageUrl]
     );
   }
   await pool.end();
+});
+
+
+test("feed uses the clean Merchant image and falls back only to the original", async () => {
+  const merchantItems = await GoogleMerchantFeedService.getItems(
+    pool,
+    { productIds: [productId] }
+  );
+  const merchantItem = merchantItems.find((item) =>
+    item.mpn === SEARCH_FIXTURE.analogArticle);
+
+  assert.ok(merchantItem);
+  assert.equal(merchantItem.imageLink, testMerchantImageUrl);
+  assert.notEqual(merchantItem.imageLink, testSiteImageUrl);
+
+  await pool.query(`
+    UPDATE product_images
+    SET merchant_url_1500 = NULL
+    WHERE product_id = $1 AND url = $2
+  `, [productId, testSiteImageUrl]);
+
+  try {
+    const fallbackItems = await GoogleMerchantFeedService.getItems(
+      pool,
+      { productIds: [productId] }
+    );
+    const fallbackItem = fallbackItems.find((item) =>
+      item.mpn === SEARCH_FIXTURE.analogArticle);
+
+    assert.ok(fallbackItem);
+    assert.equal(fallbackItem.imageLink, testOriginalImageUrl);
+    assert.notEqual(fallbackItem.imageLink, testSiteImageUrl);
+  } finally {
+    await pool.query(`
+      UPDATE product_images
+      SET merchant_url_1500 = $3
+      WHERE product_id = $1 AND url = $2
+    `, [productId, testSiteImageUrl, testMerchantImageUrl]);
+  }
 });
 
 

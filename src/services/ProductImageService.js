@@ -70,11 +70,12 @@ async function removeKeys(keys) {
   await Promise.all(unique.map((key) => r2.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })).catch(() => {})));
 }
 
-async function runProcessing(imageId, db = pool) {
+export async function processProductImageRecord(imageId, db = pool) {
   const id = positiveId(imageId, "imageId");
   const rowResult = await db.query(`SELECT pi.id,pi.product_id,pi.original_storage_key,
       pi.processed_storage_key_1600,pi.processed_storage_key_1200,
       pi.processed_storage_key_800,pi.processed_storage_key_400,
+      pi.merchant_storage_key_1500,
       pi.image_branding_mode,p.article
     FROM product_images pi
     JOIN products p ON p.id=pi.product_id
@@ -106,14 +107,25 @@ async function runProcessing(imageId, db = pool) {
       keys[slot] = key;
       uploadedKeys.push(key);
     }
+    const merchantKey = `products/${row.product_id}/merchant/${articleSlug}-photo-${id}-${revision}-clean-${PROCESSED_IMAGE_SIZE}.webp`;
+    await r2.send(new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: merchantKey,
+      Body: processed.merchant.variant,
+      ContentType: "image/webp",
+      CacheControl: "public, max-age=31536000, immutable",
+    }));
+    uploadedKeys.push(merchantKey);
     const oldKeys = [row.processed_storage_key_1600, row.processed_storage_key_1200,
-      row.processed_storage_key_800, row.processed_storage_key_400];
+      row.processed_storage_key_800, row.processed_storage_key_400,
+      row.merchant_storage_key_1500];
     await db.query(`UPDATE product_images SET
       processed_url_1600=$2,processed_url_1200=$3,processed_url_800=$4,processed_url_400=$5,
       processed_storage_key_1600=$6,processed_storage_key_1200=$7,
       processed_storage_key_800=$8,processed_storage_key_400=$9,
       original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
-      image_quality_status=$14,processing_version=${PRODUCT_IMAGE_PROCESSING_VERSION},
+      image_quality_status=$14,merchant_url_1500=$15,merchant_storage_key_1500=$16,
+      processing_version=${PRODUCT_IMAGE_PROCESSING_VERSION},
       processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
       processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
       WHERE id=$1`, [id, publicUrl(config, keys[1600]), publicUrl(config, keys[1200]),
@@ -121,7 +133,7 @@ async function runProcessing(imageId, db = pool) {
       keys[1600], keys[1200], keys[800], keys[400],
       processed.metadata.originalWidth, processed.metadata.originalHeight,
       processed.metadata.processedWidth, processed.metadata.processedHeight,
-      processed.metadata.qualityStatus]);
+      processed.metadata.qualityStatus, publicUrl(config, merchantKey), merchantKey]);
     await removeKeys(oldKeys);
   } catch (error) {
     await removeKeys(uploadedKeys);
@@ -136,7 +148,7 @@ function enqueue(imageId) {
   const id = Number(imageId);
   if (!id || activeJobs.has(id)) return;
   activeJobs.add(id);
-  setImmediate(() => runProcessing(id).catch((error) => {
+  setImmediate(() => processProductImageRecord(id).catch((error) => {
     console.error(`Product image ${id} processing failed:`, error.message);
   }).finally(() => activeJobs.delete(id)));
 }
@@ -168,6 +180,7 @@ export const ProductImageService = {
   async list(productId, db = pool) {
     const result = await db.query(`SELECT id,product_id,url,source,priority,created_at,
       original_url,processed_url_1600,processed_url_1200,processed_url_800,processed_url_400,
+      merchant_url_1500,
       processing_status,display_mode,processing_error,processed_at,
       original_width,original_height,processed_width,processed_height,image_quality_status,
       image_branding_mode
@@ -289,13 +302,15 @@ export const ProductImageService = {
 
   async remove(productId, imageId, db = pool) {
     const result = await db.query(`SELECT storage_key,original_storage_key,processed_storage_key_1600,
-      processed_storage_key_1200,processed_storage_key_800,processed_storage_key_400
+      processed_storage_key_1200,processed_storage_key_800,processed_storage_key_400,
+      merchant_storage_key_1500
       FROM product_images WHERE id=$1 AND product_id=$2`,
       [positiveId(imageId, "imageId"), positiveId(productId, "productId")]);
     if (!result.rows[0]) throw new Error("Изображение не найдено");
     const row = result.rows[0];
     await removeKeys([row.storage_key,row.original_storage_key,row.processed_storage_key_1600,
-      row.processed_storage_key_1200,row.processed_storage_key_800,row.processed_storage_key_400]);
+      row.processed_storage_key_1200,row.processed_storage_key_800,row.processed_storage_key_400,
+      row.merchant_storage_key_1500]);
     await db.query("DELETE FROM product_images WHERE id=$1", [positiveId(imageId, "imageId")]);
   },
 };

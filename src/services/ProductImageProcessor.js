@@ -336,12 +336,26 @@ export async function processProductImage(input, { brandingMode } = {}) {
   const { baseCanvas, metadata } = await prepareBaseCanvas(source);
   const branded = await applyBranding(baseCanvas, resolvedBrandingMode);
   const sizes = [PROCESSED_IMAGE_SIZE, ...RESPONSIVE_SIZES];
-  const encoded = await Promise.all(
-    sizes.map(async (size) => [size, await encodeWebp(branded.image, size)]),
-  );
+  const [encoded, separateMerchantVariant] = await Promise.all([
+    Promise.all(
+      sizes.map(async (size) => [size, await encodeWebp(branded.image, size)]),
+    ),
+    resolvedBrandingMode === IMAGE_BRANDING_MODE.CLEAN
+      ? Promise.resolve(null)
+      : encodeWebp(baseCanvas, PROCESSED_IMAGE_SIZE),
+  ]);
+  const variants = Object.fromEntries(encoded);
 
   return {
-    variants: Object.fromEntries(encoded),
+    variants,
+    merchant: {
+      variant: separateMerchantVariant || variants[PROCESSED_IMAGE_SIZE],
+      metadata: {
+        ...metadata,
+        brandingMode: IMAGE_BRANDING_MODE.CLEAN,
+        brandingLayers: [],
+      },
+    },
     metadata: {
       ...metadata,
       brandingMode: resolvedBrandingMode,
