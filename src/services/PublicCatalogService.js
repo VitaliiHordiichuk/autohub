@@ -2,6 +2,7 @@ import { pool } from "../config/db.js";
 import { OfferService } from "./OfferService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { publicProductName } from "./ProductNameService.js";
+import { parsePublicPage } from "../utils/publicPagination.js";
 
 function localizedName(row, locale) {
   if (locale === "en") return row.name_en || row.name;
@@ -134,6 +135,8 @@ export const PublicCatalogService = {
     minPrice = null, maxPrice = null, sort = "default", pricingContext = null,
   }, db = pool) {
     locale = publicLocale(locale);
+    const normalizedPage = parsePublicPage(page);
+    if (normalizedPage === null) return null;
     const categoryResult = await db.query(`
       SELECT c.*, p.slug AS parent_slug, p.name AS parent_name, p.name_uk AS parent_name_uk,
              p.name_ru AS parent_name_ru, p.name_en AS parent_name_en
@@ -142,7 +145,6 @@ export const PublicCatalogService = {
     const row = categoryResult.rows[0];
     if (!row) return null;
     const limit = 24;
-    const normalizedPage = Math.max(1, Number(page) || 1);
     const normalizedQuery = catalogQuery(query);
     const normalizedArticleQuery = normalizedQuery.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const normalizedAvailability = catalogAvailability(availability);
@@ -405,6 +407,9 @@ export const PublicCatalogService = {
         );
     }
 
+    const pages = Math.max(1, Math.ceil(total / limit));
+    if (normalizedPage > pages) return null;
+
     const productRows =
       productResult.rows.map((row) => {
         const product = { ...row };
@@ -461,8 +466,7 @@ export const PublicCatalogService = {
           })),
       },
       products,
-      pagination: { page: normalizedPage, pageSize: limit, total,
-        pages: Math.max(1, Math.ceil(total / limit)) },
+      pagination: { page: normalizedPage, pageSize: limit, total, pages },
       filters: {
         query: normalizedQuery,
         availability: normalizedAvailability,

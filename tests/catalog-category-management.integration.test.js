@@ -806,18 +806,13 @@ test("каталог сначала показывает наличие, а фо
       page: 999,
     });
 
-  assert.deepEqual(
-    beyondLastPage.products,
-    []
-  );
+  assert.equal(beyondLastPage, null);
 
-  assert.equal(
-    beyondLastPage.pagination.total,
-    3
-  );
-
-  assert.equal(
-    beyondLastPage.pagination.pages,
-    1
-  );
+  for (const page of [0, -1, 1.5, "abc", "", ["2", "3"]]) {
+    assert.equal(await PublicCatalogService.getCategoryProducts({
+      slug: childCategorySlug,
+      locale: "ru",
+      page,
+    }), null);
+  }
 });

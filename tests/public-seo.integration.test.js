@@ -115,4 +115,26 @@ test("SEO sitemap містить товар і робочу сторінку б�
   assert.equal(brandPage.brand.name, "Mercedes-Benz");
   assert.ok(brandPage.pagination.total > 0);
   assert.ok(brandPage.products.length > 0);
+
+  const lastBrandPage = await PublicSeoService.getBrand({
+    slug: brand.slug,
+    locale: "uk",
+    page: brandPage.pagination.pages,
+  });
+  assert.ok(lastBrandPage);
+  assert.equal(lastBrandPage.pagination.page, brandPage.pagination.pages);
+
+  assert.equal(await PublicSeoService.getBrand({
+    slug: brand.slug,
+    locale: "uk",
+    page: brandPage.pagination.pages + 1,
+  }), null);
+
+  for (const page of [0, -1, 1.5, "abc", "", ["2", "3"]]) {
+    assert.equal(await PublicSeoService.getBrand({
+      slug: brand.slug,
+      locale: "uk",
+      page,
+    }), null);
+  }
 });

@@ -7,17 +7,13 @@ import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js"
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { EffectiveProductCategoryService } from "./EffectiveProductCategoryService.js";
 import { publicProductName } from "./ProductNameService.js";
+import { parsePublicPage } from "../utils/publicPagination.js";
 
 const PUBLIC_LOCALES = new Set(["uk", "en", "ru"]);
 
 function publicLocale(value) {
   const locale = String(value || "").trim().toLowerCase();
   return PUBLIC_LOCALES.has(locale) ? locale : "uk";
-}
-
-function positivePage(value) {
-  const page = Number(value);
-  return Number.isInteger(page) && page > 0 ? page : 1;
 }
 
 function brandSlugPart(value) {
@@ -345,6 +341,8 @@ export const PublicSeoService = {
   async getBrand({ slug, locale: requestedLocale, page: requestedPage }, db = pool) {
     const brandId = brandIdFromSlug(slug);
     if (!brandId) return null;
+    const page = parsePublicPage(requestedPage);
+    if (page === null) return null;
 
     const brandResult = await db.query(`
       SELECT b.id, b.name, b.updated_at
@@ -356,7 +354,6 @@ export const PublicSeoService = {
     if (!brand || publicBrandSlug(brand.name, brand.id) !== slug) return null;
 
     const locale = publicLocale(requestedLocale);
-    const page = positivePage(requestedPage);
     const pageSize = 24;
     const [countResult, productsResult, pricingContext] = await Promise.all([
       db.query(`
@@ -409,6 +406,10 @@ export const PublicSeoService = {
       CustomerPricingService.getContext(null, db),
     ]);
 
+    const total = Number(countResult.rows[0]?.count || 0);
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    if (page > pages) return null;
+
     const products = await Promise.all(productsResult.rows.map(async (product) => {
       const name = publicProductName(product.name, product.name_provider);
       const offers = await OfferService.getOffersByProductId(product.id, pricingContext, locale);
@@ -430,8 +431,6 @@ export const PublicSeoService = {
         offer: offer ? mapPublicOffer(offer) : null,
       };
     }));
-    const total = Number(countResult.rows[0]?.count || 0);
-
     return {
       locale,
       brand: {
@@ -445,7 +444,7 @@ export const PublicSeoService = {
         page,
         pageSize,
         total,
-        pages: Math.max(1, Math.ceil(total / pageSize)),
+        pages,
       },
     };
   },
