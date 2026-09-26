@@ -5,6 +5,7 @@ import { pool } from "../src/config/db.js";
 import { AdminCatalogCategoryService } from "../src/services/AdminCatalogCategoryService.js";
 import { EffectiveProductCategoryService } from "../src/services/EffectiveProductCategoryService.js";
 import { PublicCatalogService } from "../src/services/PublicCatalogService.js";
+import { PublicSeoService } from "../src/services/PublicSeoService.js";
 
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 let rootCategoryId;
@@ -814,5 +815,71 @@ test("каталог сначала показывает наличие, а фо
       locale: "ru",
       page,
     }), null);
+  }
+});
+
+test("sitemap використовує те саме опубліковане дерево, що й публічний каталог", async () => {
+  const fixtureSuffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let parentId;
+  let populatedChildId;
+  let emptyChildId;
+  let productId;
+
+  try {
+    const parent = await AdminCatalogCategoryService.createCategory({
+      nameUk: `SEO контейнер ${fixtureSuffix}`,
+      nameRu: `SEO контейнер ${fixtureSuffix}`,
+      nameEn: `SEO container ${fixtureSuffix}`,
+    });
+    parentId = parent.id;
+    const populatedChild = await AdminCatalogCategoryService.createCategory({
+      parentId,
+      nameUk: `SEO категорія ${fixtureSuffix}`,
+      nameRu: `SEO категория ${fixtureSuffix}`,
+      nameEn: `SEO category ${fixtureSuffix}`,
+    });
+    populatedChildId = populatedChild.id;
+    const emptyChild = await AdminCatalogCategoryService.createCategory({
+      parentId,
+      nameUk: `Порожня SEO категорія ${fixtureSuffix}`,
+      nameRu: `Пустая SEO категория ${fixtureSuffix}`,
+      nameEn: `Empty SEO category ${fixtureSuffix}`,
+    });
+    emptyChildId = emptyChild.id;
+
+    const article = `SEOSITEMAP${Date.now()}`;
+    const product = await pool.query(`
+      INSERT INTO products(article, article_normalized, name, is_active)
+      VALUES($1, $1, 'SEO sitemap fixture', TRUE)
+      RETURNING id
+    `, [article]);
+    productId = Number(product.rows[0].id);
+    await pool.query(`
+      INSERT INTO product_categories(product_id, category_id, assignment_source, confidence)
+      VALUES($1, $2, 'MANUAL', 100)
+    `, [productId, populatedChildId]);
+
+    const tree = await PublicCatalogService.getTree("uk");
+    const sitemap = await PublicSeoService.getSitemap();
+    const flatten = (categories) => categories.flatMap((category) => [
+      category.slug,
+      ...flatten(category.children || []),
+    ]);
+    const treeSlugs = flatten(tree);
+    const sitemapSlugs = sitemap.categories.map((category) => category.slug);
+
+    assert.ok(treeSlugs.includes(parent.slug), "контейнер із товарами в дочірній категорії має лишитися");
+    assert.ok(treeSlugs.includes(populatedChild.slug), "категорія з товаром має лишитися");
+    assert.equal(treeSlugs.includes(emptyChild.slug), false, "порожній leaf не публікується в дереві");
+    assert.equal(sitemapSlugs.includes(emptyChild.slug), false, "порожній leaf не публікується в sitemap");
+    assert.deepEqual(sitemapSlugs, treeSlugs, "sitemap і каталог мають використовувати одне правило");
+  } finally {
+    if (productId) {
+      await pool.query("DELETE FROM product_categories WHERE product_id = $1", [productId]);
+      await pool.query("DELETE FROM products WHERE id = $1", [productId]);
+    }
+    if (emptyChildId) await pool.query("DELETE FROM categories WHERE id = $1", [emptyChildId]);
+    if (populatedChildId) await pool.query("DELETE FROM categories WHERE id = $1", [populatedChildId]);
+    if (parentId) await pool.query("DELETE FROM categories WHERE id = $1", [parentId]);
   }
 });

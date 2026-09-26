@@ -8,6 +8,7 @@ import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { EffectiveProductCategoryService } from "./EffectiveProductCategoryService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { parsePublicPage } from "../utils/publicPagination.js";
+import { PublicCatalogService } from "./PublicCatalogService.js";
 
 const PUBLIC_LOCALES = new Set(["uk", "en", "ru"]);
 
@@ -87,6 +88,13 @@ function mergeRelatedProducts(items, links) {
     });
   }
   return [...related.values()];
+}
+
+function publishedCategorySlugs(categories) {
+  return categories.flatMap((category) => [
+    { slug: category.slug },
+    ...publishedCategorySlugs(category.children || []),
+  ]);
 }
 
 export const PublicSeoService = {
@@ -263,7 +271,7 @@ export const PublicSeoService = {
   },
 
   async getSitemap(db = pool) {
-    const [productsResult, categoriesResult, brandsResult, languagesResult] = await Promise.all([
+    const [productsResult, categoryTree, brandsResult, languagesResult] = await Promise.all([
       db.query(`
         SELECT
           p.article,
@@ -290,12 +298,7 @@ export const PublicSeoService = {
         WHERE p.is_active = TRUE
         ORDER BY p.id
       `),
-      db.query(`
-        SELECT c.slug
-        FROM categories c
-        WHERE c.is_active = TRUE
-        ORDER BY c.id
-      `),
+      PublicCatalogService.getTree("uk", db),
       db.query(`
         SELECT b.id, b.name, b.updated_at
         FROM brands b
@@ -328,7 +331,7 @@ export const PublicSeoService = {
           isAvailable: row.is_available === true,
         };
       }),
-      categories: categoriesResult.rows.map((row) => ({ slug: row.slug })),
+      categories: publishedCategorySlugs(categoryTree),
       brands: brandsResult.rows.map((row) => ({
         id: Number(row.id),
         name: row.name,
