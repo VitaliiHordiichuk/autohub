@@ -30,7 +30,7 @@ function storageMock(overrides = {}) {
   };
 }
 
-test("creates a clean Merchant object and updates only Merchant database fields", async () => {
+test("creates a clean Merchant object and records the public product update", async () => {
   const uploads = [];
   const queries = [];
   const db = {
@@ -55,6 +55,8 @@ test("creates a clean Merchant object and updates only Merchant database fields"
   assert.equal(uploads[0].body.toString(), "clean-merchant");
   assert.equal(queries.length, 1);
   assert.match(queries[0].sql, /SET merchant_url_1500=\$2,merchant_storage_key_1500=\$3/);
+  assert.match(queries[0].sql, /UPDATE products product/);
+  assert.match(queries[0].sql, /SET updated_at=CURRENT_TIMESTAMP/);
   assert.doesNotMatch(queries[0].sql, /processed_url|display_mode|image_branding_mode|original_url=/);
   assert.equal(queries[0].parameters[1], `https://images.example.test/${uploads[0].key}`);
   assert.equal(queries[0].parameters[2], uploads[0].key);

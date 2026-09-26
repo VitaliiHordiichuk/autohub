@@ -80,6 +80,7 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
     article: "A4653201502",
   };
   const completedUpdates = [];
+  const publicUpdateTouches = [];
   const db = {
     async query(sql, parameters) {
       if (/SELECT pi\.id,pi\.product_id/.test(sql)) return { rows: [{ ...row }] };
@@ -93,6 +94,10 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
         return { rows: [] };
       }
       if (/processing_status='PROCESSING'/.test(sql)) return { rows: [] };
+      if (/UPDATE products/.test(sql) && /updated_at = CURRENT_TIMESTAMP/.test(sql)) {
+        publicUpdateTouches.push(parameters[0]);
+        return { rows: [{ updated_at: new Date() }] };
+      }
       throw new Error(`Unexpected database query: ${sql}`);
     },
   };
@@ -122,6 +127,7 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
   assert.equal(secondSite.body.equals(secondMerchant.body), false);
   assert.equal(secondMerchant.body.equals(firstMerchant.body), true);
   assert.ok(deletes.includes(firstMerchant.key));
+  assert.deepEqual(publicUpdateTouches, [row.product_id, row.product_id]);
 
   const merchantMetadata = await sharp(secondMerchant.body).metadata();
   assert.equal(merchantMetadata.format, "webp");

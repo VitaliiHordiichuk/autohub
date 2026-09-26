@@ -275,13 +275,16 @@ export const PublicSeoService = {
       db.query(`
         SELECT
           p.article,
-          p.updated_at,
-          ARRAY(
-            SELECT pi.url
-            FROM product_images pi
-            WHERE pi.product_id = p.id
-            ORDER BY pi.priority, pi.id
-          ) AS image_urls,
+          GREATEST(
+            COALESCE(p.updated_at, p.created_at)
+              AT TIME ZONE current_setting('TimeZone'),
+            COALESCE(offer_updates.updated_at
+              AT TIME ZONE current_setting('TimeZone'), '-infinity'::timestamptz),
+            COALESCE(image_updates.updated_at
+              AT TIME ZONE current_setting('TimeZone'), '-infinity'::timestamptz),
+            COALESCE(translation_updates.updated_at, '-infinity'::timestamptz)
+          ) AS updated_at,
+          COALESCE(image_updates.image_urls, ARRAY[]::text[]) AS image_urls,
           EXISTS (
             SELECT 1
             FROM product_offers po
@@ -295,6 +298,29 @@ export const PublicSeoService = {
               AND (s.id IS NULL OR s.is_active = TRUE)
           ) AS is_available
         FROM products p
+        LEFT JOIN (
+          SELECT
+            po.product_id,
+            MAX(COALESCE(po.updated_at, po.created_at)) AS updated_at
+          FROM product_offers po
+          GROUP BY po.product_id
+        ) offer_updates ON offer_updates.product_id = p.id
+        LEFT JOIN (
+          SELECT
+            pi.product_id,
+            MAX(pi.created_at) AS updated_at,
+            ARRAY_AGG(pi.url ORDER BY pi.priority, pi.id) AS image_urls
+          FROM product_images pi
+          GROUP BY pi.product_id
+        ) image_updates ON image_updates.product_id = p.id
+        LEFT JOIN (
+          SELECT
+            pt.product_id,
+            MAX(pt.updated_at) AS updated_at
+          FROM product_translations pt
+          WHERE pt.language_code = ANY(ARRAY['uk', 'ru', 'en']::varchar[])
+          GROUP BY pt.product_id
+        ) translation_updates ON translation_updates.product_id = p.id
         WHERE p.is_active = TRUE
         ORDER BY p.id
       `),

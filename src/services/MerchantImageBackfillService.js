@@ -169,11 +169,18 @@ export async function backfillMerchantImages({
     }
 
     try {
-      const updated = await db.query(`UPDATE product_images
-        SET merchant_url_1500=$2,merchant_storage_key_1500=$3
-        WHERE id=$1
-          AND (merchant_url_1500 IS NULL OR merchant_storage_key_1500 IS NULL)
-        RETURNING id`, [row.id, storage.publicUrl(merchantKey), merchantKey]);
+      const updated = await db.query(`WITH updated_image AS (
+          UPDATE product_images
+          SET merchant_url_1500=$2,merchant_storage_key_1500=$3
+          WHERE id=$1
+            AND (merchant_url_1500 IS NULL OR merchant_storage_key_1500 IS NULL)
+          RETURNING id,product_id
+        )
+        UPDATE products product
+        SET updated_at=CURRENT_TIMESTAMP
+        FROM updated_image image
+        WHERE product.id=image.product_id
+        RETURNING image.id,image.product_id`, [row.id, storage.publicUrl(merchantKey), merchantKey]);
       if (!updated.rows[0]) {
         await removeUploadedQuietly(storage, merchantKey);
         addResult(summary, row, "skipped", "already_has_merchant");

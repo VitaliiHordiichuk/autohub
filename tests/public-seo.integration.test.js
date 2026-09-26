@@ -2,6 +2,8 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 
 import { pool } from "../src/config/db.js";
+import { AdminWarehouseOfferRepository } from "../src/repositories/AdminWarehouseOfferRepository.js";
+import { ProductImageService } from "../src/services/ProductImageService.js";
 import { PublicSeoService } from "../src/services/PublicSeoService.js";
 import { SiteLanguageService } from "../src/services/SiteLanguageService.js";
 import { SEARCH_FIXTURE } from "./helpers/search-fixture.js";
@@ -136,5 +138,182 @@ test("SEO sitemap містить товар і робочу сторінку б�
       locale: "uk",
       page,
     }), null);
+  }
+});
+
+test("lastmod товару відображає всі публічні зміни та стабільний без змін", async () => {
+  const suffix = `${Date.now()}${Math.random().toString(16).slice(2, 8)}`;
+  const article = `SEOLASTMOD${suffix}`;
+  const oldTimestamp = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  let productId;
+  let offerId;
+  let firstImageId;
+  let secondImageId;
+  let addedImageId;
+
+  const sitemapLastmod = async () => {
+    const sitemap = await PublicSeoService.getSitemap();
+    const product = sitemap.products.find((item) => item.article === article);
+    assert.ok(product, "Тестовий товар має бути в sitemap");
+    const timestamp = new Date(product.updatedAt).getTime();
+    assert.ok(Number.isFinite(timestamp), "lastmod має бути валідною датою");
+    return timestamp;
+  };
+
+  const expectAdvance = async (previous, label, change) => {
+    await pool.query("SELECT pg_sleep(0.01)");
+    await change();
+    const next = await sitemapLastmod();
+    assert.ok(next > previous, `${label} має оновити lastmod`);
+    return next;
+  };
+
+  try {
+    const product = await pool.query(`
+      INSERT INTO products(
+        article, article_normalized, name, is_active, created_at, updated_at
+      )
+      VALUES($1, $1, 'SEO lastmod fixture', TRUE, $2, $2)
+      RETURNING id
+    `, [article, oldTimestamp]);
+    productId = Number(product.rows[0].id);
+
+    const offer = await pool.query(`
+      INSERT INTO product_offers(
+        product_id, quantity, purchase_price, retail_price,
+        source_type, is_available, is_hidden, created_at, updated_at
+      )
+      VALUES($1, 2, 100, 150, 'OWN_STOCK', TRUE, FALSE, $2, $2)
+      RETURNING id
+    `, [productId, oldTimestamp]);
+    offerId = Number(offer.rows[0].id);
+
+    const images = await pool.query(`
+      INSERT INTO product_images(product_id, url, priority, created_at)
+      VALUES
+        ($1, $2, 0, $4),
+        ($1, $3, 1, $4)
+      RETURNING id
+    `, [
+      productId,
+      `https://images.example.test/${suffix}-one.webp`,
+      `https://images.example.test/${suffix}-two.webp`,
+      oldTimestamp,
+    ]);
+    firstImageId = Number(images.rows[0].id);
+    secondImageId = Number(images.rows[1].id);
+
+    await pool.query(`
+      INSERT INTO product_translations(
+        product_id, language_code, name, description, provider,
+        source_language, is_verified, created_at, updated_at
+      )
+      VALUES
+        ($1, 'uk', 'Тест lastmod', 'Опис', 'MANUAL', 'uk', TRUE, $2, $2),
+        ($1, 'ru', 'Тест lastmod', 'Описание', 'MANUAL', 'ru', TRUE, $2, $2),
+        ($1, 'en', 'Lastmod test', 'Description', 'MANUAL', 'en', TRUE, $2, $2)
+    `, [productId, oldTimestamp]);
+
+    let lastmod = await sitemapLastmod();
+
+    lastmod = await expectAdvance(lastmod, "Зміна ціни", () => pool.query(`
+      UPDATE product_offers
+      SET retail_price = retail_price + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = $1
+    `, [productId]));
+
+    lastmod = await expectAdvance(lastmod, "Зміна ручної ціни", async () => {
+      const updated = await AdminWarehouseOfferRepository.setManualPrice({
+        offerId,
+        price: 175,
+      });
+      assert.ok(updated.updated_at);
+      assert.ok(updated.manual_price_updated_at);
+    });
+
+    lastmod = await expectAdvance(lastmod, "Приховування пропозиції", async () => {
+      const updated = await AdminWarehouseOfferRepository.setVisibility({
+        offerId,
+        hidden: true,
+      });
+      assert.equal(updated.is_hidden, true);
+      assert.ok(updated.hidden_at);
+      assert.ok(updated.updated_at);
+    });
+
+    lastmod = await expectAdvance(lastmod, "Повернення прихованої пропозиції", async () => {
+      const updated = await AdminWarehouseOfferRepository.setVisibility({
+        offerId,
+        hidden: false,
+      });
+      assert.equal(updated.is_hidden, false);
+      assert.equal(updated.hidden_at, null);
+      assert.ok(updated.updated_at);
+    });
+
+    lastmod = await expectAdvance(lastmod, "Зміна залишку", () => pool.query(`
+      UPDATE product_offers
+      SET quantity = quantity + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = $1
+    `, [productId]));
+
+    lastmod = await expectAdvance(lastmod, "Зміна доступності", () => pool.query(`
+      UPDATE product_offers
+      SET is_available = FALSE, updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = $1
+    `, [productId]));
+
+    lastmod = await expectAdvance(lastmod, "Додавання фото", async () => {
+      const added = await pool.query(`
+        INSERT INTO product_images(product_id, url, priority)
+        VALUES($1, $2, 2)
+        RETURNING id
+      `, [productId, `https://images.example.test/${suffix}-three.webp`]);
+      addedImageId = Number(added.rows[0].id);
+    });
+
+    lastmod = await expectAdvance(lastmod, "Зміна головного фото", () => (
+      ProductImageService.makePrimary(productId, secondImageId)
+    ));
+
+    lastmod = await expectAdvance(lastmod, "Видалення фото", async () => {
+      await ProductImageService.remove(productId, addedImageId);
+      addedImageId = null;
+    });
+
+    lastmod = await expectAdvance(lastmod, "Зміна ручної назви", () => pool.query(`
+      UPDATE product_translations
+      SET name = 'Оновлена ручна назва', provider = 'MANUAL', updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = $1 AND language_code = 'uk'
+    `, [productId]));
+
+    lastmod = await expectAdvance(lastmod, "Зміна опису", () => pool.query(`
+      UPDATE product_translations
+      SET description = 'Оновлений опис', updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = $1 AND language_code = 'uk'
+    `, [productId]));
+
+    lastmod = await expectAdvance(lastmod, "Зміна перекладів ru/en", () => pool.query(`
+      UPDATE product_translations
+      SET name = name || ' updated', updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = $1 AND language_code = ANY(ARRAY['ru', 'en']::varchar[])
+    `, [productId]));
+
+    const unchangedLastmod = await sitemapLastmod();
+    assert.equal(unchangedLastmod, lastmod, "Повторний sitemap не має змінювати lastmod");
+  } finally {
+    if (productId) {
+      if (addedImageId) {
+        await pool.query("DELETE FROM product_images WHERE id = $1", [addedImageId]);
+      }
+      await pool.query("DELETE FROM product_translations WHERE product_id = $1", [productId]);
+      await pool.query("DELETE FROM product_images WHERE id = ANY($1::integer[])", [[
+        firstImageId,
+        secondImageId,
+      ].filter(Boolean)]);
+      await pool.query("DELETE FROM product_offers WHERE product_id = $1", [productId]);
+      await pool.query("DELETE FROM product_categories WHERE product_id = $1", [productId]);
+      await pool.query("DELETE FROM products WHERE id = $1", [productId]);
+    }
   }
 });

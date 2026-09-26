@@ -7,6 +7,7 @@ import {
   ProductImageProcessor,
   resolveImageBrandingMode,
 } from "./ProductImageProcessor.js";
+import { ProductPublicUpdateService } from "./ProductPublicUpdateService.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
 
 const mimeExtensions = new Map([
@@ -116,7 +117,7 @@ async function removeKeys(keys) {
 
 export async function processProductImageRecord(imageId, db = pool) {
   const id = positiveId(imageId, "imageId");
-  const rowResult = await db.query(`SELECT pi.id,pi.product_id,pi.original_storage_key,
+  const rowResult = await db.query(`SELECT pi.id,pi.product_id,pi.url,pi.original_url,pi.display_mode,pi.original_storage_key,
       pi.processed_storage_key_1600,pi.processed_storage_key_1200,
       pi.processed_storage_key_800,pi.processed_storage_key_400,
       pi.merchant_storage_key_1500,
@@ -183,12 +184,16 @@ export async function processProductImageRecord(imageId, db = pool) {
       processed.metadata.originalWidth, processed.metadata.originalHeight,
       processed.metadata.processedWidth, processed.metadata.processedHeight,
       processed.metadata.qualityStatus, publicUrl(config, merchantKey), merchantKey]);
+    await ProductPublicUpdateService.touch(row.product_id, db);
     await removeKeys(oldKeys);
   } catch (error) {
     await removeKeys(uploadedKeys);
     const message = error instanceof Error ? error.message : String(error);
     await db.query(`UPDATE product_images SET processing_status='FAILED',processing_error=$2,
       display_mode='ORIGINAL',url=original_url,storage_key=original_storage_key WHERE id=$1`, [id, message.slice(0, 1000)]);
+    if (row.display_mode !== "ORIGINAL" || row.url !== row.original_url) {
+      await ProductPublicUpdateService.touch(row.product_id, db);
+    }
     throw error;
   }
 }
@@ -272,6 +277,7 @@ export const ProductImageService = {
       added.push(result.rows[0]);
       enqueue(result.rows[0].id);
     }
+    if (added.length) await ProductPublicUpdateService.touch(id, db);
     return added;
   },
 
@@ -281,6 +287,7 @@ export const ProductImageService = {
     if (!exists.rows[0]) throw new Error("Изображение не найдено");
     await db.query("UPDATE product_images SET priority=priority+1 WHERE product_id=$1", [product]);
     await db.query("UPDATE product_images SET priority=0 WHERE id=$1", [image]);
+    await ProductPublicUpdateService.touch(product, db);
     return this.list(product, db);
   },
 
@@ -294,6 +301,7 @@ export const ProductImageService = {
       WHERE id=$1 AND product_id=$2 AND ($3='ORIGINAL' OR processing_status='PROCESSED') RETURNING id`,
     [image, product, safeMode]);
     if (!result.rows[0]) throw new Error(safeMode === "PROCESSED" ? "Обработанная версия ещё не готова" : "Изображение не найдено");
+    await ProductPublicUpdateService.touch(product, db);
     return this.list(product, db);
   },
 
@@ -361,5 +369,6 @@ export const ProductImageService = {
       row.processed_storage_key_1200,row.processed_storage_key_800,row.processed_storage_key_400,
       row.merchant_storage_key_1500]);
     await db.query("DELETE FROM product_images WHERE id=$1", [positiveId(imageId, "imageId")]);
+    await ProductPublicUpdateService.touch(productId, db);
   },
 };
