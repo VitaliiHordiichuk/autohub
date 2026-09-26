@@ -309,7 +309,18 @@ export const PublicSeoService = {
           SELECT
             pi.product_id,
             MAX(pi.created_at) AS updated_at,
-            ARRAY_AGG(pi.url ORDER BY pi.priority, pi.id) AS image_urls
+            ARRAY_AGG(
+              COALESCE(
+                NULLIF(BTRIM(pi.merchant_url_1500), ''),
+                NULLIF(BTRIM(pi.original_url), '')
+              )
+              ORDER BY pi.priority, pi.id
+            ) FILTER (
+              WHERE COALESCE(
+                NULLIF(BTRIM(pi.merchant_url_1500), ''),
+                NULLIF(BTRIM(pi.original_url), '')
+              ) IS NOT NULL
+            ) AS image_urls
           FROM product_images pi
           GROUP BY pi.product_id
         ) image_updates ON image_updates.product_id = p.id
@@ -347,7 +358,9 @@ export const PublicSeoService = {
     return {
       languages: languagesResult.rows.map((row) => row.code),
       products: productsResult.rows.map((row) => {
-        const imageUrls = Array.isArray(row.image_urls) ? row.image_urls.filter(Boolean) : [];
+        const imageUrls = Array.isArray(row.image_urls)
+          ? [...new Set(row.image_urls.filter(Boolean))]
+          : [];
         return {
           article: row.article,
           updatedAt: row.updated_at || null,
