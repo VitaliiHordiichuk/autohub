@@ -458,9 +458,14 @@ export const PublicSeoService = {
     const pages = Math.max(1, Math.ceil(total / pageSize));
     if (page > pages) return null;
 
-    const products = await Promise.all(productsResult.rows.map(async (product) => {
+    const offersByProductId = await OfferService.getOffersByProductIds(
+      productsResult.rows.map((product) => product.id),
+      pricingContext,
+      locale,
+    );
+    const products = productsResult.rows.map((product) => {
       const name = publicProductName(product.name, product.name_provider);
-      const offers = await OfferService.getOffersByProductId(product.id, pricingContext, locale);
+      const offers = offersByProductId.get(Number(product.id)) || [];
       const offer = offers
         .filter((item) => item.isAvailable && Number.isFinite(Number(item.retailPrice)))
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0];
@@ -480,7 +485,7 @@ export const PublicSeoService = {
         isPlaceholder: image.isPlaceholder,
         offer: offer ? mapPublicOffer(offer) : null,
       };
-    }));
+    });
     return {
       locale,
       brand: {

@@ -35,23 +35,18 @@ export const MercedesFamilyOfferService = {
       return [];
     }
 
+    const candidateProducts = family.filter((product) => !(
+      exactProductId !== null &&
+      Number(product.id) === Number(exactProductId)
+    ));
+    const offersByProductId = await OfferService.getOffersByProductIds(
+      candidateProducts.map((product) => product.id),
+      pricingContext
+    );
     const result = [];
 
-    for (const product of family) {
-      if (
-        exactProductId !== null &&
-        Number(product.id) ===
-          Number(exactProductId)
-      ) {
-        continue;
-      }
-
-      const offers =
-        await OfferService
-          .getOffersByProductId(
-            product.id,
-            pricingContext
-          );
+    for (const product of candidateProducts) {
+      const offers = offersByProductId.get(Number(product.id)) || [];
 
       const allowedOffers =
         requireEnabledSupplierRule

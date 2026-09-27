@@ -137,12 +137,26 @@ test("SEO sitemap містить товар і робочу сторінку б�
   const brand = sitemap.brands.find((item) => item.name === "Mercedes-Benz");
   assert.ok(brand);
 
-  const brandPage = await PublicSeoService.getBrand({
-    slug: brand.slug,
-    locale: "uk",
-    page: 1,
-  });
+  const originalQuery = pool.query;
+  let offerQueryCount = 0;
+  pool.query = function instrumentedQuery(sql, ...args) {
+    if (String(sql).includes("WHERE po.product_id = ANY($1::integer[])")) {
+      offerQueryCount += 1;
+    }
+    return originalQuery.call(this, sql, ...args);
+  };
+  let brandPage;
+  try {
+    brandPage = await PublicSeoService.getBrand({
+      slug: brand.slug,
+      locale: "uk",
+      page: 1,
+    });
+  } finally {
+    pool.query = originalQuery;
+  }
   assert.ok(brandPage);
+  assert.equal(offerQueryCount, 1, "brand offers must be loaded in one batch");
   assert.equal(brandPage.brand.name, "Mercedes-Benz");
   assert.ok(brandPage.pagination.total > 0);
   assert.ok(brandPage.products.length > 0);

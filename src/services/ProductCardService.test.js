@@ -25,11 +25,24 @@ test(
             .originalNormalized
         );
 
-    const card =
-      await ProductCardService
-        .build(product);
+    const originalQuery = pool.query;
+    let offerQueryCount = 0;
+    pool.query = function instrumentedQuery(sql, ...args) {
+      if (String(sql).includes("WHERE po.product_id = ANY($1::integer[])")) {
+        offerQueryCount += 1;
+      }
+      return originalQuery.call(this, sql, ...args);
+    };
+
+    let card;
+    try {
+      card = await ProductCardService.build(product);
+    } finally {
+      pool.query = originalQuery;
+    }
 
     assert.ok(card);
+    assert.equal(offerQueryCount, 1, "offers for the card and all relations must be loaded in one batch");
 
     assert.equal(
       card.product.article,

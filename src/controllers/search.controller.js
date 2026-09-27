@@ -33,13 +33,18 @@ export async function searchByText(req, res) {
       PublicSearchSuggestionRepository.search({ query, locale, page: req.query.page }),
       CustomerPricingService.getContext(req.auth?.userId ?? null),
     ]);
-    const products = await Promise.all(matches.products.map(async product => {
-      const offers = await OfferService.getOffersByProductId(product.id, pricingContext, locale);
+    const offersByProductId = await OfferService.getOffersByProductIds(
+      matches.products.map((product) => product.id),
+      pricingContext,
+      locale,
+    );
+    const products = matches.products.map(product => {
+      const offers = offersByProductId.get(Number(product.id)) || [];
       return { ...product, offers: offers.map(offer => ({
         id: offer.id, retailPrice: offer.retailPrice, isAvailable: offer.isAvailable,
         availabilityText: offer.availabilityText, sourceLabel: offer.sourceLabel,
       })) };
-    }));
+    });
     // Pagination continues the same search instead of creating another event.
     if (matches.pagination.page === 1) await SearchAnalyticsService.recordSearch({
       req, article: query, requestedLocale: locale,

@@ -621,8 +621,12 @@ export const HomepageContentService = {
       CustomerPricingService.getContext(userId, db),
     ]);
 
-    const features = await Promise.all(featureRows.map(async (row) => {
-      const offers = await OfferService.getOffersByProductId(row.product_id, pricingContext);
+    const offersByProductId = await OfferService.getOffersByProductIds(
+      featureRows.map((row) => row.product_id),
+      pricingContext,
+    );
+    const features = featureRows.map((row) => {
+      const offers = offersByProductId.get(Number(row.product_id)) || [];
       const offer = offers
         .filter((item) => item.isAvailable && item.retailPrice !== null)
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0] || null;
@@ -658,7 +662,7 @@ export const HomepageContentService = {
           isAvailable: offer.isAvailable,
         } : null,
       };
-    }));
+    });
 
     return {
       date: displayDate,

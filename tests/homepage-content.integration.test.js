@@ -136,12 +136,26 @@ test("акція створюється за артикулом і поверт�
   }, adminUserId);
   featureId = feature.id;
 
-  const homepage = await HomepageContentService.getPublic({
-    locale: "uk",
-    date: scheduledDate,
-  });
+  const originalQuery = pool.query;
+  let offerQueryCount = 0;
+  pool.query = function instrumentedQuery(sql, ...args) {
+    if (String(sql).includes("WHERE po.product_id = ANY($1::integer[])")) {
+      offerQueryCount += 1;
+    }
+    return originalQuery.call(this, sql, ...args);
+  };
+  let homepage;
+  try {
+    homepage = await HomepageContentService.getPublic({
+      locale: "uk",
+      date: scheduledDate,
+    });
+  } finally {
+    pool.query = originalQuery;
+  }
   const publicFeature = homepage.features.find((item) => item.id === featureId);
   assert.ok(publicFeature);
+  assert.equal(offerQueryCount, 1, "homepage feature offers must be loaded in one batch");
   assert.equal(publicFeature.product.article, article);
   assert.equal(publicFeature.discountPercent, null);
   assert.ok(Number(publicFeature.offer?.price) > 0);

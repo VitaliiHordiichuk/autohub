@@ -1,40 +1,12 @@
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { OfferService } from "./OfferService.js";
 
-async function buildRelatedProducts(productId, relationType, pricingContext) {
-  const relatedProducts =
-    await ProductRepository.findRelatedProducts(
-      productId,
-      relationType
-    );
-
-  const result = [];
-
-  for (const relatedProduct of relatedProducts) {
-    const offers = await OfferService.getOffersByProductId(
-      relatedProduct.id,
-      pricingContext
-    );
-
-    result.push({
-      product: relatedProduct,
-      offers,
-    });
-  }
-
-  return result;
-}
-
-async function buildArticleNumberRelatedProducts(product, relationType, pricingContext) {
-  const relatedProducts = await ProductRepository.findArticleNumberRelatedProducts(
+async function findArticleNumberRelatedProducts(product, relationType) {
+  return ProductRepository.findArticleNumberRelatedProducts(
     product.brand_id,
     product.article_normalized,
     relationType
   );
-  return Promise.all(relatedProducts.map(async (relatedProduct) => ({
-    product: relatedProduct,
-    offers: await OfferService.getOffersByProductId(relatedProduct.id, pricingContext),
-  })));
 }
 
 function uniqueRelated(...groups) {
@@ -47,17 +19,33 @@ export const ProductCardService = {
       return null;
     }
 
-    const [offers, analogs, replacements, linkedAnalogs, linkedReplacements] = await Promise.all([
-      OfferService.getOffersByProductId(product.id, pricingContext),
-      buildRelatedProducts(product.id, "ANALOG", pricingContext),
-      buildRelatedProducts(product.id, "REPLACEMENT", pricingContext),
-      buildArticleNumberRelatedProducts(product, "ANALOG", pricingContext),
-      buildArticleNumberRelatedProducts(product, "REPLACEMENT", pricingContext),
+    const [analogProducts, replacementProducts, linkedAnalogProducts, linkedReplacementProducts] = await Promise.all([
+      ProductRepository.findRelatedProducts(product.id, "ANALOG"),
+      ProductRepository.findRelatedProducts(product.id, "REPLACEMENT"),
+      findArticleNumberRelatedProducts(product, "ANALOG"),
+      findArticleNumberRelatedProducts(product, "REPLACEMENT"),
     ]);
+
+    const offersByProductId = await OfferService.getOffersByProductIds([
+      product.id,
+      ...analogProducts.map((item) => item.id),
+      ...replacementProducts.map((item) => item.id),
+      ...linkedAnalogProducts.map((item) => item.id),
+      ...linkedReplacementProducts.map((item) => item.id),
+    ], pricingContext);
+    const withOffers = (relatedProduct) => ({
+      product: relatedProduct,
+      offers: offersByProductId.get(Number(relatedProduct.id)) || [],
+    });
+
+    const analogs = analogProducts.map(withOffers);
+    const replacements = replacementProducts.map(withOffers);
+    const linkedAnalogs = linkedAnalogProducts.map(withOffers);
+    const linkedReplacements = linkedReplacementProducts.map(withOffers);
 
     return {
       product,
-      offers,
+      offers: offersByProductId.get(Number(product.id)) || [],
       analogs: uniqueRelated(analogs, linkedAnalogs),
       replacements: uniqueRelated(replacements, linkedReplacements),
     };
