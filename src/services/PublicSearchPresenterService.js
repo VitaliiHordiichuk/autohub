@@ -3,6 +3,7 @@ import {
 } from "../config/db.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { publicProductName } from "./ProductNameService.js";
+import { isEligiblePublicOffer } from "./OfferService.js";
 
 
 const PUBLIC_TEXT = {
@@ -491,11 +492,11 @@ function mapPublicOffer(
       offer.retailPrice
     );
 
-  if (
-    !offer.isAvailable ||
-    quantity <= 0 ||
-    retailPrice === null
-  ) {
+  if (!isEligiblePublicOffer({
+    ...offer,
+    quantity,
+    retailPrice,
+  })) {
     return null;
   }
 

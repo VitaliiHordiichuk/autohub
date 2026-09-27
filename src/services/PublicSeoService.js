@@ -1,7 +1,11 @@
 import { pool } from "../config/db.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
-import { OfferService } from "./OfferService.js";
+import {
+  eligiblePublicOffers,
+  OfferService,
+  selectPrimaryPublicOffer,
+} from "./OfferService.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
@@ -201,9 +205,8 @@ export const PublicSeoService = {
       description: row.description || null,
     }));
     const selectedTranslation = localizedTranslation(translations, locale);
-    const availableOffers = publicCard.offers
-      .filter((offer) => offer.isAvailable && Number.isFinite(Number(offer.retailPrice)))
-      .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice));
+    const availableOffers = eligiblePublicOffers(publicCard.offers);
+    const primaryOffer = selectPrimaryPublicOffer(availableOffers);
     const linkedByType = (type) => articleLinksResult.rows.filter((item) => item.link_type === type);
     const analogs = mergeRelatedProducts(publicCard.analogs, linkedByType("ANALOG"));
     const replacements = mergeRelatedProducts(publicCard.replacements, linkedByType("REPLACEMENT"));
@@ -266,7 +269,7 @@ export const PublicSeoService = {
         [...analogs, ...replacements].map((item) => item.article).filter(Boolean)
       )],
       offers: availableOffers.map(mapPublicOffer),
-      offer: availableOffers[0] ? mapPublicOffer(availableOffers[0]) : null,
+      offer: primaryOffer ? mapPublicOffer(primaryOffer) : null,
     };
   },
 

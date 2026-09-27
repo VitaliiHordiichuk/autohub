@@ -99,6 +99,7 @@ test("loads the whole feed with one batch database query", async () => {
   assert.doesNotMatch(queries[0].sql, /pi\.processed_url_1600/);
   assert.doesNotMatch(queries[0].sql, /COALESCE\([^)]*pi\.url/);
   assert.deepEqual(queries[0].parameters, [null]);
+  assert.equal(items[0].price, "1380.96 UAH");
 });
 
 
@@ -239,15 +240,33 @@ test("excludes offers with zero or negative retail prices", () => {
 });
 
 
-test("creates one item for several offers and selects the public lowest price", () => {
+test("uses the storefront primary offer instead of repricing by the lowest offer", () => {
   const items = buildGoogleMerchantItems([
-    candidate({ id: 501, retail_price: 1400 }),
+    candidate({
+      id: 501,
+      retail_price: 1400,
+      source_type: "OWN_STOCK",
+      supplier_type: "OWN",
+      supplier_name: "MAKA warehouse",
+    }),
     candidate({ id: 502, supplier_id: 21, effective_supplier_id: 21,
       supplier_name: "Second supplier", retail_price: 1250.5 }),
   ]);
 
   assert.equal(items.length, 1);
-  assert.equal(items[0].price, "1250.50 UAH");
+  assert.equal(items[0].price, "1400.00 UAH");
+});
+
+
+test("does not publish a personalized customer price in the default feed", () => {
+  const row = candidate({ retail_price: 1000, minimum_sale_price: 700 });
+  const personalizedOffer = presentOffers([
+    row,
+  ], { discountPercent: 5, isVip: false }, "uk")[0];
+  const publicItem = buildGoogleMerchantItems([row])[0];
+
+  assert.equal(personalizedOffer.retailPrice, 950);
+  assert.equal(publicItem.price, "1000.00 UAH");
 });
 
 

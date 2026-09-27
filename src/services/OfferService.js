@@ -57,6 +57,28 @@ function formatPriority(value) {
 }
 
 
+export function isEligiblePublicOffer(offer) {
+  const price = Number(offer?.retailPrice);
+
+  return offer?.isAvailable === true
+    && Number(offer?.quantity) > 0
+    && Number.isFinite(price)
+    && price > 0;
+}
+
+
+export function eligiblePublicOffers(offers) {
+  return (offers || []).filter(
+    isEligiblePublicOffer
+  );
+}
+
+
+export function selectPrimaryPublicOffer(offers) {
+  return eligiblePublicOffers(offers)[0] || null;
+}
+
+
 const OFFER_TEXT = {
   uk: {
     ownStock: "Наш склад",

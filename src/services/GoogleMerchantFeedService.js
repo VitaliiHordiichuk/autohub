@@ -1,7 +1,11 @@
 import { pool } from "../config/db.js";
 import { GoogleMerchantFeedRepository } from "../repositories/GoogleMerchantFeedRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
-import { presentOffers } from "./OfferService.js";
+import {
+  eligiblePublicOffers,
+  presentOffers,
+  selectPrimaryPublicOffer,
+} from "./OfferService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { GoogleProductCategoryService } from "./GoogleProductCategoryService.js";
@@ -177,18 +181,12 @@ export function buildGoogleMerchantItems(
     )].slice(0, 11);
     if (!images.length) continue;
 
-    const offers = presentOffers(
+    const offers = eligiblePublicOffers(presentOffers(
       productRows.filter(isEligibleOfferRow),
       pricingContext,
       "uk"
-    )
-      .filter((offer) =>
-        offer.isAvailable
-        && Number(offer.quantity) > 0
-        && Number(offer.retailPrice) > 0)
-      .sort((first, second) =>
-        Number(first.retailPrice) - Number(second.retailPrice));
-    const offer = offers[0];
+    ));
+    const offer = selectPrimaryPublicOffer(offers);
     if (!offer) continue;
 
     const name = publicProductName(
