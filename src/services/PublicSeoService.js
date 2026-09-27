@@ -112,6 +112,7 @@ export const PublicSeoService = {
         p.brand_id,
         b.id AS catalog_brand_id,
         b.name AS catalog_brand_name,
+        b.is_active AS catalog_brand_is_active,
         p.article,
         p.article_normalized,
         p.article_no_prefix,
@@ -233,7 +234,7 @@ export const PublicSeoService = {
         name: publicCard.product.name,
         description: selectedTranslation?.description || null,
         manufacturer: publicCard.product.manufacturer || null,
-        brandPageSlug: product.catalog_brand_id
+        brandPageSlug: product.catalog_brand_id && product.catalog_brand_is_active === true
           ? publicBrandSlug(product.catalog_brand_name, product.catalog_brand_id)
           : null,
         vehicleBrand: publicCard.product.vehicle_brand || null,

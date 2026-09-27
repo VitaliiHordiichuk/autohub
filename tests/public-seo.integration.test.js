@@ -28,6 +28,7 @@ test("SEO товару містить Product-дані, категорію, зв
   assert.equal(result.locale, "ru");
   assert.equal(result.product.article, SEARCH_FIXTURE.originalArticle);
   assert.ok(result.product.name);
+  assert.ok(result.product.brandPageSlug);
   assert.ok(result.product.category);
   assert.ok(result.product.category.slug);
   assert.ok(result.alternativeArticles.includes(SEARCH_FIXTURE.originalWithoutPrefix));
@@ -40,6 +41,34 @@ test("SEO товару містить Product-дані, категорію, зв
     assert.ok(result.offers[0].displayQuantity);
   }
   assert.ok(result.analogArticles.includes(SEARCH_FIXTURE.analogArticle));
+});
+
+test("SEO товару не публікує brand breadcrumb URL для неактивного бренду", async () => {
+  const productResult = await pool.query(`
+    SELECT p.brand_id, b.is_active
+    FROM products p
+    JOIN brands b ON b.id = p.brand_id
+    WHERE p.article_normalized = $1
+    LIMIT 1
+  `, [SEARCH_FIXTURE.originalNormalized]);
+  const brandId = productResult.rows[0]?.brand_id;
+  const wasActive = productResult.rows[0]?.is_active;
+  assert.ok(brandId, "Тестовий товар повинен мати бренд");
+
+  try {
+    await pool.query("UPDATE brands SET is_active = FALSE WHERE id = $1", [brandId]);
+
+    const result = await PublicSeoService.getProduct({
+      article: SEARCH_FIXTURE.originalArticle,
+      locale: "uk",
+    });
+
+    assert.ok(result);
+    assert.equal(result.product.manufacturer, "Mercedes-Benz");
+    assert.equal(result.product.brandPageSlug, null);
+  } finally {
+    await pool.query("UPDATE brands SET is_active = $2 WHERE id = $1", [brandId, wasActive]);
+  }
 });
 
 test("SEO-зображення товару використовують Merchant CLEAN, потім ORIGINAL, але не сайтову версію", async () => {
