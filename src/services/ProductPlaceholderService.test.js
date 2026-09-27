@@ -22,6 +22,16 @@ test("повертає реальні фото без заглушки", () => {
   assert.deepEqual(result, {
     imageUrl: "https://cdn.example.com/product.webp",
     imageUrls: ["https://cdn.example.com/product.webp"],
+    imageVariant: {
+      url: "https://cdn.example.com/product.webp",
+      variants: [],
+    },
+    imageVariants: [
+      {
+        url: "https://cdn.example.com/product.webp",
+        variants: [],
+      },
+    ],
     hasRealImage: true,
     isPlaceholder: false,
   });

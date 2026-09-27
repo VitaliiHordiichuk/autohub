@@ -13,6 +13,7 @@ import { EffectiveProductCategoryService } from "./EffectiveProductCategoryServi
 import { publicProductName } from "./ProductNameService.js";
 import { parsePublicPage } from "../utils/publicPagination.js";
 import { PublicCatalogService } from "./PublicCatalogService.js";
+import { PublicProductImageService } from "./PublicProductImageService.js";
 
 const PUBLIC_LOCALES = new Set(["uk", "en", "ru"]);
 
@@ -250,6 +251,7 @@ export const PublicSeoService = {
           } : null,
         } : null,
         images: publicCard.product.imageUrls || [],
+        imageVariants: publicCard.product.imageVariants || [],
         seoImages,
         placeholderImageUrl: ProductPlaceholderService.productPlaceholderUrl(publicCard.product),
         hasRealImage: publicCard.product.hasRealImage === true,
@@ -423,7 +425,7 @@ export const PublicSeoService = {
             ) THEN 'MANUAL'
             ELSE NULL
           END AS name_provider,
-          image.url AS image_url
+          image.image_data AS image_variant
         FROM products p
         LEFT JOIN product_translations requested_translation
           ON requested_translation.product_id = p.id
@@ -439,14 +441,14 @@ export const PublicSeoService = {
           ON default_translation.product_id = p.id
           AND default_translation.language_code = default_language.code
         LEFT JOIN LATERAL (
-          SELECT pi.url
+          SELECT ${PublicProductImageService.sql("pi")} AS image_data
           FROM product_images pi
           WHERE pi.product_id = p.id
           ORDER BY pi.priority, pi.id
           LIMIT 1
         ) image ON TRUE
         WHERE p.brand_id = $1 AND p.is_active = TRUE
-        ORDER BY CASE WHEN image.url IS NULL THEN 1 ELSE 0 END, p.article, p.id
+        ORDER BY CASE WHEN image.image_data IS NULL THEN 1 ELSE 0 END, p.article, p.id
         LIMIT $3 OFFSET $4
       `, [brandId, locale, pageSize, (page - 1) * pageSize]),
       CustomerPricingService.getContext(null, db),
@@ -465,13 +467,15 @@ export const PublicSeoService = {
       const image = ProductPlaceholderService.getProductImage({
         ...product,
         name,
-        imageUrl: product.image_url,
+        imageUrl: product.image_variant?.url || product.image_url,
+        imageVariants: product.image_variant ? [product.image_variant] : [],
       });
       return {
         id: Number(product.id),
         article: product.article,
         name,
         imageUrl: image.imageUrl,
+        imageVariant: image.imageVariant,
         hasRealImage: image.hasRealImage,
         isPlaceholder: image.isPlaceholder,
         offer: offer ? mapPublicOffer(offer) : null,

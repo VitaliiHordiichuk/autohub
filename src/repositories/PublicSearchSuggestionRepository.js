@@ -1,6 +1,7 @@
 import { pool } from "../config/db.js";
 import { normalizeArticle } from "../services/articleEngine/normalize.js";
 import { ProductPlaceholderService } from "../services/ProductPlaceholderService.js";
+import { PublicProductImageService } from "../services/PublicProductImageService.js";
 import { publicProductName } from "../services/ProductNameService.js";
 import { cleanPublicSearchQuery, escapeSearchLike, isArticleQuery, publicSearchTerms } from "../services/PublicSearchQuery.js";
 
@@ -49,7 +50,8 @@ async function find({ query, locale = "uk", limit = 24, page = 1, withTotal = tr
         ELSE NULL
       END AS name_provider,
       COALESCE(b.name, pm.name, '') AS manufacturer,
-      (SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority, pi.id LIMIT 1) AS image_url
+      (SELECT ${PublicProductImageService.sql("pi")} FROM product_images pi
+        WHERE pi.product_id=p.id ORDER BY pi.priority, pi.id LIMIT 1) AS image_variant
       ${from}
       LEFT JOIN product_translations requested_translation
         ON requested_translation.product_id=p.id AND requested_translation.language_code=$1
@@ -83,11 +85,17 @@ async function find({ query, locale = "uk", limit = 24, page = 1, withTotal = tr
   const total = count ? Number(count.rows[0].total) : result.rows.length;
   const products = result.rows.map(row => {
     const name = publicProductName(row.name, row.name_provider);
-    const image = ProductPlaceholderService.getProductImage({ ...row, name, imageUrl: row.image_url });
+    const image = ProductPlaceholderService.getProductImage({
+      ...row,
+      name,
+      imageUrl: row.image_variant?.url || row.image_url,
+      imageVariants: row.image_variant ? [row.image_variant] : [],
+    });
     return {
       id: Number(row.id), article: row.article, normalized: row.article_normalized,
       name, manufacturer: row.manufacturer || null,
-      imageUrl: image.imageUrl, hasRealImage: image.hasRealImage, isPlaceholder: image.isPlaceholder,
+      imageUrl: image.imageUrl, imageVariant: image.imageVariant,
+      hasRealImage: image.hasRealImage, isPlaceholder: image.isPlaceholder,
     };
   });
   return { products, pagination: { page: safePage, pageSize: safeLimit, total, pages: Math.max(1, Math.ceil(total / safeLimit)) } };

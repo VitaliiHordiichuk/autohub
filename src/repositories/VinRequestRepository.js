@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { PublicProductImageService } from "../services/PublicProductImageService.js";
 
 const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_name, u.last_name, u.phone AS user_phone,
   (u.vin_chat_blocked_at IS NOT NULL) AS vin_chat_blocked,
@@ -23,6 +24,7 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
     'product_id',p.id,'product_offer_id',po.id,
     'article',p.article,'name',p.name,
     'image_url',(SELECT pi.url FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1),
+    'image_variant',(SELECT ${PublicProductImageService.sql("pi")} FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1),
     'retail_price',CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL THEN po.manual_retail_price ELSE po.retail_price END,
     'minimum_sale_price',po.minimum_sale_price,'delivery_days',po.delivery_days,
     'is_returnable',COALESCE(po.is_returnable,w.returnable_by_default,TRUE),

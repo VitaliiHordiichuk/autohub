@@ -9,6 +9,7 @@ import { pool } from "../config/db.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { OfferService } from "./OfferService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
 
 const IMAGE_FIELDS = ["desktop", "tablet", "mobile"];
@@ -565,7 +566,7 @@ function presentAdminFeature(row) {
     featureType: row.feature_type,
     article: row.article,
     productName: row.name,
-    imageUrl: row.image_url || null,
+    imageUrl: row.image_url || row.image_variant?.url || null,
     discountPercent: row.discount_percent === null ? null : Number(row.discount_percent),
     startsOn: row.starts_on || null,
     endsOn: row.ends_on || null,
@@ -596,8 +597,8 @@ async function listFeatureRows(where, values, db = pool) {
         SELECT 1 FROM product_translations pt
         WHERE pt.product_id = p.id AND pt.provider = 'MANUAL' AND pt.name = p.name
       ) THEN 'MANUAL' ELSE NULL END AS name_provider,
-      (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id
-       ORDER BY pi.priority, pi.id LIMIT 1) AS image_url
+      (SELECT ${PublicProductImageService.sql("pi")} FROM product_images pi WHERE pi.product_id = p.id
+       ORDER BY pi.priority, pi.id LIMIT 1) AS image_variant
     FROM homepage_product_features f
     JOIN products p ON p.id = f.product_id
     LEFT JOIN brands b ON b.id = p.brand_id
@@ -635,7 +636,8 @@ export const HomepageContentService = {
       const image = ProductPlaceholderService.getProductImage({
         ...row,
         name,
-        imageUrl: row.image_url,
+        imageUrl: row.image_variant?.url || row.image_url,
+        imageVariants: row.image_variant ? [row.image_variant] : [],
       });
       return {
         id: Number(row.id),
@@ -646,6 +648,7 @@ export const HomepageContentService = {
           article: row.article,
           name,
           imageUrl: image.imageUrl,
+          imageVariant: image.imageVariant,
           hasRealImage: image.hasRealImage,
           isPlaceholder: image.isPlaceholder,
         },

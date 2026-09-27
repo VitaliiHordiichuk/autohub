@@ -2,6 +2,7 @@ import {
   pool,
 } from "../config/db.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { isEligiblePublicOffer } from "./OfferService.js";
 
@@ -171,7 +172,14 @@ async function loadPublicNames(
             FROM product_images pi
             WHERE pi.product_id = p.id
             ORDER BY pi.priority, pi.id
-          ) AS image_urls
+          ) AS image_urls,
+
+          ARRAY(
+            SELECT ${PublicProductImageService.sql("pi")}
+            FROM product_images pi
+            WHERE pi.product_id = p.id
+            ORDER BY pi.priority, pi.id
+          ) AS image_variants
 
         FROM products p
 
@@ -237,6 +245,8 @@ async function loadPublicNames(
           imageUrls:
             row.image_urls ??
             [],
+          imageVariants:
+            PublicProductImageService.normalizeMany(row.image_variants),
         },
       ]
     )
@@ -310,6 +320,9 @@ function localizeProduct(
         ...product,
         imageUrls:
           localized?.imageUrls ??
+          [],
+        imageVariants:
+          localized?.imageVariants ??
           [],
       });
 

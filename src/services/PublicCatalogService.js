@@ -1,6 +1,7 @@
 import { pool } from "../config/db.js";
 import { OfferService } from "./OfferService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
+import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { parsePublicPage } from "../utils/publicPagination.js";
 
@@ -303,7 +304,13 @@ export const PublicCatalogService = {
                FROM product_images pi
                WHERE pi.product_id = p.id
                ORDER BY pi.priority, pi.id
-             ) AS image_urls
+             ) AS image_urls,
+             ARRAY(
+               SELECT ${PublicProductImageService.sql("pi")}
+               FROM product_images pi
+               WHERE pi.product_id = p.id
+               ORDER BY pi.priority, pi.id
+             ) AS image_variants
       FROM filtered_products filtered
       JOIN products p ON p.id=filtered.id
       LEFT JOIN brands b ON b.id = p.brand_id
@@ -434,12 +441,15 @@ export const PublicCatalogService = {
         category: localizedName(row, locale),
         imageUrl: product.image_url,
         imageUrls: product.image_urls,
+        imageVariants: product.image_variants,
       });
       return {
         ...product,
         name,
         image_url: image.imageUrl,
         image_urls: image.imageUrls,
+        image_variant: image.imageVariant,
+        image_variants: image.imageVariants,
         hasRealImage: image.hasRealImage,
         isPlaceholder: image.isPlaceholder,
         offers:

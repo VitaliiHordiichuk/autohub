@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 
 import sharp from "sharp";
 
+import { PublicProductImageService } from "./PublicProductImageService.js";
+
 const PLACEHOLDER_VERSION = "maka-product-placeholder-v1";
 const PLACEHOLDER_SIZE = 800;
 const MAX_CACHE_ENTRIES = 250;
@@ -119,17 +121,25 @@ function isProductPlaceholderUrl(value) {
 
 function getProductImage(product) {
   const images = realImageUrls(product);
+  const responsiveImages = PublicProductImageService.normalizeMany(product?.imageVariants);
   if (images.length) {
+    const variantsByUrl = new Map(responsiveImages.map((image) => [image.url, image]));
+    const imageVariants = images.map((url) => variantsByUrl.get(url) || { url, variants: [] });
     return {
       imageUrl: images[0],
       imageUrls: images,
+      imageVariant: imageVariants[0],
+      imageVariants,
       hasRealImage: true,
       isPlaceholder: false,
     };
   }
+  const placeholderUrl = productPlaceholderUrl(product);
   return {
-    imageUrl: productPlaceholderUrl(product),
+    imageUrl: placeholderUrl,
     imageUrls: [],
+    imageVariant: placeholderUrl ? { url: placeholderUrl, variants: [] } : null,
+    imageVariants: [],
     hasRealImage: false,
     isPlaceholder: true,
   };
