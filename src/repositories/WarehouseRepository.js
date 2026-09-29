@@ -255,10 +255,10 @@ export const WarehouseRepository = {
         pricing_model = COALESCE($14, pricing_model),
         retail_markup_percent = COALESCE($15, retail_markup_percent),
         minimum_markup_percent = COALESCE($16, minimum_markup_percent),
-        return_policy_override = COALESCE($17, return_policy_override),
+        return_policy_override = COALESCE($17::varchar, return_policy_override),
         returnable_by_default = CASE
           WHEN $17 IS NULL THEN returnable_by_default
-          WHEN $17 = 'NON_RETURNABLE' THEN FALSE
+          WHEN $17::varchar = 'NON_RETURNABLE' THEN FALSE
           ELSE TRUE
         END,
         return_policy_note = CASE

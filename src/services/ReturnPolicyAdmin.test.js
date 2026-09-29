@@ -20,7 +20,7 @@ test("admin offer round-trip writes a tri-state override and internal note", asy
   }, db);
   assert.equal(row.return_policy_override, "NON_RETURNABLE");
   assert.equal(row.return_policy_note, "Спецзаказ");
-  assert.match(calls[0].sql, /return_policy_override = \$2/);
+  assert.match(calls[0].sql, /return_policy_override = \$2::varchar/);
   assert.match(calls[0].sql, /is_returnable = CASE/);
 });
 

@@ -706,10 +706,10 @@ export const AdminWarehouseOfferRepository = {
   async setReturnPolicy({ offerId, returnPolicyOverride, returnPolicyNote }, db = pool) {
     const result = await db.query(
       `UPDATE product_offers
-       SET return_policy_override = $2,
+       SET return_policy_override = $2::varchar,
            is_returnable = CASE
-             WHEN $2 = 'INHERIT' THEN NULL
-             WHEN $2 = 'RETURNABLE' THEN TRUE
+             WHEN $2::varchar = 'INHERIT' THEN NULL
+             WHEN $2::varchar = 'RETURNABLE' THEN TRUE
              ELSE FALSE
            END,
            return_policy_note = $3,
