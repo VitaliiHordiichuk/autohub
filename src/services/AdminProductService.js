@@ -1,6 +1,11 @@
 import {
   pool,
 } from "../config/db.js";
+import {
+  normalizeReturnPolicyNote,
+  normalizeReturnPolicyOverride,
+  ReturnPolicyService,
+} from "./ReturnPolicyService.js";
 
 
 function positiveInteger(value) {
@@ -13,6 +18,63 @@ function positiveInteger(value) {
 
 
 export const AdminProductService = {
+  async getReturnPolicy(productIdValue, offerIdValue = null, db = pool) {
+    const productId = positiveInteger(productIdValue);
+    if (!productId) throw new Error("Некоректний товар");
+    const offerId = offerIdValue === null || offerIdValue === undefined
+      ? null
+      : positiveInteger(offerIdValue);
+    if (offerIdValue !== null && offerIdValue !== undefined && !offerId) {
+      throw new Error("Некоректна пропозиція");
+    }
+
+    const result = await db.query(
+      `SELECT
+         p.id,
+         p.return_policy_override AS product_return_policy_override,
+         p.return_policy_note AS product_return_policy_note,
+         po.return_policy_override AS offer_return_policy_override,
+         w.return_policy_override AS warehouse_return_policy_override
+       FROM products p
+       LEFT JOIN product_offers po
+         ON po.product_id = p.id
+        AND po.id = $2
+       LEFT JOIN warehouses w ON w.id = po.warehouse_id
+       WHERE p.id = $1
+         AND ($2::integer IS NULL OR po.id IS NOT NULL)
+       LIMIT 1`,
+      [productId, offerId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Товар не знайдено");
+    return {
+      productId,
+      returnPolicyOverride: row.product_return_policy_override,
+      returnPolicyNote: row.product_return_policy_note,
+      effectiveReturnPolicy: ReturnPolicyService.resolveRow(row),
+    };
+  },
+
+  async setReturnPolicy(productIdValue, data = {}, db = pool) {
+    const productId = positiveInteger(productIdValue);
+    if (!productId) throw new Error("Некоректний товар");
+    const returnPolicyOverride = normalizeReturnPolicyOverride(
+      data.returnPolicyOverride
+    );
+    const returnPolicyNote = normalizeReturnPolicyNote(data.returnPolicyNote);
+    const updated = await db.query(
+      `UPDATE products
+       SET return_policy_override = $2,
+           return_policy_note = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING id`,
+      [productId, returnPolicyOverride, returnPolicyNote]
+    );
+    if (!updated.rows[0]) throw new Error("Товар не знайдено");
+    return this.getReturnPolicy(productId, data.offerId ?? null, db);
+  },
+
   async permanentlyRemove(
     productIdValue,
     removedByUserId,

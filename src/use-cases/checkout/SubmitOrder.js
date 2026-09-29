@@ -17,6 +17,7 @@ import {
   normalizeOrderDelivery,
 } from "../../services/OrderDeliveryService.js";
 import { CustomerPricingService } from "../../services/CustomerPricingService.js";
+import { ReturnPolicyService } from "../../services/ReturnPolicyService.js";
 import { NotificationRepository } from "../../repositories/NotificationRepository.js";
 import { TelegramNotificationService } from "../../services/TelegramNotificationService.js";
 
@@ -30,6 +31,12 @@ function calculateTotal(items) {
       );
     },
     0
+  );
+}
+
+export function orderItemReturnabilitySnapshot(item) {
+  return ReturnPolicyService.isReturnable(
+    ReturnPolicyService.resolveRow(item)
   );
 }
 
@@ -240,7 +247,7 @@ export const SubmitOrder = {
                     item.retail_price
                   ),
                 isReturnable:
-                  item.is_returnable !== false,
+                  orderItemReturnabilitySnapshot(item),
               },
               db
             );

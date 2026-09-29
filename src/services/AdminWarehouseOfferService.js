@@ -19,6 +19,11 @@ import {
 import {
   calculatePriceChangePercent as calculateChangePercent,
 } from "./ImportPolicyService.js";
+import {
+  normalizeReturnPolicyNote,
+  normalizeReturnPolicyOverride,
+  ReturnPolicyService,
+} from "./ReturnPolicyService.js";
 
 const ALLOWED_STATUSES =
   new Set([
@@ -297,13 +302,11 @@ function mapOffer(row) {
 
     imageUrl: row.image_url ?? null,
     imageCount: Number(row.image_count || 0),
-    returnabilityOverride:
-      row.is_returnable === null || row.is_returnable === undefined
-        ? null
-        : Boolean(row.is_returnable),
-    isReturnable: Boolean(
-      row.effective_is_returnable ?? row.is_returnable ??
-      row.returnable_by_default ?? true
+    returnPolicyOverride: row.offer_return_policy_override ?? "INHERIT",
+    returnPolicyNote: row.offer_return_policy_note ?? null,
+    effectiveReturnPolicy: ReturnPolicyService.resolveRow(row),
+    isReturnable: ReturnPolicyService.isReturnable(
+      ReturnPolicyService.resolveRow(row)
     ),
 
     warehouse: {
@@ -1208,20 +1211,29 @@ export const AdminWarehouseOfferService = {
     });
   },
 
-  async setReturnability({ warehouseId, offerId, isReturnable }) {
+  async setReturnability({
+    warehouseId,
+    offerId,
+    returnPolicyOverride,
+    returnPolicyNote,
+  }) {
     const normalizedWarehouseId = parsePositiveInteger(warehouseId, "warehouseId");
     const normalizedOfferId = parsePositiveInteger(offerId, "offerId");
-    if (isReturnable !== null && typeof isReturnable !== "boolean") {
-      throw createError("Поле isReturnable должно быть true, false или null");
-    }
+    const normalizedOverride = normalizeReturnPolicyOverride(returnPolicyOverride);
+    const normalizedNote = normalizeReturnPolicyNote(returnPolicyNote);
     return transaction(async (db) => {
       await requireWarehouse(normalizedWarehouseId, db);
       const oldOffer = await requireOfferForUpdate({ warehouseId: normalizedWarehouseId, offerId: normalizedOfferId }, db);
-      const updated = await AdminWarehouseOfferRepository.setReturnability({ offerId: normalizedOfferId, isReturnable }, db);
+      const updated = await AdminWarehouseOfferRepository.setReturnPolicy({
+        offerId: normalizedOfferId,
+        returnPolicyOverride: normalizedOverride,
+        returnPolicyNote: normalizedNote,
+      }, db);
       return { offer: mapOffer({
         ...oldOffer,
         ...updated,
-        effective_is_returnable: updated.is_returnable ?? oldOffer.returnable_by_default ?? true,
+        offer_return_policy_override: updated.return_policy_override,
+        offer_return_policy_note: updated.return_policy_note,
       }) };
     });
   },

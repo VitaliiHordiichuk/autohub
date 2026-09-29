@@ -3,7 +3,9 @@ import {
 } from "express";
 
 import {
+  getProductReturnPolicy,
   permanentlyRemoveProduct,
+  setProductReturnPolicy,
 } from "../controllers/admin-product.controller.js";
 
 import {
@@ -22,4 +24,14 @@ adminProductRouter.use(
 adminProductRouter.delete(
   "/:productId/permanent",
   permanentlyRemoveProduct
+);
+
+adminProductRouter.get(
+  "/:productId/return-policy",
+  getProductReturnPolicy
+);
+
+adminProductRouter.patch(
+  "/:productId/return-policy",
+  setProductReturnPolicy
 );

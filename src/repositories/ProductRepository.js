@@ -1,6 +1,7 @@
 import { pool } from "../config/db.js";
 import { normalizeProductName } from "../services/ProductNameService.js";
 import { calculatePriceChangePercent } from "../services/ImportPolicyService.js";
+import { ReturnPolicyService } from "../services/ReturnPolicyService.js";
 
 export const ProductRepository = {
   async findByNormalizedArticle(articleNormalized) {
@@ -97,7 +98,9 @@ export const ProductRepository = {
         po.source_type,
         po.is_available,
         po.is_hidden,
-        COALESCE(po.is_returnable, w.returnable_by_default, TRUE) AS is_returnable,
+        po.return_policy_override AS offer_return_policy_override,
+        p.return_policy_override AS product_return_policy_override,
+        w.return_policy_override AS warehouse_return_policy_override,
 
         w.name AS warehouse_name,
         w.city AS warehouse_city,
@@ -109,6 +112,9 @@ export const ProductRepository = {
         s.warehouse_priority_enabled
 
       FROM product_offers po
+
+      JOIN products p
+        ON p.id = po.product_id
 
       LEFT JOIN warehouses w
         ON w.id = po.warehouse_id
@@ -341,29 +347,34 @@ async findOfferById(
 ) {
   const sql = `
     SELECT
-      id,
-      product_id,
-      warehouse_id,
-      supplier_id,
-      quantity,
-      purchase_price,
+      po.id,
+      po.product_id,
+      po.warehouse_id,
+      po.supplier_id,
+      po.quantity,
+      po.purchase_price,
 
       CASE
-        WHEN price_mode = 'MANUAL'
-          AND manual_retail_price IS NOT NULL
-        THEN manual_retail_price
-        ELSE retail_price
+        WHEN po.price_mode = 'MANUAL'
+          AND po.manual_retail_price IS NOT NULL
+        THEN po.manual_retail_price
+        ELSE po.retail_price
       END AS retail_price,
 
-      minimum_sale_price,
+      po.minimum_sale_price,
 
-      source_type,
-      is_available,
-      is_hidden
+      po.source_type,
+      po.is_available,
+      po.is_hidden,
+      po.return_policy_override AS offer_return_policy_override,
+      p.return_policy_override AS product_return_policy_override,
+      w.return_policy_override AS warehouse_return_policy_override
 
-    FROM product_offers
+    FROM product_offers po
+    JOIN products p ON p.id = po.product_id
+    LEFT JOIN warehouses w ON w.id = po.warehouse_id
 
-    WHERE id = $1
+    WHERE po.id = $1
 
     LIMIT 1;
   `;
@@ -379,6 +390,7 @@ async findOfferById(
   }
 
   const offer = result.rows[0];
+  const returnPolicy = ReturnPolicyService.resolveRow(offer);
 
   return {
     id:
@@ -418,6 +430,9 @@ async findOfferById(
       offer.is_available === true &&
       offer.is_hidden !== true &&
       Number(offer.quantity) > 0,
+
+    returnPolicy,
+    isReturnable: ReturnPolicyService.isReturnable(returnPolicy),
   };
 },
 
@@ -427,29 +442,34 @@ async findOfferByIdForUpdate(
 ) {
   const sql = `
     SELECT
-      id,
-      product_id,
-      warehouse_id,
-      supplier_id,
-      quantity,
-      purchase_price,
+      po.id,
+      po.product_id,
+      po.warehouse_id,
+      po.supplier_id,
+      po.quantity,
+      po.purchase_price,
 
       CASE
-        WHEN price_mode = 'MANUAL'
-          AND manual_retail_price IS NOT NULL
-        THEN manual_retail_price
-        ELSE retail_price
+        WHEN po.price_mode = 'MANUAL'
+          AND po.manual_retail_price IS NOT NULL
+        THEN po.manual_retail_price
+        ELSE po.retail_price
       END AS retail_price,
 
-      minimum_sale_price,
+      po.minimum_sale_price,
 
-      source_type,
-      is_available,
-      is_hidden
+      po.source_type,
+      po.is_available,
+      po.is_hidden,
+      po.return_policy_override AS offer_return_policy_override,
+      p.return_policy_override AS product_return_policy_override,
+      w.return_policy_override AS warehouse_return_policy_override
 
-    FROM product_offers
+    FROM product_offers po
+    JOIN products p ON p.id = po.product_id
+    LEFT JOIN warehouses w ON w.id = po.warehouse_id
 
-    WHERE id = $1
+    WHERE po.id = $1
 
     FOR UPDATE;
   `;
@@ -465,6 +485,7 @@ async findOfferByIdForUpdate(
   }
 
   const offer = result.rows[0];
+  const returnPolicy = ReturnPolicyService.resolveRow(offer);
 
   return {
     id:
@@ -508,6 +529,9 @@ async findOfferByIdForUpdate(
       offer.is_available === true &&
       offer.is_hidden !== true &&
       Number(offer.quantity) > 0,
+
+    returnPolicy,
+    isReturnable: ReturnPolicyService.isReturnable(returnPolicy),
   };
 },
 

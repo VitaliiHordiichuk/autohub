@@ -27,7 +27,9 @@ const select = `SELECT vr.*, vb.name AS vehicle_brand_name, u.email, u.first_nam
     'image_variant',(SELECT ${PublicProductImageService.sql("pi")} FROM product_images pi WHERE pi.product_id=p.id ORDER BY pi.priority,pi.id LIMIT 1),
     'retail_price',CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL THEN po.manual_retail_price ELSE po.retail_price END,
     'minimum_sale_price',po.minimum_sale_price,'delivery_days',po.delivery_days,
-    'is_returnable',COALESCE(po.is_returnable,w.returnable_by_default,TRUE),
+    'offer_return_policy_override',po.return_policy_override,
+    'product_return_policy_override',p.return_policy_override,
+    'warehouse_return_policy_override',w.return_policy_override,
     'quantity',GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0),
     'is_available',(p.is_active=TRUE AND po.is_available=TRUE AND po.is_hidden=FALSE
       AND (w.id IS NULL OR w.is_active=TRUE) AND (s.id IS NULL OR s.is_active=TRUE)

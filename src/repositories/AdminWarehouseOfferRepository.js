@@ -93,7 +93,8 @@ export const AdminWarehouseOfferRepository = {
           type,
           supplier_id,
           delivery_days,
-          returnable_by_default,
+          return_policy_override,
+          return_policy_note,
           is_active
         FROM warehouses
         WHERE id = $1
@@ -469,10 +470,10 @@ export const AdminWarehouseOfferRepository = {
             po.source_type,
             po.is_available,
             po.is_hidden,
-            po.is_returnable,
-            w.returnable_by_default,
-            COALESCE(po.is_returnable, w.returnable_by_default, TRUE)
-              AS effective_is_returnable,
+            po.return_policy_override AS offer_return_policy_override,
+            po.return_policy_note AS offer_return_policy_note,
+            p.return_policy_override AS product_return_policy_override,
+            w.return_policy_override AS warehouse_return_policy_override,
 
             po.manual_price_updated_at,
             po.hidden_at,
@@ -576,7 +577,10 @@ export const AdminWarehouseOfferRepository = {
             p.article,
             p.article_normalized,
             p.name,
-            w.returnable_by_default,
+            po.return_policy_override AS offer_return_policy_override,
+            po.return_policy_note AS offer_return_policy_note,
+            p.return_policy_override AS product_return_policy_override,
+            w.return_policy_override AS warehouse_return_policy_override,
 
             CASE
               WHEN
@@ -699,13 +703,20 @@ export const AdminWarehouseOfferRepository = {
     return result.rows[0] ?? null;
   },
 
-  async setReturnability({ offerId, isReturnable }, db = pool) {
+  async setReturnPolicy({ offerId, returnPolicyOverride, returnPolicyNote }, db = pool) {
     const result = await db.query(
       `UPDATE product_offers
-       SET is_returnable = $2, updated_at = CURRENT_TIMESTAMP
+       SET return_policy_override = $2,
+           is_returnable = CASE
+             WHEN $2 = 'INHERIT' THEN NULL
+             WHEN $2 = 'RETURNABLE' THEN TRUE
+             ELSE FALSE
+           END,
+           return_policy_note = $3,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
        RETURNING *;`,
-      [offerId, isReturnable]
+      [offerId, returnPolicyOverride, returnPolicyNote]
     );
     return result.rows[0] ?? null;
   },

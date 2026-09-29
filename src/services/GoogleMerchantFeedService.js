@@ -216,6 +216,7 @@ export function buildGoogleMerchantItems(
       brand,
       mpn: article,
       googleProductCategory,
+      returnPolicy: offer.returnPolicy,
     });
   }
 
@@ -248,6 +249,16 @@ export function renderGoogleMerchantFeed(items) {
           "google_product_category",
           item.googleProductCategory
         )]
+      : []),
+    ...(item.returnPolicy?.policy === "NON_RETURNABLE"
+      ? [
+          "      <g:returns>",
+          merchantElement("country", "UA"),
+          merchantElement("item_condition", "NEW"),
+          merchantElement("window_type", "NO_RETURNS"),
+          merchantElement("method", "BY_MAIL"),
+          "      </g:returns>",
+        ]
       : []),
     "    </item>",
   ].join("\n")).join("\n");

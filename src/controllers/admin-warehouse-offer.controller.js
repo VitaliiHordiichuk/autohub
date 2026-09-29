@@ -261,10 +261,20 @@ export async function setOfferVisibility(
 
 export async function setOfferReturnability(req, res) {
   try {
+    const legacyValue = req.body.isReturnable;
+    const returnPolicyOverride = req.body.returnPolicyOverride
+      ?? (legacyValue === null
+        ? "INHERIT"
+        : legacyValue === true
+          ? "RETURNABLE"
+          : legacyValue === false
+            ? "NON_RETURNABLE"
+            : undefined);
     const result = await AdminWarehouseOfferService.setReturnability({
       warehouseId: req.params.warehouseId,
       offerId: req.params.offerId,
-      isReturnable: req.body.isReturnable,
+      returnPolicyOverride,
+      returnPolicyNote: req.body.returnPolicyNote,
     });
     return res.json({ success: true, message: "Правило возврата сохранено", ...result });
   } catch (error) {

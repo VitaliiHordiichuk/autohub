@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { ReturnPolicyService } from "./ReturnPolicyService.js";
 
 import {
   normalizeNewProductsMode,
@@ -177,7 +178,8 @@ async function findWarehouse(db, warehouseId) {
         w.pricing_model,
         w.retail_markup_percent,
         w.minimum_markup_percent,
-        w.returnable_by_default,
+        w.return_policy_override,
+        w.return_policy_note,
         s.name AS supplier_name,
         s.type AS supplier_type,
         s.is_active AS supplier_is_active
@@ -365,7 +367,11 @@ export const WarehouseImportProfileService = {
           pricingModel: warehouse.pricing_model,
           retailMarkupPercent: Number(warehouse.retail_markup_percent),
           minimumMarkupPercent: Number(warehouse.minimum_markup_percent),
-          returnableByDefault: warehouse.returnable_by_default !== false,
+          returnPolicyOverride: warehouse.return_policy_override,
+          returnPolicyNote: warehouse.return_policy_note,
+          effectiveReturnPolicy: ReturnPolicyService.resolve({
+            warehouseOverride: warehouse.return_policy_override,
+          }),
         },
         profile: mapProfile(profile),
       };

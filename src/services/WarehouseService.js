@@ -1,4 +1,9 @@
 import { WarehouseRepository } from "../repositories/WarehouseRepository.js";
+import {
+  normalizeReturnPolicyNote,
+  normalizeReturnPolicyOverride,
+  ReturnPolicyService,
+} from "./ReturnPolicyService.js";
 import { SupplierRepository } from "../repositories/SupplierRepository.js";
 
 const WAREHOUSE_TYPES = new Set([
@@ -301,7 +306,14 @@ export const WarehouseService = {
       throw new Error("Склад не найден");
     }
 
-    return warehouse;
+    return {
+      ...warehouse,
+      returnPolicyOverride: warehouse.return_policy_override,
+      returnPolicyNote: warehouse.return_policy_note,
+      effectiveReturnPolicy: ReturnPolicyService.resolve({
+        warehouseOverride: warehouse.return_policy_override,
+      }),
+    };
   },
 
   async updateWarehouse(
@@ -320,6 +332,8 @@ export const WarehouseService = {
       retailMarkupPercent,
       minimumMarkupPercent,
       returnableByDefault,
+      returnPolicyOverride,
+      returnPolicyNote,
     }
   ) {
     const numericWarehouseId = validateId(
@@ -361,6 +375,17 @@ export const WarehouseService = {
     if (returnableByDefault !== undefined && typeof returnableByDefault !== "boolean") {
       throw new Error("Поле возвратности склада должно быть true или false");
     }
+    const legacyReturnPolicyOverride = returnableByDefault === undefined
+      ? undefined
+      : returnableByDefault
+        ? "RETURNABLE"
+        : "NON_RETURNABLE";
+    const normalizedReturnPolicyOverride = returnPolicyOverride === undefined
+      ? legacyReturnPolicyOverride
+      : normalizeReturnPolicyOverride(returnPolicyOverride);
+    const normalizedReturnPolicyNote = returnPolicyNote === undefined
+      ? undefined
+      : normalizeReturnPolicyNote(returnPolicyNote);
     if (nextRetailMarkup < nextMinimumMarkup && nextPricingModel === "SUPPLIER_MARKUP") {
       throw new Error("Розничная наценка не может быть меньше минимальной");
     }
@@ -416,11 +441,20 @@ export const WarehouseService = {
           pricingModel: nextPricingModel,
           retailMarkupPercent: nextRetailMarkup,
           minimumMarkupPercent: nextMinimumMarkup,
-          returnableByDefault,
+          returnPolicyOverride: normalizedReturnPolicyOverride,
+          returnPolicyNote: normalizedReturnPolicyNote,
         }
       );
 
-    return updatedWarehouse;
+    const effectiveReturnPolicy = ReturnPolicyService.resolve({
+      warehouseOverride: updatedWarehouse.return_policy_override,
+    });
+    return {
+      ...updatedWarehouse,
+      returnPolicyOverride: updatedWarehouse.return_policy_override,
+      returnPolicyNote: updatedWarehouse.return_policy_note,
+      effectiveReturnPolicy,
+    };
   },
 
   async setWarehouseActive(

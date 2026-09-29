@@ -4,6 +4,7 @@ import {
   CartAccessService,
 } from "./CartAccessService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
+import { ReturnPolicyService } from "./ReturnPolicyService.js";
 
 function createError(
   message,
@@ -57,7 +58,7 @@ function publicCart(cart) {
   };
 }
 
-function publicItems(items, pricingContext) {
+export function presentCartItems(items, pricingContext) {
   return items.map((item) => {
     const quantity =
       Number(item.quantity);
@@ -65,6 +66,7 @@ function publicItems(items, pricingContext) {
     const pricing = CustomerPricingService.price({ retailPrice: item.retail_price,
       minimumSalePrice: item.minimum_sale_price }, pricingContext);
     const retailPrice = Number(pricing?.customerPrice);
+    const returnPolicy = ReturnPolicyService.resolveRow(item);
 
     return {
       id: item.id,
@@ -90,6 +92,8 @@ function publicItems(items, pricingContext) {
         item.source_type,
       isAvailable:
         Boolean(item.is_available),
+      returnPolicy,
+      isReturnable: ReturnPolicyService.isReturnable(returnPolicy),
       createdAt:
         item.created_at,
       updatedAt:
@@ -105,7 +109,7 @@ function cartResult(
   pricingContext = null
 ) {
   const serializedItems =
-    publicItems(items, pricingContext);
+    presentCartItems(items, pricingContext);
 
   const totalQuantity =
     serializedItems.reduce(

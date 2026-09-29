@@ -1,5 +1,6 @@
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
+import { ReturnPolicyService } from "./ReturnPolicyService.js";
 
 
 function formatQuantity(quantity) {
@@ -187,6 +188,7 @@ function mapOffer(offer, pricingContext, locale) {
     minimumSalePrice: offer.minimum_sale_price,
   }, pricingContext);
 
+  const returnPolicy = ReturnPolicyService.resolveRow(offer);
   const mappedOffer = {
     id:
       Number(offer.id),
@@ -218,8 +220,10 @@ function mapOffer(offer, pricingContext, locale) {
         offer.is_available
       ),
 
+    returnPolicy,
+
     isReturnable:
-      offer.is_returnable !== false,
+      ReturnPolicyService.isReturnable(returnPolicy),
 
     warehousePriorityEnabled:
       offer

@@ -568,6 +568,8 @@ function mapPublicOffer(
     isReturnable:
       offer.isReturnable !== false,
 
+    returnPolicy: offer.returnPolicy,
+
     availabilityText:
       buildAvailabilityText(
         offer,

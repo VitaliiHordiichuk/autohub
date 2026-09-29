@@ -46,7 +46,9 @@ function candidate(overrides = {}) {
     source_type: "SUPPLIER",
     is_available: true,
     is_hidden: false,
-    is_returnable: true,
+    offer_return_policy_override: "INHERIT",
+    product_return_policy_override: "INHERIT",
+    warehouse_return_policy_override: "INHERIT",
     warehouse_name: "Test warehouse",
     warehouse_city: "Харків",
     warehouse_priority: null,
@@ -77,6 +79,7 @@ test("builds one stable Google item with the guest retail price", () => {
     brand: "MANN-FILTER",
     mpn: "HU718/5X",
     googleProductCategory: "5613",
+    returnPolicy: { policy: "RETURNABLE", source: "ORGANIZATION" },
   });
 });
 
@@ -165,6 +168,27 @@ test("renders valid RSS structure, namespace and required merchant elements", ()
   assert.doesNotMatch(xml, /undefined|null|NaN|\[object Object\]/);
 });
 
+test("omits a product-level returns override for the default returnable policy", () => {
+  const item = buildGoogleMerchantItems([candidate()])[0];
+  const xml = renderGoogleMerchantFeed([item]);
+  assert.equal(item.returnPolicy.policy, "RETURNABLE");
+  assert.doesNotMatch(xml, /<g:returns>/);
+});
+
+test("renders a NO_RETURNS override for a non-returnable selected offer", () => {
+  const item = buildGoogleMerchantItems([candidate({
+    offer_return_policy_override: "NON_RETURNABLE",
+  })])[0];
+  const xml = renderGoogleMerchantFeed([item]);
+  assert.deepEqual(item.returnPolicy, { policy: "NON_RETURNABLE", source: "OFFER" });
+  assert.match(xml, /<g:returns>/);
+  assert.match(xml, /<g:country>UA<\/g:country>/);
+  assert.match(xml, /<g:item_condition>NEW<\/g:item_condition>/);
+  assert.match(xml, /<g:window_type>NO_RETURNS<\/g:window_type>/);
+  assert.match(xml, /<g:method>BY_MAIL<\/g:method>/);
+  assert.doesNotMatch(xml, /window_days|FINITE_RETURN_WINDOW/);
+});
+
 
 test("XML-escapes ampersands, angle brackets, quotes and apostrophes", () => {
   const xml = renderGoogleMerchantFeed([{
@@ -248,13 +272,19 @@ test("uses the storefront primary offer instead of repricing by the lowest offer
       source_type: "OWN_STOCK",
       supplier_type: "OWN",
       supplier_name: "MAKA warehouse",
+      offer_return_policy_override: "NON_RETURNABLE",
     }),
     candidate({ id: 502, supplier_id: 21, effective_supplier_id: 21,
-      supplier_name: "Second supplier", retail_price: 1250.5 }),
+      supplier_name: "Second supplier", retail_price: 1250.5,
+      offer_return_policy_override: "RETURNABLE" }),
   ]);
 
   assert.equal(items.length, 1);
   assert.equal(items[0].price, "1400.00 UAH");
+  assert.deepEqual(items[0].returnPolicy, {
+    policy: "NON_RETURNABLE",
+    source: "OFFER",
+  });
 });
 
 

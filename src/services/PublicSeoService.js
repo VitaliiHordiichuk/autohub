@@ -55,7 +55,7 @@ function localizedCategoryName(row, locale, prefix = "") {
   return row[`${prefix}name_uk`] || row[`${prefix}name`];
 }
 
-function mapPublicOffer(offer) {
+export function mapPublicOffer(offer) {
   return {
     id: Number(offer.id),
     price: Number(offer.retailPrice),
@@ -66,6 +66,7 @@ function mapPublicOffer(offer) {
     availabilityText: offer.availabilityText,
     isAvailable: offer.isAvailable === true,
     isReturnable: offer.isReturnable !== false,
+    returnPolicy: offer.returnPolicy,
   };
 }
 

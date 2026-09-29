@@ -219,7 +219,9 @@ export const CartRepository = {
           AS available_quantity,
         po.source_type,
         po.is_available,
-        COALESCE(po.is_returnable, w.returnable_by_default, TRUE) AS is_returnable
+        po.return_policy_override AS offer_return_policy_override,
+        p.return_policy_override AS product_return_policy_override,
+        w.return_policy_override AS warehouse_return_policy_override
 
       FROM cart_items ci
 
