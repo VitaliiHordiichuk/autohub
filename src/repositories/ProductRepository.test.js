@@ -178,3 +178,50 @@ test(
     );
   }
 );
+
+
+test(
+  "findOfferByIdForUpdate блокирует только product_offers",
+  async () => {
+    let capturedSql = null;
+    let capturedParams = null;
+
+    const db = {
+      async query(sql, params) {
+        capturedSql = sql;
+        capturedParams = params;
+        return { rows: [] };
+      },
+    };
+
+    const result =
+      await ProductRepository
+        .findOfferByIdForUpdate(
+          42,
+          db
+        );
+
+    const normalizedSql =
+      capturedSql
+        .replace(/\s+/g, " ")
+        .trim();
+
+    assert.equal(result, null);
+    assert.deepEqual(
+      capturedParams,
+      [42]
+    );
+    assert.match(
+      normalizedSql,
+      /LEFT JOIN warehouses w ON w\.id = po\.warehouse_id/i
+    );
+    assert.match(
+      normalizedSql,
+      /FOR UPDATE OF po;$/i
+    );
+    assert.doesNotMatch(
+      normalizedSql,
+      /WHERE po\.id = \$1 FOR UPDATE;$/i
+    );
+  }
+);

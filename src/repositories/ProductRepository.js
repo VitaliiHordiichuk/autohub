@@ -471,7 +471,7 @@ async findOfferByIdForUpdate(
 
     WHERE po.id = $1
 
-    FOR UPDATE;
+    FOR UPDATE OF po;
   `;
 
   const result =
