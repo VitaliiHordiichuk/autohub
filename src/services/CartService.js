@@ -1,4 +1,7 @@
+import { transaction } from "../db/transaction.js";
 import { CartRepository } from "../repositories/CartRepository.js";
+import { CartAccessRepository } from "../repositories/CartAccessRepository.js";
+import { CheckoutRepository } from "../repositories/CheckoutRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import {
@@ -183,6 +186,28 @@ async function loadCartResult(
   );
 }
 
+async function invalidateActiveCheckoutForCart(cartId, db) {
+  await CheckoutRepository.expireActiveSessionsForCart(cartId, db);
+  await CheckoutRepository.cancelActiveForCart(cartId, db);
+  await ReservationRepository.releaseActiveByCartId(cartId, db);
+}
+
+async function lockCartForMutation(cartId, db) {
+  const locked =
+    await CartAccessRepository
+      .lockActiveByIdForUpdate(
+        cartId,
+        db
+      );
+
+  if (!locked) {
+    throw createError(
+      "Кошик більше не активний",
+      409
+    );
+  }
+}
+
 export const CartService = {
   async getCurrentCart({ userId }) {
     const access =
@@ -210,77 +235,105 @@ export const CartService = {
         "Кількість"
       );
 
-    const access =
-      await CartAccessService
-        .getOrCreate({
-          cartId,
-          userId,
-          guestToken,
-        });
+    const result = await transaction(async (db) => {
+      const access =
+        await CartAccessService
+          .getOrCreate({
+            cartId,
+            userId,
+            guestToken,
+            db,
+          });
 
-    const cart = access.cart;
+      const cart = access.cart;
 
-    const offer =
-      await ProductRepository
-        .findOfferById(
-          productOfferId
+      await lockCartForMutation(
+        cart.id,
+        db
+      );
+
+      await invalidateActiveCheckoutForCart(
+        cart.id,
+        db
+      );
+
+      const offer =
+        await ProductRepository
+          .findOfferByIdForUpdate(
+            productOfferId,
+            db
+          );
+
+      if (!offer) {
+        throw createError(
+          "Пропозицію не знайдено",
+          404
+        );
+      }
+
+      if (!offer.isAvailable) {
+        throw createError(
+          "Товар недоступний"
+        );
+      }
+
+      const existingItem =
+        await CartRepository.findItem(
+          cart.id,
+          productOfferId,
+          db
         );
 
-    if (!offer) {
-      throw createError(
-        "Пропозицію не знайдено",
-        404
-      );
-    }
+      const existingQuantity =
+        existingItem
+          ? Number(existingItem.quantity)
+          : 0;
 
-    if (!offer.isAvailable) {
-      throw createError(
-        "Товар недоступний"
-      );
-    }
+      const finalQuantity =
+        existingQuantity +
+        numericQuantity;
 
-    const existingItem =
-      await CartRepository.findItem(
+      const reservedByOthers =
+        await ReservationRepository
+          .getReservedQuantity(
+            offer.id,
+            existingItem?.id ?? null,
+            db
+          );
+
+      const availableQuantity =
+        Math.max(
+          0,
+          Number(offer.quantity) -
+            reservedByOthers
+        );
+
+      if (
+        finalQuantity >
+        availableQuantity
+      ) {
+        throw createError(
+          `Недостатньо товару. ` +
+          `Доступно: ${availableQuantity}`
+        );
+      }
+
+      await CartRepository.addItem(
         cart.id,
-        productOfferId
+        productOfferId,
+        numericQuantity,
+        db
       );
 
-    const existingQuantity =
-      existingItem
-        ? Number(
-            existingItem.quantity
-          )
-        : 0;
-
-    const finalQuantity =
-      existingQuantity +
-      numericQuantity;
-
-    const reservedByOthers = await ReservationRepository.getReservedQuantity(
-      offer.id,
-      existingItem?.id ?? null
-    );
-    const availableQuantity = Math.max(0, Number(offer.quantity) - reservedByOthers);
-
-    if (
-      finalQuantity >
-      availableQuantity
-    ) {
-      throw createError(
-        `Недостатньо товару. ` +
-        `Доступно: ${availableQuantity}`
-      );
-    }
-
-    await CartRepository.addItem(
-      cart.id,
-      productOfferId,
-      numericQuantity
-    );
+      return {
+        cart,
+        guestToken: access.guestToken,
+      };
+    });
 
     return loadCartResult(
-      cart,
-      access.guestToken,
+      result.cart,
+      result.guestToken,
       userId
     );
   },
@@ -317,71 +370,110 @@ export const CartService = {
         "Кількість"
       );
 
-    const cart =
-      await CartAccessService
-        .assertAccess({
-          cartId,
-          userId,
-          guestToken,
-        });
+    const result = await transaction(async (db) => {
+      const cart =
+        await CartAccessService
+          .assertAccess({
+            cartId,
+            userId,
+            guestToken,
+            db,
+          });
 
-    const item =
-      await CartRepository
-        .findItemById(
-          cart.id,
-          normalizedItemId
-        );
-
-    if (!item) {
-      throw createError(
-        "Позицію кошика не знайдено",
-        404
-      );
-    }
-
-    const offer =
-      await ProductRepository
-        .findOfferById(
-          item.product_offer_id
-        );
-
-    if (!offer) {
-      throw createError(
-        "Пропозицію не знайдено",
-        404
-      );
-    }
-
-    if (!offer.isAvailable) {
-      throw createError(
-        "Товар зараз недоступний"
-      );
-    }
-
-    const reservedByOthers = await ReservationRepository.getReservedQuantity(
-      offer.id,
-      item.id
-    );
-    const availableQuantity = Math.max(0, Number(offer.quantity) - reservedByOthers);
-
-    if (
-      numericQuantity >
-      availableQuantity
-    ) {
-      throw createError(
-        `Недостатньо товару. ` +
-        `Доступно: ${availableQuantity}`
-      );
-    }
-
-    await CartRepository
-      .setItemQuantity(
+      await lockCartForMutation(
         cart.id,
-        normalizedItemId,
-        numericQuantity
+        db
       );
 
-    return loadCartResult(cart, null, userId);
+      await invalidateActiveCheckoutForCart(
+        cart.id,
+        db
+      );
+
+      const item =
+        await CartRepository
+          .findItemById(
+            cart.id,
+            normalizedItemId,
+            db
+          );
+
+      if (!item) {
+        throw createError(
+          "Позицію кошика не знайдено",
+          404
+        );
+      }
+
+      const offer =
+        await ProductRepository
+          .findOfferByIdForUpdate(
+            item.product_offer_id,
+            db
+          );
+
+      if (!offer) {
+        throw createError(
+          "Пропозицію не знайдено",
+          404
+        );
+      }
+
+      if (!offer.isAvailable) {
+        throw createError(
+          "Товар зараз недоступний"
+        );
+      }
+
+      const reservedByOthers =
+        await ReservationRepository
+          .getReservedQuantity(
+            offer.id,
+            item.id,
+            db
+          );
+
+      const availableQuantity =
+        Math.max(
+          0,
+          Number(offer.quantity) -
+            reservedByOthers
+        );
+
+      if (
+        numericQuantity >
+        availableQuantity
+      ) {
+        throw createError(
+          `Недостатньо товару. ` +
+          `Доступно: ${availableQuantity}`
+        );
+      }
+
+      const updated =
+        await CartRepository
+          .setItemQuantity(
+            cart.id,
+            normalizedItemId,
+            numericQuantity,
+            db
+          );
+
+      if (!updated) {
+        throw createError(
+          "Позицію кошика не знайдено",
+          404
+        );
+      }
+
+      return { cart };
+    });
+
+    return loadCartResult(
+      result.cart,
+      null,
+      userId
+    );
   },
 
   async removeItem({
@@ -393,27 +485,47 @@ export const CartService = {
     const normalizedItemId =
       normalizeItemId(itemId);
 
-    const cart =
-      await CartAccessService
-        .assertAccess({
-          cartId,
-          userId,
-          guestToken,
-        });
+    const result = await transaction(async (db) => {
+      const cart =
+        await CartAccessService
+          .assertAccess({
+            cartId,
+            userId,
+            guestToken,
+            db,
+          });
 
-    const deleted =
-      await CartRepository.deleteItem(
+      await lockCartForMutation(
         cart.id,
-        normalizedItemId
+        db
       );
 
-    if (!deleted) {
-      throw createError(
-        "Позицію кошика не знайдено",
-        404
+      await invalidateActiveCheckoutForCart(
+        cart.id,
+        db
       );
-    }
 
-    return loadCartResult(cart, null, userId);
+      const deleted =
+        await CartRepository.deleteItem(
+          cart.id,
+          normalizedItemId,
+          db
+        );
+
+      if (!deleted) {
+        throw createError(
+          "Позицію кошика не знайдено",
+          404
+        );
+      }
+
+      return { cart };
+    });
+
+    return loadCartResult(
+      result.cart,
+      null,
+      userId
+    );
   },
 };

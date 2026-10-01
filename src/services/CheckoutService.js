@@ -1,6 +1,7 @@
 import { transaction } from "../db/transaction.js";
 
 import { CartRepository } from "../repositories/CartRepository.js";
+import { CartAccessRepository } from "../repositories/CartAccessRepository.js";
 import { CheckoutRepository } from "../repositories/CheckoutRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
@@ -138,6 +139,21 @@ export const CheckoutService = {
           guestToken,
           db,
         });
+
+      const lockedCart =
+        await CartAccessRepository
+          .lockActiveByIdForUpdate(
+            cart.id,
+            db
+          );
+
+      if (!lockedCart) {
+        const error = new Error(
+          "Кошик більше не активний"
+        );
+        error.statusCode = 409;
+        throw error;
+      }
 
       const allItems =
         await CartRepository.getItems(

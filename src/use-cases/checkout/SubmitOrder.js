@@ -1,6 +1,7 @@
 import { transaction } from "../../db/transaction.js";
 
 import { CartRepository } from "../../repositories/CartRepository.js";
+import { CartAccessRepository } from "../../repositories/CartAccessRepository.js";
 import { CheckoutRepository } from "../../repositories/CheckoutRepository.js";
 import { CustomerRepository } from "../../repositories/CustomerRepository.js";
 import { OrderRepository } from "../../repositories/OrderRepository.js";
@@ -52,6 +53,62 @@ export function selectReservedCartItems(allItems, reservations) {
 
 export function cartHasRemainingItems(allItems, orderedItems) {
   return allItems.length > orderedItems.length;
+}
+
+function checkoutChangedError() {
+  const error = new Error(
+    "Кошик змінився. Перейдіть до оформлення ще раз"
+  );
+  error.statusCode = 409;
+  return error;
+}
+
+export function assertReservationsMatchCartItems({
+  cartId,
+  items,
+  reservations,
+}) {
+  if (reservations.length !== items.length) {
+    throw checkoutChangedError();
+  }
+
+  const reservationsByCartItemId = new Map();
+
+  for (const reservation of reservations) {
+    const cartItemId =
+      Number(reservation.cart_item_id);
+
+    if (
+      !Number.isInteger(cartItemId) ||
+      reservationsByCartItemId.has(cartItemId)
+    ) {
+      throw checkoutChangedError();
+    }
+
+    reservationsByCartItemId.set(
+      cartItemId,
+      reservation
+    );
+  }
+
+  for (const item of items) {
+    const reservation =
+      reservationsByCartItemId.get(
+        Number(item.id)
+      );
+
+    if (
+      !reservation ||
+      Number(reservation.cart_id) !==
+        Number(cartId) ||
+      Number(reservation.product_offer_id) !==
+        Number(item.product_offer_id) ||
+      Number(reservation.quantity) !==
+        Number(item.quantity)
+    ) {
+      throw checkoutChangedError();
+    }
+  }
 }
 
 export function buildOrderComment({
@@ -130,14 +187,14 @@ export const SubmitOrder = {
       : null;
 
     const result = await transaction(async (db) => {
-      const checkout =
+      const checkoutSnapshot =
         await CheckoutRepository
-          .findActiveById(
+          .findById(
             checkoutId,
             db
           );
 
-      if (!checkout) {
+      if (!checkoutSnapshot) {
         throw new Error(
           "Сесію оформлення не знайдено або строк резерву минув"
         );
@@ -147,11 +204,42 @@ export const SubmitOrder = {
         await CartAccessService
           .assertAccess({
             cartId:
-              checkout.cart_id,
+              checkoutSnapshot.cart_id,
             userId,
             guestToken,
             db,
           });
+
+      const lockedCart =
+        await CartAccessRepository
+          .lockActiveByIdForUpdate(
+            cart.id,
+            db
+          );
+
+      if (!lockedCart) {
+        const error = new Error(
+          "Кошик більше не активний"
+        );
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const checkout =
+        await CheckoutRepository
+          .findActiveById(
+            checkoutId,
+            db
+          );
+
+      if (
+        !checkout ||
+        Number(checkout.cart_id) !== Number(cart.id)
+      ) {
+        throw new Error(
+          "Сесію оформлення не знайдено або строк резерву минув"
+        );
+      }
 
       const allItems =
         await CartRepository.getItems(
@@ -179,14 +267,11 @@ export const SubmitOrder = {
         item.retail_price = pricing?.customerPrice;
       }
 
-      if (
-        reservations.length !==
-        items.length
-      ) {
-        throw new Error(
-          "Не всі позиції кошика мають активний резерв"
-        );
-      }
+      assertReservationsMatchCartItems({
+        cartId: cart.id,
+        items,
+        reservations,
+      });
 
       let customer = null;
 

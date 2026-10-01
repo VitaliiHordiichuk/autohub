@@ -110,6 +110,19 @@ export const CheckoutRepository = {
 
     return result.rows[0] ?? null;
   },
+  async findById(checkoutSessionId, db = pool) {
+    const sql = `
+      SELECT *
+      FROM checkout_sessions
+      WHERE id = $1
+      LIMIT 1;
+    `;
+
+    const result = await db.query(sql, [checkoutSessionId]);
+
+    return result.rows[0] ?? null;
+  },
+
   async findActiveById(checkoutSessionId, db = pool) {
   const sql = `
     SELECT *

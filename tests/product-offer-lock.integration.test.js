@@ -7,8 +7,10 @@ import { CartRepository } from "../src/repositories/CartRepository.js";
 import { OrderRepository } from "../src/repositories/OrderRepository.js";
 import { ProductRepository } from "../src/repositories/ProductRepository.js";
 import { CartAccessService } from "../src/services/CartAccessService.js";
+import { CartService } from "../src/services/CartService.js";
 import { CheckoutService } from "../src/services/CheckoutService.js";
 import { OrderEditingService } from "../src/services/OrderEditingService.js";
+import { SubmitOrder } from "../src/use-cases/checkout/SubmitOrder.js";
 
 
 const tracked = {
@@ -289,6 +291,150 @@ test("failure on the second checkout item rolls back the existing session change
   assert.equal(session.rows[0].status, "ACTIVE");
   assert.equal(reservation.rows[0].status, "ACTIVE");
   assert.equal(Number(reservation.rows[0].quantity), 1);
+});
+
+test("cart quantity change invalidates old checkout and recreates reservation with the new quantity", async () => {
+  const warehouseId = await createWarehouse();
+  const { offerId } = await createOffer({
+    warehouseId,
+    quantity: 2,
+  });
+
+  const cart = await createGuestCart([
+    {
+      offerId,
+      quantity: 1,
+    },
+  ]);
+
+  const cartItemId =
+    Number(cart.items[0].id);
+
+  const initial =
+    await CheckoutService.start({
+      cartId: cart.cartId,
+      guestToken: cart.guestToken,
+    });
+
+  assert.equal(
+    Number(initial.reservations[0].quantity),
+    1
+  );
+
+  const updatedCart =
+    await CartService.updateItemQuantity({
+      cartId: cart.cartId,
+      itemId: cartItemId,
+      guestToken: cart.guestToken,
+      quantity: 2,
+    });
+
+  assert.equal(
+    Number(updatedCart.items[0].quantity),
+    2
+  );
+
+  const oldSession = await pool.query(
+    `
+      SELECT status
+      FROM checkout_sessions
+      WHERE id = $1;
+    `,
+    [initial.checkoutSession.id]
+  );
+
+  const oldReservation = await pool.query(
+    `
+      SELECT status, quantity
+      FROM stock_reservations
+      WHERE id = $1;
+    `,
+    [initial.reservations[0].id]
+  );
+
+  assert.equal(
+    oldSession.rows[0].status,
+    "CANCELLED"
+  );
+
+  assert.equal(
+    oldReservation.rows[0].status,
+    "RELEASED"
+  );
+
+  assert.equal(
+    Number(oldReservation.rows[0].quantity),
+    1
+  );
+
+  await assert.rejects(
+    SubmitOrder.execute({
+      checkoutId:
+        initial.checkoutSession.id,
+      guestToken:
+        cart.guestToken,
+    }),
+    /Сесію оформлення не знайдено або строк резерву минув/
+  );
+
+  const restarted =
+    await CheckoutService.start({
+      cartId: cart.cartId,
+      guestToken: cart.guestToken,
+    });
+
+  assert.equal(
+    restarted.checkoutSession.status,
+    "ACTIVE"
+  );
+
+  assert.equal(
+    restarted.reservations.length,
+    1
+  );
+
+  assert.equal(
+    Number(
+      restarted.reservations[0]
+        .product_offer_id
+    ),
+    offerId
+  );
+
+  assert.equal(
+    Number(
+      restarted.reservations[0]
+        .quantity
+    ),
+    2
+  );
+
+  const activeReservations =
+    await pool.query(
+      `
+        SELECT
+          COUNT(*)::integer AS count,
+          COALESCE(SUM(quantity), 0)::numeric AS quantity
+        FROM stock_reservations
+        WHERE cart_id = $1
+          AND status = 'ACTIVE'
+          AND reserved_until > CURRENT_TIMESTAMP;
+      `,
+      [cart.cartId]
+    );
+
+  assert.equal(
+    activeReservations.rows[0].count,
+    1
+  );
+
+  assert.equal(
+    Number(
+      activeReservations.rows[0]
+        .quantity
+    ),
+    2
+  );
 });
 
 test("OrderEditingService addItem and changeQuantity use the scoped offer lock", async () => {

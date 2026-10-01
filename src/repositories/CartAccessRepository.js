@@ -103,4 +103,21 @@ export const CartAccessRepository = {
 
     return result.rows[0] ?? null;
   },
+  async lockActiveByIdForUpdate(
+    cartId,
+    db = pool
+  ) {
+    const sql = `
+      SELECT id
+      FROM carts
+      WHERE id = $1
+        AND status = 'ACTIVE'
+      FOR UPDATE;
+    `;
+
+    const result = await db.query(sql, [cartId]);
+
+    return result.rows[0] ?? null;
+  },
+
 };

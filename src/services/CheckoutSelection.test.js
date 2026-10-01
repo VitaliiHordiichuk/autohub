@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { selectCheckoutItems } from "./CheckoutService.js";
 import {
+  assertReservationsMatchCartItems,
   buildOrderComment,
   cartHasRemainingItems,
   selectReservedCartItems,
@@ -64,5 +65,87 @@ test("не создаёт заказ с некорректным VIN для пр
   assert.throws(
     () => buildOrderComment({ vinCheckRequested: true, vin: "SHORT" }),
     /VIN має містити 17 символів/
+  );
+});
+
+
+test("принимает резерв, полностью совпадающий с позицией корзины", () => {
+  assert.doesNotThrow(() =>
+    assertReservationsMatchCartItems({
+      cartId: 50,
+      items: [
+        {
+          id: 11,
+          product_offer_id: 6632,
+          quantity: 2,
+        },
+      ],
+      reservations: [
+        {
+          cart_id: 50,
+          cart_item_id: 11,
+          product_offer_id: 6632,
+          quantity: 2,
+        },
+      ],
+    })
+  );
+});
+
+test("отклоняет checkout, если количество в корзине изменилось после резерва", () => {
+  assert.throws(
+    () =>
+      assertReservationsMatchCartItems({
+        cartId: 50,
+        items: [
+          {
+            id: 11,
+            product_offer_id: 6632,
+            quantity: 2,
+          },
+        ],
+        reservations: [
+          {
+            cart_id: 50,
+            cart_item_id: 11,
+            product_offer_id: 6632,
+            quantity: 1,
+          },
+        ],
+      }),
+    (error) => {
+      assert.equal(error.statusCode, 409);
+      assert.match(error.message, /Кошик змінився/);
+      return true;
+    }
+  );
+});
+
+test("отклоняет checkout, если резерв относится к другой пропозиции", () => {
+  assert.throws(
+    () =>
+      assertReservationsMatchCartItems({
+        cartId: 50,
+        items: [
+          {
+            id: 11,
+            product_offer_id: 6632,
+            quantity: 1,
+          },
+        ],
+        reservations: [
+          {
+            cart_id: 50,
+            cart_item_id: 11,
+            product_offer_id: 9999,
+            quantity: 1,
+          },
+        ],
+      }),
+    (error) => {
+      assert.equal(error.statusCode, 409);
+      assert.match(error.message, /Кошик змінився/);
+      return true;
+    }
   );
 });
