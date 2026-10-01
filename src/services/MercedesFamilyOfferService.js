@@ -17,6 +17,7 @@ export const MercedesFamilyOfferService = {
     exactProductId = null,
     requireEnabledSupplierRule = true,
     pricingContext = null,
+    availabilityContext = null,
   } = {}) {
     const enabledSupplierIds =
       requireEnabledSupplierRule
@@ -41,7 +42,9 @@ export const MercedesFamilyOfferService = {
     ));
     const offersByProductId = await OfferService.getOffersByProductIds(
       candidateProducts.map((product) => product.id),
-      pricingContext
+      pricingContext,
+      "uk",
+      availabilityContext
     );
     const result = [];
 

@@ -43,7 +43,7 @@ export const ProductRepository = {
     return result.rows[0] ?? null;
   },
   
-  async findOffersByProductIds(productIds) {
+  async findOffersByProductIds(productIds, availabilityContext = null) {
     const normalizedProductIds = [
       ...new Set(
         (productIds || [])
@@ -55,6 +55,15 @@ export const ProductRepository = {
     if (normalizedProductIds.length === 0) {
       return [];
     }
+
+    const availabilityUserId = Number.isInteger(Number(availabilityContext?.userId))
+      && Number(availabilityContext.userId) > 0
+      ? Number(availabilityContext.userId)
+      : null;
+    const availabilityCartId = Number.isInteger(Number(availabilityContext?.cartId))
+      && Number(availabilityContext.cartId) > 0
+      ? Number(availabilityContext.cartId)
+      : null;
 
     const sql = `
       SELECT
@@ -75,6 +84,9 @@ export const ProductRepository = {
         po.quantity AS stock_quantity,
         COALESCE(reservations.reserved_quantity, 0)
           AS reserved_quantity,
+        COALESCE(reservations.own_reserved_quantity, 0)
+          AS own_reserved_quantity,
+        reservations.own_reserved_until,
         po.purchase_price,
 
         po.retail_price
@@ -126,30 +138,50 @@ export const ProductRepository = {
         )
 
       LEFT JOIN LATERAL (
-        SELECT COALESCE(SUM(sr.quantity), 0)
-          AS reserved_quantity
-        FROM stock_reservations sr
-        WHERE sr.product_offer_id = po.id
-          AND (
-            sr.status = 'ORDER_PENDING'
-            OR (
-              sr.status = 'ACTIVE'
-              AND (
-                sr.order_id IS NOT NULL
-                OR sr.reserved_until IS NULL
-                OR sr.reserved_until > CURRENT_TIMESTAMP
+        SELECT
+          COALESCE(SUM(sr.quantity) FILTER (
+            WHERE sr.status = 'ORDER_PENDING'
+              OR (
+                sr.status = 'ACTIVE'
+                AND (
+                  sr.order_id IS NOT NULL
+                  OR sr.reserved_until IS NULL
+                  OR sr.reserved_until > CURRENT_TIMESTAMP
+                )
               )
-            )
-          )
+          ), 0) AS reserved_quantity,
+          COALESCE(SUM(sr.quantity) FILTER (
+            WHERE sr.status = 'ACTIVE'
+              AND sr.order_id IS NULL
+              AND sr.reserved_until > CURRENT_TIMESTAMP
+              AND cs.status = 'ACTIVE'
+              AND cs.expires_at > CURRENT_TIMESTAMP
+              AND (
+                ($2::integer IS NOT NULL AND cs.user_id = $2)
+                OR ($3::integer IS NOT NULL AND sr.cart_id = $3)
+              )
+          ), 0) AS own_reserved_quantity,
+          MAX(sr.reserved_until) FILTER (
+            WHERE sr.status = 'ACTIVE'
+              AND sr.order_id IS NULL
+              AND sr.reserved_until > CURRENT_TIMESTAMP
+              AND cs.status = 'ACTIVE'
+              AND cs.expires_at > CURRENT_TIMESTAMP
+              AND (
+                ($2::integer IS NOT NULL AND cs.user_id = $2)
+                OR ($3::integer IS NOT NULL AND sr.cart_id = $3)
+              )
+          ) AS own_reserved_until
+        FROM stock_reservations sr
+        LEFT JOIN checkout_sessions cs
+          ON cs.id = sr.checkout_session_id
+        WHERE sr.product_offer_id = po.id
       ) reservations ON TRUE
 
       WHERE po.product_id = ANY($1::integer[])
         AND po.is_available = TRUE
         AND po.is_hidden = FALSE
-        AND GREATEST(
-          po.quantity - COALESCE(reservations.reserved_quantity, 0),
-          0
-        ) > 0
+        AND po.quantity > 0
 
         AND (
           w.id IS NULL
@@ -194,16 +226,16 @@ export const ProductRepository = {
     const result =
       await pool.query(
         sql,
-        [normalizedProductIds]
+        [normalizedProductIds, availabilityUserId, availabilityCartId]
       );
 
     return result.rows;
   },
 
-  async findOffersByProductId(productId) {
+  async findOffersByProductId(productId, availabilityContext = null) {
     return ProductRepository.findOffersByProductIds([
       productId,
-    ]);
+    ], availabilityContext);
   },
 
 async findMercedesFamilyByBase(articleBase) {

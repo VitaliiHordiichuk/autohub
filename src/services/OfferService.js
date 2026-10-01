@@ -84,34 +84,73 @@ const OFFER_TEXT = {
   uk: {
     ownStock: "Наш склад",
     partnerStock: "Доступно під замовлення",
-    unavailable: "Під замовлення",
+    unavailable: "Немає пропозицій",
     availableToday: "В наявності",
     onOrder: "Під замовлення",
     delivery: (days) => `Доставка ${days} дн.`,
     available: "В наявності",
+    reserved: "У резерві",
+    reservedForYou: "Зарезервовано для вас",
   },
   en: {
     ownStock: "Our stock",
     partnerStock: "Available to order",
-    unavailable: "Available to order",
+    unavailable: "No offers",
     availableToday: "In stock",
     onOrder: "Available to order",
     delivery: (days) => `Delivery in ${days} days`,
     available: "In stock",
+    reserved: "Reserved",
+    reservedForYou: "Reserved for you",
   },
   ru: {
     ownStock: "Наш склад",
     partnerStock: "Доступно под заказ",
-    unavailable: "Под заказ",
+    unavailable: "Нет предложений",
     availableToday: "В наличии",
     onOrder: "Под заказ",
     delivery: (days) => `Доставка ${days} дн.`,
     available: "В наличии",
+    reserved: "В резерве",
+    reservedForYou: "Зарезервировано для вас",
   },
 };
 
 
-function buildAvailabilityText(offer, locale = "uk") {
+export const OFFER_AVAILABILITY = Object.freeze({
+  AVAILABLE: "AVAILABLE",
+  ON_ORDER: "ON_ORDER",
+  RESERVED: "RESERVED",
+  RESERVED_FOR_YOU: "RESERVED_FOR_YOU",
+  UNAVAILABLE: "UNAVAILABLE",
+});
+
+export function resolveOfferAvailability(offer, sourceType = offer.source_type) {
+  const quantity = formatQuantity(offer.quantity);
+  const stockQuantity = formatQuantity(offer.stock_quantity ?? offer.quantity);
+  const reservedQuantity = formatQuantity(offer.reserved_quantity);
+  const ownReservedQuantity = formatQuantity(offer.own_reserved_quantity);
+
+  if (offer.is_available !== true || offer.is_hidden === true || stockQuantity <= 0) {
+    return OFFER_AVAILABILITY.UNAVAILABLE;
+  }
+
+  if (quantity > 0) {
+    return sourceType === "SUPPLIER"
+      ? OFFER_AVAILABILITY.ON_ORDER
+      : OFFER_AVAILABILITY.AVAILABLE;
+  }
+
+  if (reservedQuantity >= stockQuantity) {
+    return ownReservedQuantity > 0
+      ? OFFER_AVAILABILITY.RESERVED_FOR_YOU
+      : OFFER_AVAILABILITY.RESERVED;
+  }
+
+  return OFFER_AVAILABILITY.UNAVAILABLE;
+}
+
+function buildAvailabilityText(offer, availabilityStatus, locale = "uk") {
   const quantity =
     formatQuantity(
       offer.quantity
@@ -121,14 +160,22 @@ function buildAvailabilityText(offer, locale = "uk") {
     OFFER_TEXT[locale] ||
     OFFER_TEXT.uk;
 
+  if (availabilityStatus === OFFER_AVAILABILITY.RESERVED_FOR_YOU) {
+    return text.reservedForYou;
+  }
+
+  if (availabilityStatus === OFFER_AVAILABILITY.RESERVED) {
+    return text.reserved;
+  }
+
+  if (availabilityStatus === OFFER_AVAILABILITY.UNAVAILABLE) {
+    return text.unavailable;
+  }
+
   if (
     offer.source_type ===
     "OWN_STOCK"
   ) {
-    if (quantity <= 0) {
-      return text.unavailable;
-    }
-
     return text.availableToday;
   }
 
@@ -136,10 +183,6 @@ function buildAvailabilityText(offer, locale = "uk") {
     offer.source_type ===
     "SUPPLIER"
   ) {
-    if (quantity <= 0) {
-      return text.unavailable;
-    }
-
     const deliveryDays =
       Number(
         offer.delivery_days
@@ -177,6 +220,8 @@ function mapOffer(offer, pricingContext, locale) {
       : supplierType === "PARTNER"
         ? "SUPPLIER"
         : offer.source_type;
+
+  const availabilityStatus = resolveOfferAvailability(offer, sourceType);
 
   const customerPricing = CustomerPricingService.price({
     retailPrice: offer.retail_price,
@@ -216,9 +261,15 @@ function mapOffer(offer, pricingContext, locale) {
       ) || 0,
 
     isAvailable:
-      Boolean(
-        offer.is_available
-      ),
+      availabilityStatus === OFFER_AVAILABILITY.AVAILABLE ||
+      availabilityStatus === OFFER_AVAILABILITY.ON_ORDER,
+
+    availabilityStatus,
+
+    reservationExpiresAt:
+      availabilityStatus === OFFER_AVAILABILITY.RESERVED_FOR_YOU
+        ? offer.own_reserved_until || null
+        : null,
 
     returnPolicy,
 
@@ -282,7 +333,7 @@ function mapOffer(offer, pricingContext, locale) {
         ...offer,
         source_type:
           sourceType,
-      }, locale),
+      }, availabilityStatus, locale),
   };
 }
 
@@ -414,7 +465,8 @@ export const OfferService = {
   async getOffersByProductIds(
     productIds,
     pricingContext = null,
-    locale = "uk"
+    locale = "uk",
+    availabilityContext = null
   ) {
     const normalizedProductIds = [
       ...new Set(
@@ -437,7 +489,8 @@ export const OfferService = {
     const offers =
       await ProductRepository
         .findOffersByProductIds(
-          normalizedProductIds
+          normalizedProductIds,
+          availabilityContext
         );
 
     for (const offer of offers) {
@@ -469,14 +522,16 @@ export const OfferService = {
   async getOffersByProductId(
     productId,
     pricingContext = null,
-    locale = "uk"
+    locale = "uk",
+    availabilityContext = null
   ) {
     const offersByProductId =
       await OfferService
         .getOffersByProductIds(
           [productId],
           pricingContext,
-          locale
+          locale,
+          availabilityContext
         );
 
     return offersByProductId.get(

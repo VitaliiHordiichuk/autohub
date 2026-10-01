@@ -134,6 +134,7 @@ export const PublicCatalogService = {
   async getCategoryProducts({
     slug, locale = "uk", page = 1, query = "", availability = "all",
     minPrice = null, maxPrice = null, sort = "default", pricingContext = null,
+    availabilityContext = null,
   }, db = pool) {
     locale = publicLocale(locale);
     const normalizedPage = parsePublicPage(page);
@@ -430,7 +431,8 @@ export const PublicCatalogService = {
           (product) => Number(product.id)
         ),
         pricingContext,
-        locale
+        locale,
+        availabilityContext
       );
 
     const products = productRows.map((product) => {

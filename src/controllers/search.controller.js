@@ -22,6 +22,7 @@ import { CustomerPricingService } from "../services/CustomerPricingService.js";
 import { PublicSearchSuggestionRepository } from "../repositories/PublicSearchSuggestionRepository.js";
 import { cleanPublicSearchQuery } from "../services/PublicSearchQuery.js";
 import { OfferService } from "../services/OfferService.js";
+import { PublicAvailabilityContextService } from "../services/PublicAvailabilityContextService.js";
 
 export async function searchByText(req, res) {
   const query = cleanPublicSearchQuery(req.query.q);
@@ -29,19 +30,23 @@ export async function searchByText(req, res) {
   const locale = ["uk", "en", "ru"].includes(req.query.locale) ? req.query.locale : "uk";
   try {
     res.set("Cache-Control", "private, no-store");
-    const [matches, pricingContext] = await Promise.all([
+    const [matches, pricingContext, availabilityContext] = await Promise.all([
       PublicSearchSuggestionRepository.search({ query, locale, page: req.query.page }),
       CustomerPricingService.getContext(req.auth?.userId ?? null),
+      PublicAvailabilityContextService.fromRequest(req),
     ]);
     const offersByProductId = await OfferService.getOffersByProductIds(
       matches.products.map((product) => product.id),
       pricingContext,
       locale,
+      availabilityContext,
     );
     const products = matches.products.map(product => {
       const offers = offersByProductId.get(Number(product.id)) || [];
       return { ...product, offers: offers.map(offer => ({
         id: offer.id, retailPrice: offer.retailPrice, isAvailable: offer.isAvailable,
+        availabilityStatus: offer.availabilityStatus,
+        reservationExpiresAt: offer.reservationExpiresAt,
         availabilityText: offer.availabilityText, sourceLabel: offer.sourceLabel,
       })) };
     });
@@ -109,6 +114,7 @@ async function respondToArticle(
         );
 
     const pricingContext = await CustomerPricingService.getContext(req.auth?.userId ?? null);
+    const availabilityContext = await PublicAvailabilityContextService.fromRequest(req);
     const includeSourceDetails = [
       "ADMIN",
       "MANAGER",
@@ -144,7 +150,8 @@ async function respondToArticle(
         ? await ProductCardService
             .build(
               searchResult.exactProduct,
-              pricingContext
+              pricingContext,
+              availabilityContext
             )
         : null;
 
@@ -164,7 +171,7 @@ async function respondToArticle(
     const replacementSourceCard =
       replacementSourceProduct &&
       Number(replacementSourceProduct.id) !== Number(searchResult.exactProduct?.id)
-        ? await ProductCardService.build(replacementSourceProduct, pricingContext)
+        ? await ProductCardService.build(replacementSourceProduct, pricingContext, availabilityContext)
         : null;
 
     const familyCards =
@@ -183,6 +190,7 @@ async function respondToArticle(
                 searchResult.rule === "MERCEDES" &&
                 searchResult.numberResolution !== "PREFIX",
               pricingContext,
+              availabilityContext,
             })
         : [];
 

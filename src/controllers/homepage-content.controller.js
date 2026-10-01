@@ -1,4 +1,5 @@
 import { HomepageContentService } from "../services/HomepageContentService.js";
+import { PublicAvailabilityContextService } from "../services/PublicAvailabilityContextService.js";
 
 function fail(res, error) {
   console.error("Помилка вмісту головної сторінки:", error);
@@ -16,9 +17,12 @@ function fail(res, error) {
 
 export async function getPublicHomepage(req, res) {
   try {
+    res.set("Cache-Control", "private, no-store");
+    const availabilityContext = await PublicAvailabilityContextService.fromRequest(req);
     const homepage = await HomepageContentService.getPublic({
       locale: req.query.locale,
       userId: req.auth?.userId ?? null,
+      availabilityContext,
     });
     return res.json({ success: true, ...homepage });
   } catch (error) {

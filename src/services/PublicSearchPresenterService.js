@@ -4,7 +4,7 @@ import {
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
-import { isEligiblePublicOffer } from "./OfferService.js";
+import { isEligiblePublicOffer, OFFER_AVAILABILITY } from "./OfferService.js";
 
 
 const PUBLIC_TEXT = {
@@ -22,7 +22,11 @@ const PUBLIC_TEXT = {
       "Під замовлення",
 
     unavailable:
-      "Під замовлення",
+      "Немає пропозицій",
+    reserved:
+      "У резерві",
+    reservedForYou:
+      "Зарезервовано для вас",
   },
 
   en: {
@@ -39,7 +43,11 @@ const PUBLIC_TEXT = {
       "Available to order",
 
     unavailable:
-      "Available to order",
+      "No offers",
+    reserved:
+      "Reserved",
+    reservedForYou:
+      "Reserved for you",
   },
 
   ru: {
@@ -56,7 +64,11 @@ const PUBLIC_TEXT = {
       "Под заказ",
 
     unavailable:
-      "Под заказ",
+      "Нет предложений",
+    reserved:
+      "В резерве",
+    reservedForYou:
+      "Зарезервировано для вас",
   },
 };
 
@@ -446,6 +458,14 @@ function buildAvailabilityText(
       offer.quantity
     );
 
+  if (offer.availabilityStatus === OFFER_AVAILABILITY.RESERVED_FOR_YOU) {
+    return text.reservedForYou;
+  }
+
+  if (offer.availabilityStatus === OFFER_AVAILABILITY.RESERVED) {
+    return text.reserved;
+  }
+
   if (quantity <= 0) {
     return text.unavailable;
   }
@@ -505,11 +525,17 @@ function mapPublicOffer(
       offer.retailPrice
     );
 
-  if (!isEligiblePublicOffer({
+  const isAvailable = isEligiblePublicOffer({
     ...offer,
     quantity,
     retailPrice,
-  })) {
+  });
+  const isReservationBlocked = [
+    OFFER_AVAILABILITY.RESERVED,
+    OFFER_AVAILABILITY.RESERVED_FOR_YOU,
+  ].includes(offer.availabilityStatus);
+
+  if (!isAvailable && !isReservationBlocked) {
     return null;
   }
 
@@ -562,8 +588,16 @@ function mapPublicOffer(
         offer.deliveryDays
       ) || 0,
 
-    isAvailable:
-      true,
+    isAvailable,
+
+    availabilityStatus:
+      offer.availabilityStatus ||
+      (isAvailable ? OFFER_AVAILABILITY.AVAILABLE : OFFER_AVAILABILITY.UNAVAILABLE),
+
+    reservationExpiresAt:
+      offer.availabilityStatus === OFFER_AVAILABILITY.RESERVED_FOR_YOU
+        ? offer.reservationExpiresAt || null
+        : null,
 
     isReturnable:
       offer.isReturnable !== false,

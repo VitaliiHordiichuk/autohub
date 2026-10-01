@@ -215,10 +215,23 @@ export const CartRepository = {
 
         po.minimum_sale_price,
 
-        po.quantity
-          AS available_quantity,
+        po.quantity AS stock_quantity,
+        COALESCE(reservations.reserved_quantity, 0) AS reserved_quantity,
+        COALESCE(reservations.own_reserved_quantity, 0) AS own_reserved_quantity,
+        reservations.own_reserved_until,
+        GREATEST(
+          po.quantity
+            - COALESCE(reservations.reserved_quantity, 0)
+            + COALESCE(reservations.own_reserved_quantity, 0),
+          0
+        ) AS available_quantity,
+        GREATEST(
+          po.quantity - COALESCE(reservations.reserved_quantity, 0),
+          0
+        ) AS public_available_quantity,
         po.source_type,
         po.is_available,
+        po.is_hidden,
         po.return_policy_override AS offer_return_policy_override,
         p.return_policy_override AS product_return_policy_override,
         w.return_policy_override AS warehouse_return_policy_override
@@ -234,6 +247,41 @@ export const CartRepository = {
 
       LEFT JOIN warehouses w
         ON w.id = po.warehouse_id
+
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(sr.quantity) FILTER (
+            WHERE sr.status = 'ORDER_PENDING'
+              OR (
+                sr.status = 'ACTIVE'
+                AND (
+                  sr.order_id IS NOT NULL
+                  OR sr.reserved_until IS NULL
+                  OR sr.reserved_until > CURRENT_TIMESTAMP
+                )
+              )
+          ), 0) AS reserved_quantity,
+          COALESCE(SUM(sr.quantity) FILTER (
+            WHERE sr.status = 'ACTIVE'
+              AND sr.order_id IS NULL
+              AND sr.cart_item_id = ci.id
+              AND sr.reserved_until > CURRENT_TIMESTAMP
+              AND cs.status = 'ACTIVE'
+              AND cs.expires_at > CURRENT_TIMESTAMP
+          ), 0) AS own_reserved_quantity,
+          MAX(sr.reserved_until) FILTER (
+            WHERE sr.status = 'ACTIVE'
+              AND sr.order_id IS NULL
+              AND sr.cart_item_id = ci.id
+              AND sr.reserved_until > CURRENT_TIMESTAMP
+              AND cs.status = 'ACTIVE'
+              AND cs.expires_at > CURRENT_TIMESTAMP
+          ) AS own_reserved_until
+        FROM stock_reservations sr
+        LEFT JOIN checkout_sessions cs
+          ON cs.id = sr.checkout_session_id
+        WHERE sr.product_offer_id = po.id
+      ) reservations ON TRUE
 
       WHERE ci.cart_id = $1
 

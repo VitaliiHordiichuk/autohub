@@ -609,7 +609,12 @@ async function listFeatureRows(where, values, db = pool) {
 }
 
 export const HomepageContentService = {
-  async getPublic({ locale: requestedLocale, userId = null, date = null } = {}, db = pool) {
+  async getPublic({
+    locale: requestedLocale,
+    userId = null,
+    date = null,
+    availabilityContext = null,
+  } = {}, db = pool) {
     const locale = normalizeLocale(requestedLocale);
     const displayDate = optionalDate(date, "Дата") || homepageDateInKyiv();
     const [bannerRow, featureRows, pricingContext] = await Promise.all([
@@ -624,12 +629,21 @@ export const HomepageContentService = {
     const offersByProductId = await OfferService.getOffersByProductIds(
       featureRows.map((row) => row.product_id),
       pricingContext,
+      locale,
+      availabilityContext,
     );
     const features = featureRows.map((row) => {
       const offers = offersByProductId.get(Number(row.product_id)) || [];
-      const offer = offers
+      const availableOffer = offers
         .filter((item) => item.isAvailable && item.retailPrice !== null)
         .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0] || null;
+      const reservedOffer = offers
+        .filter((item) => (
+          item.availabilityStatus === "RESERVED"
+          || item.availabilityStatus === "RESERVED_FOR_YOU"
+        ) && item.retailPrice !== null)
+        .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0] || null;
+      const offer = availableOffer || reservedOffer;
       const localizedName = row[`name_${locale}`] || row.name_uk || row.name;
       const localizedProvider = row[`name_${locale}`]
         ? row[`name_${locale}_provider`]
@@ -660,6 +674,8 @@ export const HomepageContentService = {
           id: offer.id,
           price: offer.retailPrice,
           isAvailable: offer.isAvailable,
+          availabilityStatus: offer.availabilityStatus,
+          reservationExpiresAt: offer.reservationExpiresAt,
         } : null,
       };
     });

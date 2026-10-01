@@ -1,10 +1,15 @@
 import { CartRepository } from "../repositories/CartRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
+import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import {
   CartAccessService,
 } from "./CartAccessService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { ReturnPolicyService } from "./ReturnPolicyService.js";
+import {
+  OFFER_AVAILABILITY,
+  resolveOfferAvailability,
+} from "./OfferService.js";
 
 function createError(
   message,
@@ -67,6 +72,14 @@ export function presentCartItems(items, pricingContext) {
       minimumSalePrice: item.minimum_sale_price }, pricingContext);
     const retailPrice = Number(pricing?.customerPrice);
     const returnPolicy = ReturnPolicyService.resolveRow(item);
+    const availabilityStatus = resolveOfferAvailability({
+      ...item,
+      quantity: item.public_available_quantity,
+      stock_quantity: item.stock_quantity,
+      reserved_quantity: item.reserved_quantity,
+      own_reserved_quantity: item.own_reserved_quantity,
+    });
+    const availableQuantity = Number(item.available_quantity);
 
     return {
       id: item.id,
@@ -78,9 +91,7 @@ export function presentCartItems(items, pricingContext) {
       name: item.name,
       quantity,
       availableQuantity:
-        Number(
-          item.available_quantity
-        ),
+        availableQuantity,
       retailPrice,
       lineTotal:
         Number(
@@ -91,7 +102,17 @@ export function presentCartItems(items, pricingContext) {
       sourceType:
         item.source_type,
       isAvailable:
-        Boolean(item.is_available),
+        item.is_available === true &&
+        item.is_hidden !== true &&
+        availableQuantity > 0,
+      availabilityStatus:
+        Number(item.own_reserved_quantity) > 0
+          ? OFFER_AVAILABILITY.RESERVED_FOR_YOU
+          : availabilityStatus,
+      reservationExpiresAt:
+        Number(item.own_reserved_quantity) > 0
+          ? item.own_reserved_until || null
+          : null,
       returnPolicy,
       isReturnable: ReturnPolicyService.isReturnable(returnPolicy),
       createdAt:
@@ -235,13 +256,19 @@ export const CartService = {
       existingQuantity +
       numericQuantity;
 
+    const reservedByOthers = await ReservationRepository.getReservedQuantity(
+      offer.id,
+      existingItem?.id ?? null
+    );
+    const availableQuantity = Math.max(0, Number(offer.quantity) - reservedByOthers);
+
     if (
       finalQuantity >
-      Number(offer.quantity)
+      availableQuantity
     ) {
       throw createError(
         `Недостатньо товару. ` +
-        `Доступно: ${offer.quantity}`
+        `Доступно: ${availableQuantity}`
       );
     }
 
@@ -331,13 +358,19 @@ export const CartService = {
       );
     }
 
+    const reservedByOthers = await ReservationRepository.getReservedQuantity(
+      offer.id,
+      item.id
+    );
+    const availableQuantity = Math.max(0, Number(offer.quantity) - reservedByOthers);
+
     if (
       numericQuantity >
-      Number(offer.quantity)
+      availableQuantity
     ) {
       throw createError(
         `Недостатньо товару. ` +
-        `Доступно: ${offer.quantity}`
+        `Доступно: ${availableQuantity}`
       );
     }
 

@@ -65,6 +65,8 @@ export function mapPublicOffer(offer) {
     deliveryDays: Number(offer.deliveryDays) || 0,
     availabilityText: offer.availabilityText,
     isAvailable: offer.isAvailable === true,
+    availabilityStatus: offer.availabilityStatus || null,
+    reservationExpiresAt: offer.reservationExpiresAt || null,
     isReturnable: offer.isReturnable !== false,
     returnPolicy: offer.returnPolicy,
   };
@@ -272,7 +274,7 @@ export const PublicSeoService = {
       relatedArticles: [...new Set(
         [...analogs, ...replacements].map((item) => item.article).filter(Boolean)
       )],
-      offers: availableOffers.map(mapPublicOffer),
+      offers: publicCard.offers.map(mapPublicOffer),
       offer: primaryOffer ? mapPublicOffer(primaryOffer) : null,
     };
   },

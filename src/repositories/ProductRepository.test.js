@@ -225,3 +225,36 @@ test(
     );
   }
 );
+
+test(
+  "публичные предложения вычисляют общий и собственный ACTIVE резерв на backend",
+  async () => {
+    const originalQuery = pool.query;
+    let capturedSql = "";
+    let capturedParams = null;
+    pool.query = async (sql, params) => {
+      capturedSql = sql.replace(/\s+/g, " ").trim();
+      capturedParams = params;
+      return { rows: [] };
+    };
+
+    try {
+      await ProductRepository.findOffersByProductIds(
+        [12],
+        { userId: 7, cartId: 9 },
+      );
+    } finally {
+      pool.query = originalQuery;
+    }
+
+    assert.deepEqual(capturedParams, [[12], 7, 9]);
+    assert.match(capturedSql, /AS reserved_quantity/i);
+    assert.match(capturedSql, /AS own_reserved_quantity/i);
+    assert.match(capturedSql, /AS own_reserved_until/i);
+    assert.match(capturedSql, /cs\.user_id = \$2/i);
+    assert.match(capturedSql, /sr\.cart_id = \$3/i);
+    assert.match(capturedSql, /cs\.status = 'ACTIVE'/i);
+    assert.match(capturedSql, /cs\.expires_at > CURRENT_TIMESTAMP/i);
+    assert.match(capturedSql, /po\.quantity > 0/i);
+  }
+);

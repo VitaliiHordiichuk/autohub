@@ -14,7 +14,7 @@ function uniqueRelated(...groups) {
 }
 
 export const ProductCardService = {
-  async build(product, pricingContext = null) {
+  async build(product, pricingContext = null, availabilityContext = null) {
     if (!product) {
       return null;
     }
@@ -32,7 +32,7 @@ export const ProductCardService = {
       ...replacementProducts.map((item) => item.id),
       ...linkedAnalogProducts.map((item) => item.id),
       ...linkedReplacementProducts.map((item) => item.id),
-    ], pricingContext);
+    ], pricingContext, "uk", availabilityContext);
     const withOffers = (relatedProduct) => ({
       product: relatedProduct,
       offers: offersByProductId.get(Number(relatedProduct.id)) || [],
