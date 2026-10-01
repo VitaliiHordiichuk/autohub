@@ -113,6 +113,42 @@ export async function me(req, res) {
   }
 }
 
+export async function session(req, res) {
+  if (!req.auth) {
+    return res.json({
+      success: true,
+      authenticated: false,
+      user: null,
+      customer: null,
+    });
+  }
+
+  try {
+    const result =
+      await AuthService.getCurrentUser(
+        req.auth.userId
+      );
+
+    return res.json({
+      success: true,
+      authenticated: true,
+      user: result.user,
+      customer: result.customer,
+    });
+  } catch (error) {
+    if (Number(error?.statusCode) === 401) {
+      return res.json({
+        success: true,
+        authenticated: false,
+        user: null,
+        customer: null,
+      });
+    }
+
+    return sendError(res, error);
+  }
+}
+
 export async function updateProfile(req, res) {
   try {
     const result = await AuthService.updateProfile(req.auth.userId, req.body);

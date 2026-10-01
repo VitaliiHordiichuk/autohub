@@ -24,6 +24,17 @@ async function attachAuth(req, token) {
   req.auth = await AuthService.verifySessionToken(token);
 }
 
+function isExpectedSessionRejection(error) {
+  return (
+    Number(error?.statusCode) === 401 ||
+    [
+      "JsonWebTokenError",
+      "NotBeforeError",
+      "TokenExpiredError",
+    ].includes(error?.name)
+  );
+}
+
 function isPasswordChangeRoute(req) {
   return [
     "/api/auth/me",
@@ -73,6 +84,32 @@ export async function optionalAuthSilent(
   }
 
   return next();
+}
+
+export async function optionalSessionAuth(
+  req,
+  res,
+  next
+) {
+  const token = getToken(req);
+
+  req.auth = null;
+
+  if (!token) {
+    return next();
+  }
+
+  try {
+    await attachAuth(req, token);
+    return next();
+  } catch (error) {
+    if (isExpectedSessionRejection(error)) {
+      req.auth = null;
+      return next();
+    }
+
+    return next(error);
+  }
 }
 
 export async function requireAuth(req, res, next) {
