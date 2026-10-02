@@ -440,6 +440,127 @@ function applyWarehousePriorities(
 }
 
 
+function isPublicOfferCandidate(offer) {
+  const stockQuantity =
+    formatQuantity(
+      offer?.stock_quantity ??
+      offer?.quantity
+    );
+
+  return offer?.product_active !== false
+    && offer?.is_available === true
+    && offer?.is_hidden !== true
+    && stockQuantity > 0
+    && offer?.warehouse_active !== false
+    && offer?.supplier_active !== false;
+}
+
+
+function isReservationBlockedOffer(offer) {
+  return [
+    OFFER_AVAILABILITY.RESERVED,
+    OFFER_AVAILABILITY.RESERVED_FOR_YOU,
+  ].includes(
+    offer?.availabilityStatus
+  );
+}
+
+
+function publicPriorityOffer(group) {
+  const commercialOffers =
+    group.filter(
+      isEligiblePublicOffer
+    );
+
+  if (commercialOffers.length > 0) {
+    return applyWarehousePriorities(
+      commercialOffers
+    )[0] || null;
+  }
+
+  const reservedOffers =
+    group.filter(
+      isReservationBlockedOffer
+    );
+
+  return applyWarehousePriorities(
+    reservedOffers
+  )[0] || null;
+}
+
+
+function applyPublicWarehousePriorities(
+  offers
+) {
+  const groups = new Map();
+
+  for (const offer of offers) {
+    const key = sourceKey(offer);
+
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+
+    groups.get(key).push(offer);
+  }
+
+  const result = [];
+
+  for (const group of groups.values()) {
+    const priorityEnabled =
+      group.some(
+        (offer) =>
+          offer
+            .warehousePriorityEnabled ===
+          true
+      );
+
+    const everyOfferHasPriority =
+      group.every(
+        (offer) =>
+          offer.warehouse
+            ?.priority !== null &&
+          offer.warehouse
+            ?.priority !== undefined
+      );
+
+    if (
+      !priorityEnabled ||
+      !everyOfferHasPriority ||
+      group.length <= 1
+    ) {
+      result.push(...group);
+      continue;
+    }
+
+    const selected =
+      publicPriorityOffer(group);
+
+    if (selected) {
+      result.push(selected);
+    }
+  }
+
+  const commercialOffers =
+    result.filter(
+      isEligiblePublicOffer
+    );
+
+  if (commercialOffers.length > 0) {
+    return commercialOffers;
+  }
+
+  const reservedOffer =
+    result.find(
+      isReservationBlockedOffer
+    );
+
+  return reservedOffer
+    ? [reservedOffer]
+    : [];
+}
+
+
 export function presentOffers(
   offers,
   pricingContext = null,
@@ -456,6 +577,31 @@ export function presentOffers(
     );
 
   return applyWarehousePriorities(
+    mappedOffers
+  );
+}
+
+
+export function presentPublicOffers(
+  offers,
+  pricingContext = null,
+  locale = "uk"
+) {
+  const mappedOffers =
+    (offers || [])
+      .filter(
+        isPublicOfferCandidate
+      )
+      .map(
+        (offer) =>
+          mapOffer(
+            offer,
+            pricingContext,
+            locale
+          )
+      );
+
+  return applyPublicWarehousePriorities(
     mappedOffers
   );
 }
@@ -508,7 +654,7 @@ export const OfferService = {
     for (const productId of normalizedProductIds) {
       offersByProductId.set(
         productId,
-        presentOffers(
+        presentPublicOffers(
           offersByProductId.get(productId),
           pricingContext,
           locale

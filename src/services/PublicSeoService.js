@@ -469,9 +469,7 @@ export const PublicSeoService = {
     const products = productsResult.rows.map((product) => {
       const name = publicProductName(product.name, product.name_provider);
       const offers = offersByProductId.get(Number(product.id)) || [];
-      const offer = offers
-        .filter((item) => item.isAvailable && Number.isFinite(Number(item.retailPrice)))
-        .sort((first, second) => Number(first.retailPrice) - Number(second.retailPrice))[0];
+      const offer = selectPrimaryPublicOffer(offers);
       const image = ProductPlaceholderService.getProductImage({
         ...product,
         name,

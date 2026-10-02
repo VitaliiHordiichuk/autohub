@@ -3,7 +3,7 @@ import { GoogleMerchantFeedRepository } from "../repositories/GoogleMerchantFeed
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import {
   eligiblePublicOffers,
-  presentOffers,
+  presentPublicOffers,
   selectPrimaryPublicOffer,
 } from "./OfferService.js";
 import { publicProductName } from "./ProductNameService.js";
@@ -181,7 +181,7 @@ export function buildGoogleMerchantItems(
     )].slice(0, 11);
     if (!images.length) continue;
 
-    const offers = eligiblePublicOffers(presentOffers(
+    const offers = eligiblePublicOffers(presentPublicOffers(
       productRows.filter(isEligibleOfferRow),
       pricingContext,
       "uk"

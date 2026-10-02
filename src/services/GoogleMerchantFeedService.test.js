@@ -8,7 +8,11 @@ import {
   isPublicMerchantImage,
   renderGoogleMerchantFeed,
 } from "./GoogleMerchantFeedService.js";
-import { presentOffers } from "./OfferService.js";
+import {
+  presentOffers,
+  presentPublicOffers,
+  selectPrimaryPublicOffer,
+} from "./OfferService.js";
 
 
 function candidate(overrides = {}) {
@@ -285,6 +289,67 @@ test("uses the storefront primary offer instead of repricing by the lowest offer
     policy: "NON_RETURNABLE",
     source: "OFFER",
   });
+});
+
+
+test("Merchant and storefront use the same eligibility-aware warehouse fallback", () => {
+  const rows = [
+    candidate({
+      id: 501,
+      warehouse_id: 10,
+      warehouse_priority: 1,
+      warehouse_priority_enabled: true,
+      retail_price: 0,
+      offer_return_policy_override: "NON_RETURNABLE",
+    }),
+    candidate({
+      id: 502,
+      warehouse_id: 11,
+      warehouse_priority: 2,
+      warehouse_priority_enabled: true,
+      retail_price: 1250.5,
+      offer_return_policy_override: "RETURNABLE",
+    }),
+  ];
+  const storefrontOffer = selectPrimaryPublicOffer(
+    presentPublicOffers(rows, null, "uk")
+  );
+  const item = buildGoogleMerchantItems(rows)[0];
+
+  assert.equal(storefrontOffer.id, 502);
+  assert.equal(item.price, "1250.50 UAH");
+  assert.deepEqual(item.returnPolicy, storefrontOffer.returnPolicy);
+});
+
+
+test("Merchant image gate does not select an alternative commercial offer", () => {
+  const rows = [
+    candidate({
+      id: 501,
+      retail_price: 1400,
+      offer_return_policy_override: "NON_RETURNABLE",
+    }),
+    candidate({
+      id: 502,
+      supplier_id: 21,
+      effective_supplier_id: 21,
+      supplier_name: "Second supplier",
+      retail_price: 1200,
+      offer_return_policy_override: "RETURNABLE",
+    }),
+  ];
+  const selected = selectPrimaryPublicOffer(
+    presentPublicOffers(rows, null, "uk")
+  );
+  const item = buildGoogleMerchantItems(rows)[0];
+
+  assert.equal(selected.id, 501);
+  assert.equal(item.price, "1400.00 UAH");
+  assert.deepEqual(item.returnPolicy, selected.returnPolicy);
+  assert.equal(buildGoogleMerchantItems(rows.map((row) => ({
+    ...row,
+    merchant_image_urls: [],
+  }))).length, 0);
 });
 
 
