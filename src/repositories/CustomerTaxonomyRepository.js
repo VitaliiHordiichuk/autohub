@@ -54,6 +54,17 @@ function mapMembership(row) {
 }
 
 export const CustomerTaxonomyRepository = {
+  async lockProductForAssignment(productId, db = pool) {
+    const result = await db.query(`
+      SELECT id
+      FROM products
+      WHERE id = $1
+      FOR UPDATE
+    `, [productId]);
+    if (!result.rowCount) throw new Error("Product not found for customer taxonomy assignment");
+    return Number(result.rows[0].id);
+  },
+
   async listActiveRules(db = pool) {
     const result = await db.query(`
       SELECT
@@ -155,6 +166,62 @@ export const CustomerTaxonomyRepository = {
       ${lock ? "FOR UPDATE OF membership" : ""}
     `, [productId]);
     return result.rows.map(mapMembership);
+  },
+
+  async getBackfillVerification(db = pool) {
+    const totals = await db.query(`
+      SELECT
+        COUNT(*)::integer AS memberships,
+        COUNT(*) FILTER (
+          WHERE membership.is_primary = TRUE
+            AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        )::integer AS approved_primary,
+        COUNT(*) FILTER (
+          WHERE membership.assignment_source = 'RULE'
+        )::integer AS rule,
+        COUNT(*) FILTER (
+          WHERE membership.assignment_origin = 'BACKFILL'
+        )::integer AS backfill,
+        COUNT(*) FILTER (
+          WHERE membership.confidence = 'HIGH'
+        )::integer AS high,
+        COUNT(*) FILTER (
+          WHERE membership.approval_status = 'AUTO_APPROVED'
+        )::integer AS auto_approved,
+        COUNT(*) FILTER (
+          WHERE membership.rule_code IS NOT NULL AND rule.id IS NULL
+        )::integer AS orphan_rule,
+        COUNT(*) FILTER (
+          WHERE category.status <> 'ACTIVE' OR category.is_active IS NOT TRUE
+        )::integer AS inactive_target
+      FROM product_customer_categories membership
+      JOIN customer_categories category
+        ON category.id = membership.customer_category_id
+      LEFT JOIN customer_classification_rules rule
+        ON rule.code = membership.rule_code
+       AND rule.version = membership.rule_version
+    `);
+    const duplicatePrimary = await db.query(`
+      SELECT COUNT(*)::integer AS count
+      FROM (
+        SELECT product_id
+        FROM product_customer_categories
+        WHERE is_primary = TRUE
+        GROUP BY product_id
+        HAVING COUNT(*) > 1
+      ) duplicate
+    `);
+    return {
+      memberships: totals.rows[0].memberships,
+      approvedPrimary: totals.rows[0].approved_primary,
+      rule: totals.rows[0].rule,
+      backfill: totals.rows[0].backfill,
+      high: totals.rows[0].high,
+      autoApproved: totals.rows[0].auto_approved,
+      duplicatePrimary: duplicatePrimary.rows[0].count,
+      orphanRule: totals.rows[0].orphan_rule,
+      inactiveTarget: totals.rows[0].inactive_target,
+    };
   },
 
   async upsertMembership({

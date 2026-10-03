@@ -43,6 +43,7 @@ export const CustomerTaxonomyAssignmentService = {
     approvedBy,
   }, { dbPool = pool, repository = CustomerTaxonomyRepository } = {}) {
     return withTransaction(dbPool, async (db) => {
+      await repository.lockProductForAssignment?.(productId, db);
       await repository.listMembershipsForProduct(productId, db, { lock: true });
       if (isPrimary) await repository.demoteAllPrimary(productId, db);
       return repository.upsertMembership({
@@ -64,46 +65,68 @@ export const CustomerTaxonomyAssignmentService = {
     assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
   }, { dbPool = pool, repository = CustomerTaxonomyRepository } = {}) {
     assertOrigin(assignmentOrigin);
-    return withTransaction(dbPool, async (db) => {
-      const existing = await repository.listMembershipsForProduct(
+    return withTransaction(dbPool, (db) => (
+      CustomerTaxonomyAssignmentService.applyResolutionInTransaction({
         productId,
-        db,
-        { lock: true },
-      );
-      const hasManualPrimary = existing.some((membership) => (
-        membership.isPrimary
-        && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL
-        && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED
+        resolution,
+        assignmentOrigin,
+      }, { db, repository })
+    ));
+  },
+
+  async applyResolutionInTransaction({
+    productId,
+    resolution,
+    assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
+  }, { db, repository = CustomerTaxonomyRepository } = {}) {
+    assertOrigin(assignmentOrigin);
+    if (!db) throw new Error("Customer taxonomy transaction client is required");
+    await repository.lockProductForAssignment?.(productId, db);
+    const existing = await repository.listMembershipsForProduct(
+      productId,
+      db,
+      { lock: true },
+    );
+    const hasManualPrimary = existing.some((membership) => (
+      membership.isPrimary
+      && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL
+      && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED
+    ));
+    const applied = [];
+    const rejectedPreserved = [];
+
+    for (const proposal of resolution?.proposals || []) {
+      const sameCategory = existing.find((membership) => (
+        membership.customerCategoryId === proposal.category.id
       ));
-      const applied = [];
-
-      for (const proposal of resolution?.proposals || []) {
-        const manualSameCategory = existing.some((membership) => (
-          membership.customerCategoryId === proposal.category.id
-          && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL
-        ));
-        if (manualSameCategory) continue;
-
-        const isPrimary = Boolean(proposal.isPrimary) && !hasManualPrimary;
-        if (isPrimary) await repository.demoteAutomaticPrimary(productId, db);
-        applied.push(await repository.upsertMembership({
-          productId,
-          customerCategoryId: proposal.category.id,
-          isPrimary,
-          assignmentSource: proposal.assignmentSource,
-          assignmentOrigin,
-          ruleCode: proposal.ruleCode,
-          ruleVersion: proposal.ruleVersion,
-          confidence: proposal.confidence,
-          approvalStatus: proposal.approvalStatus,
-        }, db));
+      if (sameCategory?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REJECTED) {
+        rejectedPreserved.push(sameCategory);
+        continue;
+      }
+      if (sameCategory?.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL) {
+        continue;
       }
 
-      return {
+      const isPrimary = Boolean(proposal.isPrimary) && !hasManualPrimary;
+      if (isPrimary) await repository.demoteAutomaticPrimary(productId, db);
+      applied.push(await repository.upsertMembership({
         productId,
-        manualPrimaryPreserved: hasManualPrimary,
-        applied,
-      };
-    });
+        customerCategoryId: proposal.category.id,
+        isPrimary,
+        assignmentSource: proposal.assignmentSource,
+        assignmentOrigin,
+        ruleCode: proposal.ruleCode,
+        ruleVersion: proposal.ruleVersion,
+        confidence: proposal.confidence,
+        approvalStatus: proposal.approvalStatus,
+      }, db));
+    }
+
+    return {
+      productId,
+      manualPrimaryPreserved: hasManualPrimary,
+      rejectedPreserved,
+      applied,
+    };
   },
 };

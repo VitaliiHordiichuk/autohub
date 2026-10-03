@@ -10,7 +10,8 @@
     "backfill:merchant-images": "node scripts/backfill-merchant-images.mjs",
     "report:mercedes-accessories": "node scripts/report-mercedes-a-accessories.mjs",
     "report:data-retention": "node scripts/report-data-retention.mjs",
-    "customer-taxonomy:preview": "node scripts/preview-customer-taxonomy.mjs"
+    "customer-taxonomy:preview": "node scripts/preview-customer-taxonomy.mjs",
+    "customer-taxonomy:backfill": "node scripts/backfill-customer-taxonomy.mjs"
   },
   "keywords": [],
   "author": "",
