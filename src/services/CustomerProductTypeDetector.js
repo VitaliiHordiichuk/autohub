@@ -1,10 +1,11 @@
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 1;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 2;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
   "FILTER_AIR_ENGINE",
   "FILTER_CABIN",
   "FILTER_FUEL",
+  "FUEL_VAPOR_CANISTER",
   "IGNITION_SPARK_PLUG",
   "SERVICE_BELT",
   "BELT_TENSIONER",
@@ -74,22 +75,47 @@ function technicalEpcGroups(product = {}) {
 }
 
 function detectFilterType(text, epcGroups) {
+  const fuelVapor = /(?:charcoal\s+canister|carbon\s+canister|kraftstoffverdunst|fuel\s+vapou?r|\bevap\b|адсорбер|испарени\w*\s+топлив|паров\w*\s+топлив|випаров\w*\s+палив|пар[іи]в\w*\s+палив)/iu.test(text);
+  const activatedCharcoalAtFuelEpc = epcGroups.has("47")
+    && /(?:activated\s+charcoal\s+filter|aktivkohlefilter|aktkohlefilter|вугіль|уголь|charcoal|carbon)/iu.test(text);
+  if (fuelVapor || activatedCharcoalAtFuelEpc) {
+    return "FUEL_VAPOR_CANISTER";
+  }
+
   if (!/(?:ф[іи]льтр|filter)/iu.test(text)) return null;
-  if (/(?:кришк|крышк|корпус|пробк|патруб|кронштейн|рем.?комплект)/iu.test(text)) {
+  if (/(?:кришк|крышк|корпус|пробк|патруб|кронштейн|рамк|кожух|рем.?комплект|housing|cover|frame|bracket|holder|adapter)/iu.test(text)) {
     return null;
   }
-  if (/(?:салон|пил|пыль|pollen|cabin|вугіль|уголь)/iu.test(text)
-    || epcGroups.has("83")) return "FILTER_CABIN";
-  if (/(?:палив|топлив|fuel)/iu.test(text) || epcGroups.has("47")) {
+  if (/(?:комплект\s+ф[іи]льтр|ф[іи]льтр(?:и|ы)\s+комплект|filter\s+(?:kit|set))/iu.test(text)) {
+    return null;
+  }
+
+  if (/(?:палив|топлив|fuel)/iu.test(text)) {
     return "FILTER_FUEL";
   }
-  if (/(?:масл|мастил|олив|oil)/iu.test(text) || epcGroups.has("18")) {
+  if (/(?:масл|мастил|олив|oil)/iu.test(text)) {
     return "FILTER_OIL";
   }
-  if (/(?:пов[іи]тр|воздуш|air)/iu.test(text) || epcGroups.has("09")) {
+  if (/(?:(?:пов[іи]тр|воздуш|air|luft).*(?:двигун|двигател|engine|motor)|(?:двигун|двигател|engine|motor).*(?:пов[іи]тр|воздуш|air|luft))/iu.test(text)) {
     return "FILTER_AIR_ENGINE";
   }
+  if (/(?:салон|пилов|пильов|пыль|pollen|cabin|кондиц|staub)/iu.test(text)) {
+    return "FILTER_CABIN";
+  }
+
+  if (epcGroups.has("83")) return "FILTER_CABIN";
+  if (epcGroups.has("47")) return "FILTER_FUEL";
+  if (epcGroups.has("18")) return "FILTER_OIL";
+  if (epcGroups.has("09")) return "FILTER_AIR_ENGINE";
   return null;
+}
+
+function isBrakeDiscComponent(text) {
+  return /(?:захист|щиток|dust\s+shield|backing\s+plate|brake\s+shield)/iu.test(text);
+}
+
+function isBrakeCaliperComponent(text) {
+  return /(?:клапан|корпус|направля|пильовик|рем.?комплект|скоба|г[іи]льз|втул|valve|housing|guide|boot|repair\s+kit|bracket|sleeve)/iu.test(text);
 }
 
 export function isKnownCustomerProductTypeCode(value) {
@@ -102,6 +128,14 @@ export function detectCustomerProductTypes(product = {}) {
   const detected = detectors
     .filter(([, pattern]) => pattern.test(text))
     .map(([typeCode]) => typeCode);
+  if (isBrakeDiscComponent(text)) {
+    const index = detected.indexOf("BRAKE_DISC");
+    if (index >= 0) detected.splice(index, 1);
+  }
+  if (isBrakeCaliperComponent(text)) {
+    const index = detected.indexOf("BRAKE_CALIPER");
+    if (index >= 0) detected.splice(index, 1);
+  }
   const epcGroups = technicalEpcGroups(product);
   const filterType = detectFilterType(text, epcGroups);
   if (filterType) detected.unshift(filterType);

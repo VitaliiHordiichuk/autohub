@@ -50,7 +50,7 @@ function product(overrides = {}) {
 }
 
 test("TYPE_CODE contract is closed and detector version is fixed", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 1);
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 2);
   assert.equal(isKnownCustomerProductTypeCode("FILTER_OIL"), true);
   assert.equal(isKnownCustomerProductTypeCode("arbitrary words"), false);
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
@@ -67,6 +67,70 @@ test("detector reproduces reviewed filter semantics with mixed-script names and 
   assert.equal(detectCustomerProductTypes(product({
     name: "Кришка фільтра мастила",
   })).includes("FILTER_OIL"), false);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    article: "A212470065905",
+    name: "AKTIVKOHLEFILTER",
+    technicalEpcGroups: ["47"],
+  })), ["FUEL_VAPOR_CANISTER"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    article: "A2214700759",
+    name: "AKTKOHLEFILTER",
+    technicalEpcGroups: ["47"],
+  })), ["FUEL_VAPOR_CANISTER"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Charcoal canister",
+    technicalEpcGroups: ["47"],
+  })), ["FUEL_VAPOR_CANISTER"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Kraftstoffverdunstungsanlage",
+    technicalEpcGroups: ["47"],
+  })), ["FUEL_VAPOR_CANISTER"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Адсорбер паров топлива",
+    technicalEpcGroups: ["47"],
+  })), ["FUEL_VAPOR_CANISTER"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Activated charcoal filter",
+    technicalEpcGroups: ["83"],
+  })), ["FILTER_CABIN"]);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Рамка повітряного фільтра",
+    technicalEpcGroups: ["09"],
+  })).includes("FILTER_AIR_ENGINE"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Комплект фільтрів (паливний + масляний + повітряний)",
+    technicalEpcGroups: ["83"],
+  })).some((code) => code.startsWith("FILTER_")), false);
+});
+
+test("explicit filter semantics take precedence over broad EPC fallback", () => {
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Фільтр повітряний двигуна",
+    technicalEpcGroups: ["83"],
+  })), ["FILTER_AIR_ENGINE"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Фільтр паливний",
+    technicalEpcGroups: ["47"],
+  })), ["FILTER_FUEL"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Фільтр повітряний салону вугільний",
+    technicalEpcGroups: ["83"],
+  })), ["FILTER_CABIN"]);
+});
+
+test("brake component names do not become complete discs or calipers", () => {
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Щиток захисту гальмівного диску",
+    technicalEpcGroups: ["42"],
+  })).includes("BRAKE_DISC"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Направляюча супорта, комплект",
+    technicalEpcGroups: ["42"],
+  })).includes("BRAKE_CALIPER"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Супорт гальмівний",
+    technicalEpcGroups: ["42"],
+  })).includes("BRAKE_CALIPER"), true);
 });
 
 test("detector separates service belts, tensioners and wiper blades from mechanisms", () => {
@@ -245,7 +309,7 @@ test("unknown TYPE_CODE and unsupported detector version are ignored safely", ()
     product: product(),
     rules: [
       rule({ code: "UNKNOWN", matchValue: "FREE FORM REGEX" }),
-      rule({ code: "FUTURE", detectorVersion: 2 }),
+      rule({ code: "FUTURE", detectorVersion: 3 }),
     ],
   });
   assert.equal(resolution.unclassified, true);

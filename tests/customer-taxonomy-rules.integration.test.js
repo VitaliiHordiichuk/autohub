@@ -67,7 +67,7 @@ test("migration 088 seeds only reviewed HIGH primary RULE definitions", async ()
     SELECT id
     FROM customer_classification_rules
     WHERE version <> 1
-       OR detector_version <> 1
+       OR detector_version <> 2
        OR source_kind <> 'RULE'
        OR assignment_role <> 'PRIMARY'
        OR confidence <> 'HIGH'
@@ -162,6 +162,72 @@ test("unsafe filter contexts, belt tensioners and wiper mechanisms are not auto-
     article: "A2138200540",
     name: "Механізм склоочисника",
     epc: "82",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A212470065905",
+    name: "AKTIVKOHLEFILTER",
+    epc: "47",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A2214700759",
+    name: "AKTKOHLEFILTER",
+    epc: "47",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A1770940004",
+    name: "Рамка повітряного фільтра",
+    epc: "09",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A4478351600",
+    name: "Комплект фільтрів (паливний+масляний+повітряний)",
+    epc: "83",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A0002770000",
+    name: "Фільтр мастила АКПП",
+    epc: "27",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A0003200000",
+    name: "Гідравлічний фільтр",
+    epc: "32",
+  }).proposals.length, 0);
+});
+
+test("service filter leaves require matching item semantics and EPC context", () => {
+  expectAutoApproved({
+    article: "A0024776101",
+    name: "Фільтр паливний",
+    epc: "47",
+  }, "filters-fuel");
+  expectAutoApproved({
+    article: "A0001800109",
+    name: "Фільтр оливи",
+    epc: "18",
+  }, "filters-oil");
+  expectAutoApproved({
+    article: "A2730901201",
+    name: "Фільтр повітряний двигуна",
+    epc: "09",
+  }, "filters-engine-air");
+  expectAutoApproved({
+    article: "A0008351500",
+    name: "Фільтр повітряний салону",
+    epc: "83",
+  }, "filters-cabin");
+});
+
+test("disc shields and caliper components stay outside complete-part leaves", () => {
+  assert.equal(resolve({
+    article: "A1674233100",
+    name: "Захист гальмівного диску",
+    epc: "42",
+  }).proposals.length, 0);
+  assert.equal(resolve({
+    article: "A0004210850",
+    name: "Направляюча супорта, комплект",
+    epc: "42",
   }).proposals.length, 0);
 });
 
