@@ -60,6 +60,7 @@ import { adminEmployeeRouter } from "./routes/admin-employee.routes.js";
 import { adminProductImageRouter } from "./routes/admin-product-image.routes.js";
 import { adminProductRouter } from "./routes/admin-product.routes.js";
 import { adminCatalogCategoryRouter } from "./routes/admin-catalog-category.routes.js";
+import { adminCustomerTaxonomyRouter } from "./routes/admin-customer-taxonomy.routes.js";
 import { clientSearchHistoryRouter } from "./routes/client-search-history.routes.js";
 import { clientOrderRouter } from "./routes/client-order.routes.js";
 import { notificationRouter } from "./routes/notification.routes.js";
@@ -138,6 +139,7 @@ app.use("/api/products", productPlaceholderRouter);
 app.use("/api/site/contact", siteContactRouter);
 app.use("/api/shipping/nova-poshta", novaPoshtaRouter);
 app.use("/api/admin/products", adminProductRouter);
+app.use("/api/admin/customer-taxonomy", adminCustomerTaxonomyRouter);
 
 app.use(
   "/api/admin",
