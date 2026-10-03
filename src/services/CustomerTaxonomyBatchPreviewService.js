@@ -68,6 +68,11 @@ export function buildCustomerTaxonomyBatch2Report(report) {
       unclassifiedDetected: unclassified.length,
       autoApprovedBySection: countBy(autoApproved, "parentSlug"),
       newCandidatesBySection: countBy(additions, "parentSlug"),
+      existingClassificationDrift: report.summary.classificationDrift || {
+        sameCategory: 0,
+        differentCategory: 0,
+        noLongerMatches: 0,
+      },
     },
     additions,
     autoApproved,

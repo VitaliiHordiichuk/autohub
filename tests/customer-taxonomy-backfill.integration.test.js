@@ -10,10 +10,17 @@ import {
 } from "../src/services/CustomerTaxonomyBackfillService.js";
 
 const suffix = `${process.pid}${Date.now()}`.slice(-8);
-const ids = { auto: null, manual: null, rejected: null, phase2d: null };
+const ids = {
+  auto: null,
+  manual: null,
+  rejected: null,
+  historical: null,
+  phase2d: null,
+};
 let filterCategoryId;
 let manualCategoryId;
 let filterRule;
+let historicalFilterRule;
 
 async function taxonomyEpcFingerprint() {
   const result = await pool.query(`
@@ -51,8 +58,8 @@ function scopedRepository(productIds) {
     },
     async getBackfillVerification(db) {
       const memberships = await this.listMemberships(db);
-      const rules = await CustomerTaxonomyRepository.listActiveRules(db);
-      const activeRuleKeys = new Set(rules.map((rule) => `${rule.code}:${rule.version}`));
+      const rules = await db.query("SELECT code, version FROM customer_classification_rules");
+      const ruleKeys = new Set(rules.rows.map((rule) => `${rule.code}:${rule.version}`));
       const primaryCounts = new Map();
       for (const membership of memberships) {
         if (!membership.isPrimary) continue;
@@ -78,7 +85,7 @@ function scopedRepository(productIds) {
         duplicatePrimary: [...primaryCounts.values()].filter((count) => count > 1).length,
         orphanRule: memberships.filter((membership) => (
           membership.ruleCode
-          && !activeRuleKeys.has(`${membership.ruleCode}:${membership.ruleVersion}`)
+          && !ruleKeys.has(`${membership.ruleCode}:${membership.ruleVersion}`)
         )).length,
         inactiveTarget: 0,
       };
@@ -114,9 +121,19 @@ before(async () => {
       AND is_active = TRUE
   `);
   filterRule = ruleResult.rows[0];
+  const historicalRuleResult = await pool.query(`
+    SELECT code, version
+    FROM customer_classification_rules
+    WHERE code = 'FILTER_OIL_A_EPC18_V1'
+      AND version = 1
+      AND detector_version = 2
+      AND is_active = FALSE
+  `);
+  historicalFilterRule = historicalRuleResult.rows[0];
   ids.auto = await insertProduct("backfill", 1);
   ids.manual = await insertProduct("manual", 2);
   ids.rejected = await insertProduct("rejected", 3);
+  ids.historical = await insertProduct("historical", 4);
   const phase2d = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Диск колісний легкосплавний', TRUE)
@@ -148,6 +165,19 @@ before(async () => {
     ) VALUES($1, $2, FALSE, 'RULE', 'ADMIN', $3, $4,
              'HIGH', 'REJECTED', NOW(), NULL, NOW())
   `, [ids.rejected, filterCategoryId, filterRule.code, filterRule.version]);
+  await pool.query(`
+    INSERT INTO product_customer_categories(
+      product_id, customer_category_id, is_primary,
+      assignment_source, assignment_origin, rule_code, rule_version,
+      confidence, approval_status, assigned_at, approved_at, updated_at
+    ) VALUES($1, $2, TRUE, 'RULE', 'BACKFILL', $3, $4,
+             'HIGH', 'AUTO_APPROVED', NOW(), NOW(), NOW())
+  `, [
+    ids.historical,
+    filterCategoryId,
+    historicalFilterRule.code,
+    historicalFilterRule.version,
+  ]);
 });
 
 after(async () => {
@@ -302,6 +332,50 @@ test("VERIFY checks the PostgreSQL membership and performs zero writes", async (
     WHERE product_id = $1
   `, [ids.auto]);
   assert.deepEqual(afterResult.rows, before.rows);
+});
+
+test("controlled backfill preserves an approved membership on inactive historical rule v1", async () => {
+  const repository = scopedRepository([ids.historical]);
+  const beforeResult = await pool.query(`
+    SELECT rule_code, rule_version, assigned_at, approved_at, updated_at
+    FROM product_customer_categories
+    WHERE product_id = $1
+  `, [ids.historical]);
+
+  const dryRun = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(dryRun.candidateCount, 1);
+  assert.equal(dryRun.wouldInsert, 0);
+  assert.equal(dryRun.wouldUpdate, 0);
+  assert.equal(dryRun.approvedPrimaryPreserved, 1);
+
+  const applied = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(applied.inserted, 0);
+  assert.equal(applied.updated, 0);
+  assert.equal(applied.approvedPrimaryPreserved, 1);
+
+  const afterResult = await pool.query(`
+    SELECT rule_code, rule_version, assigned_at, approved_at, updated_at
+    FROM product_customer_categories
+    WHERE product_id = $1
+  `, [ids.historical]);
+  assert.deepEqual(afterResult.rows, beforeResult.rows);
+  assert.equal(afterResult.rows[0].rule_code, filterRule.code);
+  assert.equal(afterResult.rows[0].rule_version, 1);
+
+  const verification = await runCustomerTaxonomyBackfill({
+    mode: "VERIFY",
+    expectedCount: 1,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(verification.errors.length, 0);
+  assert.equal(verification.verification.orphanRule, 0);
 });
 
 test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel variant", async () => {

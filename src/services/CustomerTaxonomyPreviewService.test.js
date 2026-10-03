@@ -45,7 +45,7 @@ test("customer taxonomy preview uses READ ONLY transaction and performs zero wri
   assert.equal(dbPool.commands.at(-1), "RELEASE");
 });
 
-test("preview separates additions, removals, changed rules, conflicts and REVIEW", async () => {
+test("preview separates additions, removals, conflicts and REVIEW without version-only drift", async () => {
   const dbPool = fakePool();
   const repository = {
     listProductsForPreview: async () => [{
@@ -90,7 +90,7 @@ test("preview separates additions, removals, changed rules, conflicts and REVIEW
   const report = await runCustomerTaxonomyPreview({ dbPool, repository, resolver });
   assert.equal(report.summary.additions, 1);
   assert.equal(report.summary.removals, 1);
-  assert.equal(report.summary.changedRules, 1);
+  assert.equal(report.summary.changedRules, 0);
   assert.equal(report.summary.conflicts, 1);
   assert.equal(report.summary.autoApproved, 0);
   assert.equal(report.summary.review, 1);
@@ -153,4 +153,53 @@ test("preview reports AUTO_APPROVED candidates and preserved manual primaries se
     name: "Ручна категорія",
     categoryId: 999,
   }]);
+});
+
+test("historical rule versions stay valid when the active successor resolves to the same category", async () => {
+  const dbPool = fakePool();
+  const repository = {
+    listProductsForPreview: async () => [{
+      id: 10,
+      article: "A0001800109",
+      name: "Масляний фільтр",
+      technicalEpcGroups: ["18"],
+    }],
+    listActiveRules: async () => [{ code: "FILTER_OIL_A_EPC18_V1", version: 2 }],
+    listMemberships: async () => [{
+      productId: 10,
+      customerCategoryId: 100,
+      categorySlug: "filters-oil",
+      assignmentSource: "RULE",
+      ruleCode: "FILTER_OIL_A_EPC18_V1",
+      ruleVersion: 1,
+      approvalStatus: "AUTO_APPROVED",
+      isPrimary: true,
+    }],
+  };
+  const resolver = () => ({
+    unclassified: false,
+    diagnostics: [],
+    conflicts: [],
+    proposals: [{
+      category: { id: 100, slug: "filters-oil", parentSlug: "filters-maintenance" },
+      assignmentSource: "RULE",
+      assignmentOrigin: "SYSTEM",
+      ruleCode: "FILTER_OIL_A_EPC18_V1",
+      ruleVersion: 2,
+      confidence: "HIGH",
+      approvalStatus: "AUTO_APPROVED",
+      isPrimary: true,
+    }],
+  });
+
+  const report = await runCustomerTaxonomyPreview({ dbPool, repository, resolver });
+  assert.equal(report.summary.changedRules, 0);
+  assert.equal(report.summary.removals, 0);
+  assert.deepEqual(report.summary.classificationDrift, {
+    sameCategory: 1,
+    differentCategory: 0,
+    noLongerMatches: 0,
+  });
+  assert.equal(report.classificationDrift.sameCategory[0].existing.ruleVersion, 1);
+  assert.equal(report.classificationDrift.sameCategory[0].proposed.ruleVersion, 2);
 });

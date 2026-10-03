@@ -1,13 +1,66 @@
 BEGIN;
 
--- The detector gained additive, closed semantic codes. Existing reviewed rules
--- keep their code/version and target; only their compatible detector contract
--- is advanced. Existing product memberships are deliberately untouched.
+-- The detector gained additive, closed semantic codes. Preserve every v1/d2
+-- row as immutable classification history, then publish a v2/d3 copy for new
+-- proposals. Existing memberships deliberately keep their v1 provenance.
 UPDATE customer_classification_rules
-SET detector_version = 3,
+SET is_active = FALSE,
     updated_at = NOW()
-WHERE is_active = TRUE
-  AND detector_version = 2;
+WHERE version = 1
+  AND detector_version = 2
+  AND is_active = TRUE;
+
+INSERT INTO customer_classification_rules(
+  code,
+  version,
+  detector_version,
+  source_kind,
+  assignment_role,
+  number_family,
+  epc_group,
+  match_type,
+  match_value,
+  exclude_values,
+  target_category_id,
+  priority,
+  confidence,
+  auto_approval_allowed,
+  is_active
+)
+SELECT
+  code,
+  2,
+  3,
+  source_kind,
+  assignment_role,
+  number_family,
+  epc_group,
+  match_type,
+  match_value,
+  exclude_values,
+  target_category_id,
+  priority,
+  confidence,
+  auto_approval_allowed,
+  TRUE
+FROM customer_classification_rules
+WHERE version = 1
+  AND detector_version = 2
+ON CONFLICT(code, version) DO UPDATE SET
+  detector_version = EXCLUDED.detector_version,
+  source_kind = EXCLUDED.source_kind,
+  assignment_role = EXCLUDED.assignment_role,
+  number_family = EXCLUDED.number_family,
+  epc_group = EXCLUDED.epc_group,
+  match_type = EXCLUDED.match_type,
+  match_value = EXCLUDED.match_value,
+  exclude_values = EXCLUDED.exclude_values,
+  target_category_id = EXCLUDED.target_category_id,
+  priority = EXCLUDED.priority,
+  confidence = EXCLUDED.confidence,
+  auto_approval_allowed = EXCLUDED.auto_approval_allowed,
+  is_active = TRUE,
+  updated_at = NOW();
 
 WITH rule_seed(
   code,
@@ -109,9 +162,35 @@ ON CONFLICT(code, version) DO UPDATE SET
 
 DO $$
 DECLARE
+  expected_historical_rule_count CONSTANT INTEGER := 119;
   expected_rule_count CONSTANT INTEGER := 25;
+  historical_rule_count INTEGER;
+  active_successor_count INTEGER;
   actual_rule_count INTEGER;
+  duplicate_active_code_count INTEGER;
 BEGIN
+  SELECT COUNT(*)::INTEGER
+  INTO historical_rule_count
+  FROM customer_classification_rules
+  WHERE version = 1
+    AND detector_version = 2
+    AND is_active = FALSE;
+
+  SELECT COUNT(*)::INTEGER
+  INTO active_successor_count
+  FROM customer_classification_rules successor
+  WHERE successor.version = 2
+    AND successor.detector_version = 3
+    AND successor.is_active = TRUE
+    AND EXISTS (
+      SELECT 1
+      FROM customer_classification_rules historical
+      WHERE historical.code = successor.code
+        AND historical.version = 1
+        AND historical.detector_version = 2
+        AND historical.is_active = FALSE
+    );
+
   SELECT COUNT(*)::INTEGER
   INTO actual_rule_count
   FROM customer_classification_rules
@@ -133,11 +212,41 @@ BEGIN
       'TPMS_SENSOR_A_EPC90_V1'
     ]::TEXT[]);
 
+  SELECT COUNT(*)::INTEGER
+  INTO duplicate_active_code_count
+  FROM (
+    SELECT code
+    FROM customer_classification_rules
+    WHERE is_active = TRUE
+    GROUP BY code
+    HAVING COUNT(*) > 1
+  ) duplicate_active_codes;
+
+  IF historical_rule_count <> expected_historical_rule_count THEN
+    RAISE EXCEPTION
+      'Customer taxonomy batch 2 expected % historical v1/d2 rules but found %',
+      expected_historical_rule_count,
+      historical_rule_count;
+  END IF;
+
+  IF active_successor_count <> expected_historical_rule_count THEN
+    RAISE EXCEPTION
+      'Customer taxonomy batch 2 expected % active v2/d3 successors but found %',
+      expected_historical_rule_count,
+      active_successor_count;
+  END IF;
+
   IF actual_rule_count <> expected_rule_count THEN
     RAISE EXCEPTION
       'Customer taxonomy batch 2 expected % active rules but found %',
       expected_rule_count,
       actual_rule_count;
+  END IF;
+
+  IF duplicate_active_code_count <> 0 THEN
+    RAISE EXCEPTION
+      'Customer taxonomy batch 2 found % codes with multiple active versions',
+      duplicate_active_code_count;
   END IF;
 END;
 $$;

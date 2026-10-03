@@ -37,5 +37,10 @@ test("PHASE 2D preview separates existing memberships from new batch candidates"
     unclassifiedDetected: 1,
     autoApprovedBySection: { steering: 1, exhaust: 1, wheels: 1 },
     newCandidatesBySection: { steering: 1, exhaust: 1, wheels: 1 },
+    existingClassificationDrift: {
+      sameCategory: 0,
+      differentCategory: 0,
+      noLongerMatches: 0,
+    },
   });
 });

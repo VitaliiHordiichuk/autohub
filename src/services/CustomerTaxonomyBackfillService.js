@@ -111,6 +111,17 @@ function exactDesiredMembership(membership, desired) {
     && membership.approvalStatus === desired.approvalStatus;
 }
 
+function equivalentApprovedMembership(membership, desired) {
+  return Boolean(membership)
+    && membership.productId === desired.productId
+    && membership.customerCategoryId === desired.customerCategoryId
+    && membership.isPrimary === true
+    && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+    && membership.ruleCode === desired.ruleCode
+    && membership.confidence === desired.confidence
+    && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED;
+}
+
 function classifyExisting(candidate, memberships) {
   const desired = desiredMembership(candidate);
   const target = memberships.find((membership) => (
@@ -137,11 +148,14 @@ function classifyExisting(candidate, memberships) {
   if (otherApprovedPrimary) {
     return { action: "APPROVED_PRIMARY_PRESERVED", membership: otherApprovedPrimary };
   }
-  if (target?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW) {
-    return { action: "REVIEW_BLOCKED", membership: target };
-  }
   if (exactDesiredMembership(target, desired)) {
     return { action: "UNCHANGED", membership: target };
+  }
+  if (equivalentApprovedMembership(target, desired)) {
+    return { action: "APPROVED_PRIMARY_PRESERVED", membership: target };
+  }
+  if (target?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW) {
+    return { action: "REVIEW_BLOCKED", membership: target };
   }
   return { action: target ? "UPDATE" : "INSERT", membership: target };
 }
@@ -297,7 +311,11 @@ function verifyCandidateMemberships(report, candidates, memberships) {
       report.errors.push(`MISSING_BACKFILL_MEMBERSHIP:${candidate.productId}:${candidate.categoryId}`);
       continue;
     }
-    if (!exactDesiredMembership(membership, desiredMembership(candidate))) {
+    const desired = desiredMembership(candidate);
+    if (
+      !exactDesiredMembership(membership, desired)
+      && !equivalentApprovedMembership(membership, desired)
+    ) {
       report.errors.push(`STALE_BACKFILL_MEMBERSHIP:${candidate.productId}:${candidate.categoryId}`);
     }
   }

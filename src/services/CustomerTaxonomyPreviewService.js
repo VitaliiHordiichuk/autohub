@@ -71,6 +71,12 @@ export async function buildCustomerTaxonomyPreview({
   const review = [];
   const manualPreserved = [];
   const proposedKeys = new Set();
+  const drift = {
+    sameCategory: [],
+    differentCategory: [],
+    noLongerMatches: [],
+  };
+  const driftMembershipKeys = new Set();
 
   for (const product of products) {
     const existingMemberships = membershipsByProduct.get(product.id) || [];
@@ -111,6 +117,41 @@ export async function buildCustomerTaxonomyPreview({
       });
     }
 
+    const existingRulePrimary = existingMemberships.find((membership) => (
+      membership.isPrimary
+      && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+      && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+    ));
+    if (existingRulePrimary) {
+      const driftKey = membershipKey(
+        existingRulePrimary.productId,
+        existingRulePrimary.customerCategoryId,
+      );
+      driftMembershipKeys.add(driftKey);
+      const proposedPrimary = resolution.proposals.find((proposal) => proposal.isPrimary);
+      const detail = {
+        productId: product.id,
+        article: product.article,
+        name: product.name,
+        existing: {
+          categoryId: existingRulePrimary.customerCategoryId,
+          categorySlug: existingRulePrimary.categorySlug,
+          ruleCode: existingRulePrimary.ruleCode,
+          ruleVersion: existingRulePrimary.ruleVersion,
+        },
+        proposed: proposedPrimary ? {
+          categoryId: proposedPrimary.category.id,
+          categorySlug: proposedPrimary.category.slug,
+          ruleCode: proposedPrimary.ruleCode,
+          ruleVersion: proposedPrimary.ruleVersion,
+        } : null,
+      };
+      if (!proposedPrimary) drift.noLongerMatches.push(detail);
+      else if (proposedPrimary.category.id === existingRulePrimary.customerCategoryId) {
+        drift.sameCategory.push(detail);
+      } else drift.differentCategory.push(detail);
+    }
+
     for (const proposal of resolution.proposals) {
       const key = membershipKey(product.id, proposal.category.id);
       proposedKeys.add(key);
@@ -130,10 +171,7 @@ export async function buildCustomerTaxonomyPreview({
       }
       if (
         existing?.ruleCode
-        && (
-          existing.ruleCode !== proposal.ruleCode
-          || existing.ruleVersion !== proposal.ruleVersion
-        )
+        && existing.ruleCode !== proposal.ruleCode
       ) {
         changedRules.push({
           productId: product.id,
@@ -160,28 +198,23 @@ export async function buildCustomerTaxonomyPreview({
     );
     if (!proposedKeys.has(key)) removals.push(membership);
 
-    const activeRule = membership.ruleCode
-      ? activeRuleByCode.get(membership.ruleCode)
-      : null;
     if (
-      activeRule
-      && membership.ruleVersion !== activeRule.version
-      && !changedRules.some((item) => (
-        item.productId === membership.productId
-        && item.categoryId === membership.customerCategoryId
-      ))
+      membership.isPrimary
+      && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+      && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+      && !driftMembershipKeys.has(key)
     ) {
-      changedRules.push({
+      drift.noLongerMatches.push({
         productId: membership.productId,
-        categoryId: membership.customerCategoryId,
-        previous: {
-          code: membership.ruleCode,
-          version: membership.ruleVersion,
+        article: null,
+        name: null,
+        existing: {
+          categoryId: membership.customerCategoryId,
+          categorySlug: membership.categorySlug,
+          ruleCode: membership.ruleCode,
+          ruleVersion: membership.ruleVersion,
         },
-        proposed: {
-          code: activeRule.code,
-          version: activeRule.version,
-        },
+        proposed: null,
       });
     }
   }
@@ -213,6 +246,11 @@ export async function buildCustomerTaxonomyPreview({
       autoApproved: autoApproved.length,
       review: review.length,
       manualPreserved: manualPreserved.length,
+      classificationDrift: {
+        sameCategory: drift.sameCategory.length,
+        differentCategory: drift.differentCategory.length,
+        noLongerMatches: drift.noLongerMatches.length,
+      },
     },
     additions,
     removals,
@@ -222,6 +260,7 @@ export async function buildCustomerTaxonomyPreview({
     autoApproved,
     review,
     manualPreserved,
+    classificationDrift: drift,
     integrity: { missingPrimary, multiplePrimary },
   };
 }
