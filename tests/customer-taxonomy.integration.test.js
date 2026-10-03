@@ -47,7 +47,7 @@ after(async () => {
   await pool.end();
 });
 
-test("initial taxonomy contains 16 hidden top levels and only READY leaves", async () => {
+test("initial taxonomy contains hidden READY structure, seeded rules and zero memberships", async () => {
   const topLevel = await pool.query(`
     SELECT category.id, category.slug, category.status,
            category.is_active, category.is_navigation_visible,
@@ -91,13 +91,13 @@ test("initial taxonomy contains 16 hidden top levels and only READY leaves", asy
   `);
   assert.equal(incompleteTranslations.rowCount, 0);
 
-  const emptyFoundation = await pool.query(`
+  const seededFoundation = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rule_count,
       (SELECT COUNT(*)::integer FROM product_customer_categories) AS membership_count
   `);
-  assert.deepEqual(emptyFoundation.rows[0], {
-    rule_count: 0,
+  assert.deepEqual(seededFoundation.rows[0], {
+    rule_count: 119,
     membership_count: 0,
   });
 });

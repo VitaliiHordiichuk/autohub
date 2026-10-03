@@ -11,11 +11,20 @@ function membershipKey(productId, categoryId) {
   return `${productId}:${categoryId}`;
 }
 
-function describeProposal(product, proposal) {
+function describeProposal(product, proposal, resolution, matchedRule) {
+  const matchDescription = matchedRule
+    ? [
+      matchedRule.numberFamily ? `family=${matchedRule.numberFamily}` : null,
+      matchedRule.epcGroup ? `epc=${matchedRule.epcGroup}` : null,
+      `${matchedRule.matchType}=${matchedRule.matchValue}`,
+    ].filter(Boolean).join(", ")
+    : null;
   return {
     productId: product.id,
     article: product.article,
+    name: product.name,
     technicalEpc: product.technicalEpcGroups,
+    detectedTypeCodes: resolution.typeCodes || [],
     categoryId: proposal.category.id,
     categorySlug: proposal.category.slug,
     parentSlug: proposal.category.parentSlug,
@@ -26,6 +35,7 @@ function describeProposal(product, proposal) {
     confidence: proposal.confidence,
     approvalStatus: proposal.approvalStatus,
     isPrimary: proposal.isPrimary,
+    reason: matchDescription ? `Matched reviewed rule: ${matchDescription}` : null,
   };
 }
 
@@ -64,7 +74,9 @@ export async function runCustomerTaxonomyPreview({
     const changedRules = [];
     const conflicts = [];
     const unclassified = [];
+    const autoApproved = [];
     const review = [];
+    const manualPreserved = [];
     const proposedKeys = new Set();
 
     for (const product of products) {
@@ -76,11 +88,24 @@ export async function runCustomerTaxonomyPreview({
         assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
       });
 
+      if (resolution.manualPrimaryPreserved) {
+        manualPreserved.push({
+          productId: product.id,
+          article: product.article,
+          name: product.name,
+          categoryId: resolution.manualPrimary?.customerCategoryId
+            ?? resolution.manualPrimary?.customer_category_id
+            ?? null,
+        });
+      }
+
       if (resolution.unclassified) {
         unclassified.push({
           productId: product.id,
           article: product.article,
+          name: product.name,
           technicalEpc: product.technicalEpcGroups,
+          detectedTypeCodes: resolution.typeCodes || [],
           diagnostics: resolution.diagnostics,
         });
       }
@@ -88,6 +113,7 @@ export async function runCustomerTaxonomyPreview({
         conflicts.push({
           productId: product.id,
           article: product.article,
+          name: product.name,
           conflicts: resolution.conflicts,
         });
       }
@@ -96,8 +122,16 @@ export async function runCustomerTaxonomyPreview({
         const key = membershipKey(product.id, proposal.category.id);
         proposedKeys.add(key);
         const existing = membershipByKey.get(key);
-        const described = describeProposal(product, proposal);
+        const described = describeProposal(
+          product,
+          proposal,
+          resolution,
+          activeRuleByCode.get(proposal.ruleCode),
+        );
         if (!existing) additions.push(described);
+        if (proposal.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED) {
+          autoApproved.push(described);
+        }
         if (proposal.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW) {
           review.push(described);
         }
@@ -184,14 +218,18 @@ export async function runCustomerTaxonomyPreview({
         changedRules: changedRules.length,
         conflicts: conflicts.length,
         unclassified: unclassified.length,
+        autoApproved: autoApproved.length,
         review: review.length,
+        manualPreserved: manualPreserved.length,
       },
       additions,
       removals,
       changedRules,
       conflicts,
       unclassified,
+      autoApproved,
       review,
+      manualPreserved,
       integrity: { missingPrimary, multiplePrimary },
     };
   } catch (error) {

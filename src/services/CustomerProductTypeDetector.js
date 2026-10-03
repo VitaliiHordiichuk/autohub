@@ -30,15 +30,10 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
 const knownTypeCodes = new Set(CUSTOMER_PRODUCT_TYPE_CODES);
 
 const detectors = Object.freeze([
-  ["FILTER_OIL", /(?:ф[іи]льтр.*(?:олив|мастил|масл)|(?:олив|масл).*ф[іи]льтр|oil\s+filter)/iu],
-  ["FILTER_AIR_ENGINE", /(?:(?:пов[іи]тр|воздуш|air).*ф[іи]льтр|ф[іи]льтр.*(?:пов[іи]тр|воздуш|air))(?!.*(?:салон|кабін|кабин|cabin))/iu],
-  ["FILTER_CABIN", /(?:(?:салон|кабін|кабин|cabin).*ф[іи]льтр|ф[іи]льтр.*(?:салон|кабін|кабин|cabin))/iu],
-  ["FILTER_FUEL", /(?:(?:палив|топлив|fuel).*ф[іи]льтр|ф[іи]льтр.*(?:палив|топлив|fuel))/iu],
-  ["IGNITION_SPARK_PLUG", /(?:св[іе]ч(?:ка|і|и)|spark\s+plug|glow\s+plug)/iu],
-  ["SERVICE_BELT", /(?:рем[іе]нь|пасок|belt)/iu],
-  ["BELT_TENSIONER", /(?:натягувач|натяжител|ролик.*(?:ремен|паск)|belt.*tensioner|tensioner)/iu],
-  ["WIPER_BLADE", /(?:склоочисник|стеклоочистител|щ[іе]тк.*скл|щетк.*стекл|wiper)/iu],
-  ["BRAKE_PAD", /(?:(?:гальм|тормоз|brake).*колод|колод.*(?:гальм|тормоз)|brake\s+pad)/iu],
+  ["IGNITION_SPARK_PLUG", /(?:(?:^|[\s(,/.-])св[іе]ч|(?:котушк|катушк).*?(?:запал|зажиг)|(?:запал|зажиг).*?(?:котушк|катушк)|spark\s+plug|glow\s+plug)/iu],
+  ["BELT_TENSIONER", /(?:натягувач|натяжник|натяжител|ролик.*(?:ремен|паск)|belt.*tensioner|tensioner)/iu],
+  ["WIPER_BLADE", /(?:(?:щ[іе]тк|гумк|резинк).*(?:склооч|стеклооч|двірник|дворник)|(?:склооч|стеклооч|двірник|дворник).*(?:щ[іе]тк|гумк|резинк))/iu],
+  ["BRAKE_PAD", /(?:(?:гальм|тормоз|brake).*колодк|колодк.*(?:гальм|тормоз)|brake\s+pad)/iu],
   ["BRAKE_DISC", /(?:(?:гальм|тормоз|brake).*диск|диск.*(?:гальм|тормоз)|brake\s+disc)/iu],
   ["BRAKE_CALIPER", /(?:супорт|суппорт|caliper)/iu],
   ["BRAKE_SENSOR", /(?:(?:гальм|тормоз|brake).*(?:датчик|sensor)|(?:датчик|sensor).*(?:гальм|тормоз|brake))/iu],
@@ -61,7 +56,40 @@ function searchableText(product = {}) {
   if (Array.isArray(product.translations)) {
     for (const translation of product.translations) names.push(translation?.name);
   }
-  return names.filter(Boolean).join(" \n ").normalize("NFKC").trim();
+  return names
+    .filter(Boolean)
+    .join(" \n ")
+    .normalize("NFKC")
+    .replace(/(?<=[\u0400-\u04ff])i|i(?=[\u0400-\u04ff])/giu, "і")
+    .trim();
+}
+
+function technicalEpcGroups(product = {}) {
+  const groups = product.technicalEpcGroups ?? product.technical_epc_groups ?? [];
+  return new Set(
+    (Array.isArray(groups) ? groups : [groups])
+      .map((group) => String(group || "").trim().toUpperCase())
+      .filter(Boolean),
+  );
+}
+
+function detectFilterType(text, epcGroups) {
+  if (!/(?:ф[іи]льтр|filter)/iu.test(text)) return null;
+  if (/(?:кришк|крышк|корпус|пробк|патруб|кронштейн|рем.?комплект)/iu.test(text)) {
+    return null;
+  }
+  if (/(?:салон|пил|пыль|pollen|cabin|вугіль|уголь)/iu.test(text)
+    || epcGroups.has("83")) return "FILTER_CABIN";
+  if (/(?:палив|топлив|fuel)/iu.test(text) || epcGroups.has("47")) {
+    return "FILTER_FUEL";
+  }
+  if (/(?:масл|мастил|олив|oil)/iu.test(text) || epcGroups.has("18")) {
+    return "FILTER_OIL";
+  }
+  if (/(?:пов[іи]тр|воздуш|air)/iu.test(text) || epcGroups.has("09")) {
+    return "FILTER_AIR_ENGINE";
+  }
+  return null;
 }
 
 export function isKnownCustomerProductTypeCode(value) {
@@ -71,7 +99,15 @@ export function isKnownCustomerProductTypeCode(value) {
 export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
-  return detectors
+  const detected = detectors
     .filter(([, pattern]) => pattern.test(text))
     .map(([typeCode]) => typeCode);
+  const epcGroups = technicalEpcGroups(product);
+  const filterType = detectFilterType(text, epcGroups);
+  if (filterType) detected.unshift(filterType);
+
+  const serviceBelt = /(?:рем[іе]нь|пасок|belt)/iu.test(text);
+  const tensioner = detected.includes("BELT_TENSIONER");
+  if (serviceBelt && !tensioner) detected.push("SERVICE_BELT");
+  return [...new Set(detected)];
 }

@@ -56,6 +56,50 @@ test("TYPE_CODE contract is closed and detector version is fixed", () => {
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
 });
 
+test("detector reproduces reviewed filter semantics with mixed-script names and EPC context", () => {
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Фiльтр мастила",
+  })), ["FILTER_OIL"]);
+  assert.deepEqual(detectCustomerProductTypes(product({
+    name: "Фільтр",
+    technicalEpcGroups: ["83"],
+  })), ["FILTER_CABIN"]);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Кришка фільтра мастила",
+  })).includes("FILTER_OIL"), false);
+});
+
+test("detector separates service belts, tensioners and wiper blades from mechanisms", () => {
+  assert.deepEqual(
+    detectCustomerProductTypes(product({ name: "Ремінь привідний" })),
+    ["SERVICE_BELT"],
+  );
+  assert.deepEqual(
+    detectCustomerProductTypes(product({ name: "Натягувач ременя" })),
+    ["BELT_TENSIONER"],
+  );
+  assert.equal(
+    detectCustomerProductTypes(product({ name: "Щітка склоочисника" }))
+      .includes("WIPER_BLADE"),
+    true,
+  );
+  assert.equal(
+    detectCustomerProductTypes(product({ name: "Механізм склоочисника" }))
+      .includes("WIPER_BLADE"),
+    false,
+  );
+});
+
+test("ignition detector does not confuse license-plate illumination with a spark plug", () => {
+  assert.equal(
+    detectCustomerProductTypes(product({
+      name: "Плафон підсвічування номерного знака",
+      technicalEpcGroups: ["90"],
+    })).includes("IGNITION_SPARK_PLUG"),
+    false,
+  );
+});
+
 test("HIGH RULE auto-approves only when explicitly allowed", () => {
   const approved = resolveCustomerTaxonomy({ product: product(), rules: [rule()] });
   assert.equal(approved.proposals[0].approvalStatus, "AUTO_APPROVED");
