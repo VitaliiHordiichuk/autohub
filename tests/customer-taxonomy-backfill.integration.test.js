@@ -10,7 +10,7 @@ import {
 } from "../src/services/CustomerTaxonomyBackfillService.js";
 
 const suffix = `${process.pid}${Date.now()}`.slice(-8);
-const ids = { auto: null, manual: null, rejected: null };
+const ids = { auto: null, manual: null, rejected: null, phase2d: null };
 let filterCategoryId;
 let manualCategoryId;
 let filterRule;
@@ -117,6 +117,20 @@ before(async () => {
   ids.auto = await insertProduct("backfill", 1);
   ids.manual = await insertProduct("manual", 2);
   ids.rejected = await insertProduct("rejected", 3);
+  const phase2d = await pool.query(`
+    INSERT INTO products(article, article_normalized, name, is_active)
+    VALUES($1, $1, 'Диск колісний легкосплавний', TRUE)
+    RETURNING id
+  `, [`A1674012000${suffix}X23`]);
+  ids.phase2d = Number(phase2d.rows[0].id);
+  await pool.query(`
+    INSERT INTO product_categories(
+      product_id, category_id, assignment_source, confidence
+    )
+    SELECT $1, id, 'AUTO_RULE', 100
+    FROM categories
+    WHERE slug = 'mb-group-40'
+  `, [ids.phase2d]);
 
   await pool.query(`
     INSERT INTO product_customer_categories(
@@ -288,4 +302,47 @@ test("VERIFY checks the PostgreSQL membership and performs zero writes", async (
     WHERE product_id = $1
   `, [ids.auto]);
   assert.deepEqual(afterResult.rows, before.rows);
+});
+
+test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel variant", async () => {
+  const repository = scopedRepository([ids.phase2d]);
+  const dryRun = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(dryRun.candidateCount, 1);
+  assert.equal(dryRun.wouldInsert, 1);
+  assert.deepEqual(dryRun.breakdown.sections, {
+    "filters-maintenance": 0,
+    brakes: 0,
+    accessories: 0,
+    wheels: 1,
+  });
+
+  const applied = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(applied.inserted, 1);
+
+  const result = await pool.query(`
+    SELECT category.slug, parent.slug AS parent_slug,
+           membership.assignment_source, membership.assignment_origin,
+           membership.approval_status, membership.is_primary,
+           membership.rule_code
+    FROM product_customer_categories membership
+    JOIN customer_categories category
+      ON category.id = membership.customer_category_id
+    JOIN customer_categories parent ON parent.id = category.parent_id
+    WHERE membership.product_id = $1
+  `, [ids.phase2d]);
+  assert.deepEqual(result.rows, [{
+    slug: "wheels-rims",
+    parent_slug: "wheels",
+    assignment_source: "RULE",
+    assignment_origin: "BACKFILL",
+    approval_status: "AUTO_APPROVED",
+    is_primary: true,
+    rule_code: "WHEEL_RIM_A_EPC40_V1",
+  }]);
 });

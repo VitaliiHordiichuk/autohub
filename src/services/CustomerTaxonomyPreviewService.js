@@ -204,6 +204,7 @@ export async function buildCustomerTaxonomyPreview({
     mode: "DRY_RUN",
     summary: {
       products: products.length,
+      existingMemberships: memberships.length,
       additions: additions.length,
       removals: removals.length,
       changedRules: changedRules.length,

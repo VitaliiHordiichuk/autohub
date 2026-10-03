@@ -9,8 +9,16 @@ import {
   resolveCustomerTaxonomy,
 } from "../src/services/CustomerTaxonomyResolver.js";
 
-const migrationUrl = new URL(
+const phase2MigrationUrl = new URL(
   "../migrations/088_seed_customer_taxonomy_rules.sql",
+  import.meta.url,
+);
+const categoryMigrationUrl = new URL(
+  "../migrations/089_add_customer_taxonomy_batch2_categories.sql",
+  import.meta.url,
+);
+const batch2MigrationUrl = new URL(
+  "../migrations/090_seed_customer_taxonomy_batch2_rules.sql",
   import.meta.url,
 );
 let rules = [];
@@ -48,7 +56,7 @@ function expectAutoApproved(input, expectedSlug) {
   assert.equal(result.proposals[0].isPrimary, true);
 }
 
-test("migration 088 seeds only reviewed HIGH primary RULE definitions", async () => {
+test("migrations seed only reviewed HIGH primary RULE definitions", async () => {
   const grouped = await pool.query(`
     SELECT parent.slug AS section, COUNT(*)::integer AS count
     FROM customer_classification_rules rule
@@ -60,14 +68,17 @@ test("migration 088 seeds only reviewed HIGH primary RULE definitions", async ()
   assert.deepEqual(grouped.rows, [
     { section: "accessories", count: 103 },
     { section: "brakes", count: 9 },
+    { section: "exhaust", count: 10 },
     { section: "filters-maintenance", count: 7 },
+    { section: "steering", count: 10 },
+    { section: "wheels", count: 5 },
   ]);
 
   const invalid = await pool.query(`
     SELECT id
     FROM customer_classification_rules
     WHERE version <> 1
-       OR detector_version <> 2
+       OR detector_version <> 3
        OR source_kind <> 'RULE'
        OR assignment_role <> 'PRIMARY'
        OR confidence <> 'HIGH'
@@ -82,12 +93,16 @@ test("migration 088 seeds only reviewed HIGH primary RULE definitions", async ()
   assert.equal(memberships.rows[0].count, 0);
 });
 
-test("migration 088 is idempotent and cannot write memberships or old EPC tables", async () => {
-  const sql = await readFile(migrationUrl, "utf8");
-  assert.doesNotMatch(
-    sql,
-    /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:product_customer_categories|categories|product_categories|products)\b/iu,
-  );
+test("batch 2 migrations are idempotent and cannot write memberships or old EPC tables", async () => {
+  const phase2Sql = await readFile(phase2MigrationUrl, "utf8");
+  const categorySql = await readFile(categoryMigrationUrl, "utf8");
+  const batch2Sql = await readFile(batch2MigrationUrl, "utf8");
+  for (const sql of [phase2Sql, categorySql, batch2Sql]) {
+    assert.doesNotMatch(
+      sql,
+      /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:product_customer_categories|categories|product_categories|products)\b/iu,
+    );
+  }
 
   const beforeResult = await pool.query(`
     SELECT
@@ -96,7 +111,8 @@ test("migration 088 is idempotent and cannot write memberships or old EPC tables
       (SELECT COUNT(*)::integer FROM categories) AS epc_categories,
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
-  await pool.query(sql);
+  await pool.query(categorySql);
+  await pool.query(batch2Sql);
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
@@ -105,7 +121,7 @@ test("migration 088 is idempotent and cannot write memberships or old EPC tables
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   assert.deepEqual(afterResult.rows[0], beforeResult.rows[0]);
-  assert.equal(afterResult.rows[0].rules, 119);
+  assert.equal(afterResult.rows[0].rules, 144);
   assert.equal(afterResult.rows[0].memberships, 0);
 });
 
@@ -295,4 +311,152 @@ test("confirmed accessory exact/prefix rules work while arbitrary B stays unclas
   });
   assert.equal(arbitrary.proposals.length, 0);
   assert.equal(arbitrary.unclassified, true);
+});
+
+test("reviewed steering EPC and TYPE_CODE combinations resolve to PHASE 2D leaves", () => {
+  expectAutoApproved({
+    article: "A0004600001",
+    name: "Рейка кермова",
+    epc: "46",
+  }, "steering-racks");
+  expectAutoApproved({
+    article: "A0003300001",
+    name: "Тяга рульова",
+    epc: "33",
+  }, "steering-tie-rods");
+  expectAutoApproved({
+    article: "A0003386110",
+    name: "Наконечник",
+    epc: "33",
+  }, "steering-tie-rod-ends");
+  expectAutoApproved({
+    article: "A0004600002",
+    name: "Насос ГУР",
+    epc: "46",
+  }, "steering-pumps");
+  expectAutoApproved({
+    article: "A0004600003",
+    name: "Вал рульовий",
+    epc: "46",
+  }, "steering-shafts");
+  expectAutoApproved({
+    article: "A0004600004",
+    name: "Бачок рульового керування",
+    epc: "46",
+  }, "steering-reservoirs");
+  expectAutoApproved({
+    article: "A0004600005",
+    name: "Шланг рульового керування",
+    epc: "46",
+  }, "steering-hoses-pipes");
+});
+
+test("steering generic parts outside reviewed EPC context remain unclassified", () => {
+  for (const input of [{
+    article: "A0003200001",
+    name: "Тяга стабілізатора",
+    epc: "32",
+  }, {
+    article: "A0002000001",
+    name: "Насос охолоджувальної рідини",
+    epc: "20",
+  }, {
+    article: "A0002700001",
+    name: "Вал коробки передач",
+    epc: "27",
+  }]) {
+    assert.equal(resolve(input).proposals.length, 0);
+  }
+});
+
+test("reviewed exhaust EPC and TYPE_CODE combinations resolve to PHASE 2D leaves", () => {
+  expectAutoApproved({
+    article: "A0004900001",
+    name: "Каталізатор вихлопної системи",
+    epc: "49",
+  }, "exhaust-catalysts");
+  expectAutoApproved({
+    article: "A0004900002",
+    name: "Глушник",
+    epc: "49",
+  }, "exhaust-mufflers");
+  expectAutoApproved({
+    article: "A0004900003",
+    name: "Труба глушника",
+    epc: "49",
+  }, "exhaust-pipes");
+  expectAutoApproved({
+    article: "A0009000001",
+    name: "Датчик тиску вихлопних газів",
+    epc: "90",
+  }, "exhaust-sensors");
+  expectAutoApproved({
+    article: "A0004900004",
+    name: "Кронштейн вихлопної системи",
+    epc: "49",
+  }, "exhaust-mounts");
+  expectAutoApproved({
+    article: "A0004900005",
+    name: "Форсунка AdBlue",
+    epc: "49",
+  }, "exhaust-other");
+});
+
+test("generic sensors, pipes and muffler components do not become complete exhaust parts", () => {
+  for (const input of [{
+    article: "A0001800001",
+    name: "Датчик тиску оливи",
+    epc: "18",
+  }, {
+    article: "A0004700001",
+    name: "Трубка паливна",
+    epc: "47",
+  }, {
+    article: "A0004900006",
+    name: "Прокладка глушника",
+    epc: "49",
+  }]) {
+    assert.equal(resolve(input).proposals.length, 0);
+  }
+});
+
+test("reviewed wheel EPC and TYPE_CODE combinations resolve to PHASE 2D leaves", () => {
+  expectAutoApproved({
+    article: "A0004000001",
+    name: "Диск колісний легкосплавний",
+    epc: "40",
+  }, "wheels-rims");
+  expectAutoApproved({
+    article: "A00040009009790",
+    name: "Ковпак колеса",
+    epc: "40",
+  }, "wheels-caps");
+  expectAutoApproved({
+    article: "A0004000002",
+    name: "Болт колісний",
+    epc: "40",
+  }, "wheels-bolts-nuts");
+  expectAutoApproved({
+    article: "A0009000002",
+    name: "Датчик тиску в шині",
+    epc: "90",
+  }, "wheels-pressure-sensors");
+});
+
+test("brake discs and unrelated pressure sensors stay outside wheel leaves", () => {
+  assert.equal(resolve({
+    article: "A0004200001",
+    name: "Диск гальмівний",
+    epc: "42",
+  }).proposals.some((proposal) => proposal.category.parentSlug === "wheels"), false);
+  assert.equal(resolve({
+    article: "A0009000003",
+    name: "Датчик тиску палива",
+    epc: "90",
+  }).proposals.some((proposal) => proposal.category.parentSlug === "wheels"), false);
+  assert.equal(resolve({
+    article: "A0004000003",
+    name: "Гайка вентиля",
+    epc: "40",
+  }).proposals.some((proposal) => proposal.category.parentSlug === "wheels"), false);
 });

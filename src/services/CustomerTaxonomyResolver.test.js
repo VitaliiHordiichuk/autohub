@@ -50,10 +50,91 @@ function product(overrides = {}) {
 }
 
 test("TYPE_CODE contract is closed and detector version is fixed", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 2);
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 3);
   assert.equal(isKnownCustomerProductTypeCode("FILTER_OIL"), true);
   assert.equal(isKnownCustomerProductTypeCode("arbitrary words"), false);
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
+});
+
+test("steering types require reviewed steering EPC and semantic context", () => {
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Рейка кермова",
+    technicalEpcGroups: ["46"],
+  })).includes("STEERING_RACK"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Тяга рульова",
+    technicalEpcGroups: ["33"],
+  })).includes("STEERING_TIE_ROD"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Наконечник керма",
+    technicalEpcGroups: ["33"],
+  })).includes("STEERING_TIE_ROD_END"));
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Тяга стабілізатора",
+    technicalEpcGroups: ["32"],
+  })).some((code) => code.startsWith("STEERING_")), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Насос охолоджувальної рідини",
+    technicalEpcGroups: ["20"],
+  })).includes("STEERING_PUMP"), false);
+});
+
+test("exhaust detector separates complete parts from generic sensors and pipes", () => {
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Каталізатор випускної системи",
+    technicalEpcGroups: ["14"],
+  })).includes("EXHAUST_CATALYST"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Глушитель",
+    technicalEpcGroups: ["49"],
+  })).includes("EXHAUST_MUFFLER"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Труба глушника",
+    technicalEpcGroups: ["49"],
+  })).includes("EXHAUST_PIPE"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Датчик тиску вихлопних газів",
+    technicalEpcGroups: ["90"],
+  })).includes("EXHAUST_SENSOR"));
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Датчик тиску оливи",
+    technicalEpcGroups: ["18"],
+  })).includes("EXHAUST_SENSOR"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Трубка паливна",
+    technicalEpcGroups: ["47"],
+  })).includes("EXHAUST_PIPE"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Прокладка глушника",
+    technicalEpcGroups: ["49"],
+  })).includes("EXHAUST_MUFFLER"), false);
+});
+
+test("wheel detector distinguishes rims, caps, fasteners and TPMS", () => {
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Диск колісний легкосплавний",
+    technicalEpcGroups: ["40"],
+  })).includes("WHEEL_RIM"));
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Диск гальмівний",
+    technicalEpcGroups: ["42"],
+  })).includes("WHEEL_RIM"), false);
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Ковпак колеса",
+    technicalEpcGroups: ["40"],
+  })).includes("WHEEL_CAP"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Болти колісні",
+    technicalEpcGroups: ["99"],
+  })).includes("WHEEL_BOLT_NUT"));
+  assert.ok(detectCustomerProductTypes(product({
+    name: "Датчик тиску в шині",
+    technicalEpcGroups: ["90"],
+  })).includes("TPMS_SENSOR"));
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Датчик тиску палива",
+    technicalEpcGroups: ["90"],
+  })).includes("TPMS_SENSOR"), false);
 });
 
 test("detector reproduces reviewed filter semantics with mixed-script names and EPC context", () => {
@@ -309,7 +390,7 @@ test("unknown TYPE_CODE and unsupported detector version are ignored safely", ()
     product: product(),
     rules: [
       rule({ code: "UNKNOWN", matchValue: "FREE FORM REGEX" }),
-      rule({ code: "FUTURE", detectorVersion: 3 }),
+      rule({ code: "FUTURE", detectorVersion: 4 }),
     ],
   });
   assert.equal(resolution.unclassified, true);

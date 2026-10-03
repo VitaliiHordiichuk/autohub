@@ -53,6 +53,16 @@ function mapMembership(row) {
   };
 }
 
+function technicalEpcGroups(row) {
+  const groups = new Set();
+  if (row.technical_epc_group) groups.add(String(row.technical_epc_group));
+  for (const category of row.technical_categories || []) {
+    const match = String(category?.slug || "").match(/^mb-group-(\d{2})$/i);
+    if (match) groups.add(match[1]);
+  }
+  return [...groups].sort();
+}
+
 export const CustomerTaxonomyRepository = {
   async lockProductForAssignment(productId, db = pool) {
     const result = await db.query(`
@@ -94,7 +104,7 @@ export const CustomerTaxonomyRepository = {
         product.name,
         CASE
           WHEN COALESCE(product.article_normalized, product.article, '')
-            ~ '^A[0-9]{6,}$'
+            ~ '^A[0-9]{10}'
           THEN SUBSTRING(
             COALESCE(product.article_normalized, product.article, '')
             FROM 5 FOR 2
@@ -126,9 +136,7 @@ export const CustomerTaxonomyRepository = {
       article: row.article,
       articleNormalized: row.article_normalized,
       name: row.name,
-      technicalEpcGroups: row.technical_epc_group
-        ? [row.technical_epc_group]
-        : [],
+      technicalEpcGroups: technicalEpcGroups(row),
       technicalCategories: row.technical_categories || [],
     }));
   },
