@@ -44,6 +44,7 @@ export async function buildCustomerTaxonomyPreview({
   repository = CustomerTaxonomyRepository,
   resolver = resolveCustomerTaxonomy,
   assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
+  includeEvaluations = false,
 } = {}) {
   const products = await repository.listProductsForPreview(db);
   const rules = await repository.listActiveRules(db);
@@ -77,6 +78,7 @@ export async function buildCustomerTaxonomyPreview({
     noLongerMatches: [],
   };
   const driftMembershipKeys = new Set();
+  const evaluations = [];
 
   for (const product of products) {
     const existingMemberships = membershipsByProduct.get(product.id) || [];
@@ -86,6 +88,32 @@ export async function buildCustomerTaxonomyPreview({
       existingMemberships,
       assignmentOrigin,
     });
+
+    if (includeEvaluations) {
+      evaluations.push({
+        productId: product.id,
+        article: product.article,
+        name: product.name,
+        numberFamily: resolution.numberFamily,
+        technicalEpc: product.technicalEpcGroups,
+        detectedTypeCodes: resolution.typeCodes || [],
+        existingMemberships: existingMemberships.map((membership) => ({
+          categoryId: membership.customerCategoryId,
+          categorySlug: membership.categorySlug,
+          parentSlug: membership.parentSlug,
+          approvalStatus: membership.approvalStatus,
+          isPrimary: membership.isPrimary,
+        })),
+        proposals: resolution.proposals.map((proposal) => ({
+          categoryId: proposal.category.id,
+          categorySlug: proposal.category.slug,
+          parentSlug: proposal.category.parentSlug,
+          confidence: proposal.confidence,
+          approvalStatus: proposal.approvalStatus,
+          isPrimary: proposal.isPrimary,
+        })),
+      });
+    }
 
     if (resolution.manualPrimaryPreserved) {
       manualPreserved.push({
@@ -233,7 +261,7 @@ export async function buildCustomerTaxonomyPreview({
     if (primary.length > 1) multiplePrimary.push(productId);
   }
 
-  return {
+  const report = {
     mode: "DRY_RUN",
     summary: {
       products: products.length,
@@ -263,12 +291,15 @@ export async function buildCustomerTaxonomyPreview({
     classificationDrift: drift,
     integrity: { missingPrimary, multiplePrimary },
   };
+  if (includeEvaluations) report.evaluations = evaluations;
+  return report;
 }
 
 export async function runCustomerTaxonomyPreview({
   dbPool = pool,
   repository = CustomerTaxonomyRepository,
   resolver = resolveCustomerTaxonomy,
+  includeEvaluations = false,
 } = {}) {
   const client = typeof dbPool.connect === "function"
     ? await dbPool.connect()
@@ -282,6 +313,7 @@ export async function runCustomerTaxonomyPreview({
       db: client,
       repository,
       resolver,
+      includeEvaluations,
     });
 
     await client.query("ROLLBACK");

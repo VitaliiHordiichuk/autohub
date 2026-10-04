@@ -77,10 +77,10 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
   assert.deepEqual(leaves.rows, [
     { parent_slug: "accessories", count: 7 },
     { parent_slug: "brakes", count: 6 },
-    { parent_slug: "exhaust", count: 6 },
+    { parent_slug: "exhaust", count: 8 },
     { parent_slug: "filters-maintenance", count: 8 },
     { parent_slug: "steering", count: 8 },
-    { parent_slug: "wheels", count: 5 },
+    { parent_slug: "wheels", count: 6 },
   ]);
 
   const incompleteTranslations = await pool.query(`
@@ -100,7 +100,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
       (SELECT COUNT(*)::integer FROM product_customer_categories) AS membership_count
   `);
   assert.deepEqual(seededFoundation.rows[0], {
-    rule_count: 263,
+    rule_count: 409,
     membership_count: 0,
   });
 });

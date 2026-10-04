@@ -50,7 +50,7 @@ function product(overrides = {}) {
 }
 
 test("TYPE_CODE contract is closed and detector version is fixed", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 3);
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 4);
   assert.equal(isKnownCustomerProductTypeCode("FILTER_OIL"), true);
   assert.equal(isKnownCustomerProductTypeCode("arbitrary words"), false);
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
@@ -122,7 +122,7 @@ test("wheel detector distinguishes rims, caps, fasteners and TPMS", () => {
   assert.ok(detectCustomerProductTypes(product({
     name: "Ковпак колеса",
     technicalEpcGroups: ["40"],
-  })).includes("WHEEL_CAP"));
+  })).includes("WHEEL_CENTER_CAP"));
   assert.ok(detectCustomerProductTypes(product({
     name: "Болти колісні",
     technicalEpcGroups: ["99"],
@@ -390,7 +390,7 @@ test("unknown TYPE_CODE and unsupported detector version are ignored safely", ()
     product: product(),
     rules: [
       rule({ code: "UNKNOWN", matchValue: "FREE FORM REGEX" }),
-      rule({ code: "FUTURE", detectorVersion: 4 }),
+      rule({ code: "FUTURE", detectorVersion: 5 }),
     ],
   });
   assert.equal(resolution.unclassified, true);

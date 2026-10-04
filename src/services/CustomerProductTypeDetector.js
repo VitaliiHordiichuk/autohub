@@ -1,4 +1,4 @@
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 3;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 4;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -39,8 +39,12 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "EXHAUST_SENSOR",
   "EXHAUST_MOUNT",
   "EXHAUST_ADBLUE_INJECTOR",
+  "EXHAUST_EGR_PIPE",
   "WHEEL_RIM",
   "WHEEL_CAP",
+  "WHEEL_CENTER_CAP",
+  "WHEEL_VALVE_CAP",
+  "WHEEL_SPARE_COVER",
   "WHEEL_BOLT_NUT",
   "TPMS_SENSOR",
 ]);
@@ -171,7 +175,7 @@ function detectSteeringTypes(text, epcGroups) {
 
 function detectExhaustTypes(text, epcGroups) {
   const types = [];
-  const exhaustContext = /(?:вихлоп|выпуск|випуск|відпрацьован|отработан|exhaust|сажов|dpf|катал[іи]зат|ad.?blue|адблю)/iu.test(text);
+  const exhaustContext = /(?:вихлоп|выпуск|випуск|відпрацьован|отработан|exhaust|глуш|сажов|dpf|катал[іи]зат|ad.?blue|адблю)/iu.test(text);
   const sensor = /(?:датчик|sensor)/iu.test(text) && exhaustContext;
   if (sensor) types.push("EXHAUST_SENSOR");
 
@@ -179,19 +183,24 @@ function detectExhaustTypes(text, epcGroups) {
     && !/(?:датчик|sensor|температур|temperature|тиск|давлен)/iu.test(text);
   if (catalyst) types.push("EXHAUST_CATALYST");
 
-  const mount = /(?:кронштейн|хомут|подушк|опор[аи]|тримач|держател|hanger|bracket|clamp|mount)/iu.test(text)
+  const mount = /(?:кронштейн|хомут|подушк|опор[аи]|тримач|держател|гумк|резинк|hanger|bracket|clamp|mount|rubber)/iu.test(text)
     && (exhaustContext || epcGroups.has("49"));
   if (mount) types.push("EXHAUST_MOUNT");
 
   const pipeSubject = /(?:^|[\s(])(?:труб[аик]|патрубок|трубопров[іи]д|pipe|tube)(?:[\s),.-]|$)/iu.test(text);
   const exhaustGasContext = /(?:вихлоп|выпуск|випуск|відпрацьован|отработан|exhaust|глуш)/iu.test(text);
+  const egrContext = /(?:\begr\b|рециркуляц\w*.*(?:вихлоп|випуск|выпуск|відпрацьован|отработан|газ)|(?:вихлоп|випуск|выпуск|відпрацьован|отработан).*рециркуляц)/iu.test(text);
+  const egrPipe = pipeSubject && egrContext;
+  if (egrPipe) types.push("EXHAUST_EGR_PIPE");
+
   const pipe = pipeSubject
     && (exhaustGasContext || epcGroups.has("49"))
+    && !egrPipe
     && !/(?:накладк|кільц|кольц|прокладк|ущільн|уплотн|тримач|держател|кронштейн|хомут|подушк)/iu.test(text);
   if (pipe) types.push("EXHAUST_PIPE");
 
   const muffler = /(?:^|[\s(])(?:глушник|глушител[ьья]?|muffler|silencer)(?:[\s),.-]|$)/iu.test(text)
-    && !/(?:труб|патруб|прокладк|ущільн|уплотн|кронштейн|хомут|болт|гайк|кільц|кольц|подушк|накладк|рем.?комплект)/iu.test(text);
+    && !/(?:труб|патруб|прокладк|ущільн|уплотн|кронштейн|хомут|болт|гайк|кільц|кольц|подушк|гумк|резинк|rubber|hanger|mount|накладк|рем.?комплект)/iu.test(text);
   if (muffler) types.push("EXHAUST_MUFFLER");
 
   const adblueInjector = /(?:форсунк|інжектор|инжектор|injector).*(?:ad.?blue|адблю)|(?:ad.?blue|адблю).*(?:форсунк|інжектор|инжектор|injector)/iu.test(text);
@@ -204,13 +213,24 @@ function detectWheelTypes(text, epcGroups) {
   const wheelContext = /(?:колес|коліс|wheel|шин|tire|tyre)/iu.test(text);
   const wheelEpc = epcGroups.has("40");
 
-  const cap = /(?:ковпак|колпак|ковпачок|колпачок|заглушк|кришк|крышк|cap|cover)/iu.test(text)
-    && (wheelContext || (wheelEpc && /(?:диск|ніпел|ниппел|ступиц|маточин)/iu.test(text)));
-  if (cap) types.push("WHEEL_CAP");
+  const capSubject = /(?:ковпак|колпак|ковпачок|колпачок|заглушк|кришк|крышк|cap|cover)/iu.test(text);
+  const spareWheel = /(?:(?:запасн|spare).*(?:колес|коліс|wheel)|(?:колес|коліс|wheel).*(?:запасн|spare))/iu.test(text);
+  const valve = /(?:ніпел|ниппел|вентил|valve)/iu.test(text);
+  const rimCenter = /(?:диск|обод|ступиц|маточин|hub|rim|center|centre|колес|коліс|wheel)/iu.test(text);
+
+  const spareCover = capSubject && spareWheel;
+  if (spareCover) types.push("WHEEL_SPARE_COVER");
+
+  const valveCap = capSubject && valve && !spareCover && (wheelContext || wheelEpc);
+  if (valveCap) types.push("WHEEL_VALVE_CAP");
+
+  const centerCap = capSubject && rimCenter && !spareCover && !valveCap
+    && (wheelContext || wheelEpc);
+  if (centerCap) types.push("WHEEL_CENTER_CAP");
 
   const brakeOrOtherDisc = /(?:гальм|тормоз|brake|dvd|cd|програм|кардан|коробк|фрикц)/iu.test(text);
   const rim = /(?:диск\w*.*(?:колес|коліс|wheel)|(?:колес|коліс|wheel).*диск|wheel\s+rim|alloy\s+wheel)/iu.test(text)
-    && !cap
+    && !capSubject
     && !brakeOrOtherDisc;
   if (rim) types.push("WHEEL_RIM");
 

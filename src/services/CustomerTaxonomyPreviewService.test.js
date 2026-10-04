@@ -30,12 +30,18 @@ test("customer taxonomy preview uses READ ONLY transaction and performs zero wri
     listActiveRules: async () => [],
     listMemberships: async () => [],
   };
-  const report = await runCustomerTaxonomyPreview({ dbPool, repository });
+  const report = await runCustomerTaxonomyPreview({
+    dbPool,
+    repository,
+    includeEvaluations: true,
+  });
   assert.equal(report.mode, "DRY_RUN");
   assert.equal(report.summary.products, 1);
   assert.equal(report.summary.unclassified, 1);
   assert.equal(report.summary.autoApproved, 0);
   assert.equal(report.summary.review, 0);
+  assert.equal(report.evaluations.length, 1);
+  assert.equal(report.evaluations[0].article, "A0001800109");
   assert.equal(dbPool.commands[0], "BEGIN READ ONLY");
   assert.ok(dbPool.commands.includes("ROLLBACK"));
   assert.equal(
