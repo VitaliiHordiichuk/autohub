@@ -30,6 +30,9 @@ let filterCategoryId;
 let manualCategoryId;
 let filterRule;
 let historicalFilterRule;
+let phase2fHighId;
+let phase2fSafeId;
+const createdPhase2fProductIds = [];
 
 async function taxonomyEpcFingerprint() {
   const result = await pool.query(`
@@ -129,6 +132,17 @@ async function insertNamedProduct(article, name) {
   return Number(result.rows[0].id);
 }
 
+async function findOrInsertReviewedProduct(article, name) {
+  const existing = await pool.query(
+    "SELECT id FROM products WHERE article_normalized = $1 ORDER BY id LIMIT 1",
+    [article],
+  );
+  if (existing.rowCount) return Number(existing.rows[0].id);
+  const id = await insertNamedProduct(article, name);
+  createdPhase2fProductIds.push(id);
+  return id;
+}
+
 before(async () => {
   const categoryResult = await pool.query(`
     SELECT id, slug
@@ -186,6 +200,8 @@ before(async () => {
     "Корпус замка запалювання",
   );
   ids.reviewValveSensor = await insertNamedProduct("A0014012713", "Золотникдатчик");
+  phase2fHighId = await findOrInsertReviewedProduct("A0002020719", "Ролик натяжний");
+  phase2fSafeId = await findOrInsertReviewedProduct("A0002021619", "Ролик");
 
   await pool.query(`
     INSERT INTO product_customer_categories(
@@ -226,6 +242,18 @@ after(async () => {
       [productIds],
     );
     await pool.query("DELETE FROM products WHERE id = ANY($1::integer[])", [productIds]);
+  }
+  if (phase2fHighId || phase2fSafeId) {
+    await pool.query(
+      "DELETE FROM product_customer_categories WHERE product_id = ANY($1::integer[])",
+      [[phase2fHighId, phase2fSafeId].filter(Boolean)],
+    );
+  }
+  if (createdPhase2fProductIds.length) {
+    await pool.query(
+      "DELETE FROM products WHERE id = ANY($1::integer[])",
+      [createdPhase2fProductIds],
+    );
   }
   await pool.end();
 });
@@ -428,6 +456,8 @@ test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel
     steering: 0,
     exhaust: 0,
     wheels: 1,
+    engine: 0,
+    suspension: 0,
   });
 
   const applied = await runCustomerTaxonomyBackfill({
@@ -491,6 +521,8 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
     "fuel-system": 0,
     cooling: 0,
     climate: 0,
+    engine: 0,
+    suspension: 0,
   });
   assert.equal(dryRun.summary.realReview, 3);
   assert.equal(dryRun.summary.wouldInsertSafeTopLevel, 3);
@@ -639,4 +671,82 @@ test("PHASE 2E SAFE_TOPLEVEL uses only the accepted article + EPC review", async
     approval_status: "AUTO_APPROVED",
     rule_code: null,
   }]);
+});
+
+test("PHASE 2F HIGH PostgreSQL backfill applies once and preserves the exact reviewed leaf", async () => {
+  const repository = scopedRepository([phase2fHighId]);
+  const dryRun = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(dryRun.candidateCount, 1);
+  assert.equal(dryRun.wouldInsert, 1);
+  assert.equal(dryRun.breakdown.leaves["engine-belt-tensioners"], 1);
+
+  const applied = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(applied.insertedHighRule, 1);
+  assert.equal(applied.insertedSafeTopLevel, 0);
+
+  const repeated = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(repeated.inserted, 0);
+  assert.equal(repeated.unchanged, 1);
+});
+
+test("PHASE 2F SAFE PostgreSQL backfill requires opt-in and is idempotent", async () => {
+  const repository = scopedRepository([phase2fSafeId]);
+  const highOnly = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(highOnly.candidateCount, 0);
+
+  const dryRun = await runCustomerTaxonomyBackfill({
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(dryRun.candidateCount, 1);
+  assert.equal(dryRun.wouldInsert, 1);
+  assert.equal(dryRun.safeTopLevelCandidates[0].categorySlug, "engine");
+  assert.equal(dryRun.safeTopLevelCandidates[0].reviewSource, "PHASE_2F_AUDIT");
+
+  const applied = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(applied.insertedHighRule, 0);
+  assert.equal(applied.insertedSafeTopLevel, 1);
+
+  const repeated = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 0,
+    confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(repeated.inserted, 0);
+  assert.equal(repeated.candidateCount, 0);
+
+  const verification = await runCustomerTaxonomyBackfill({
+    mode: "VERIFY",
+    expectedCount: 0,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(verification.errors.length, 0);
+  assert.equal(verification.verification.duplicatePrimary, 0);
+  assert.equal(verification.verification.orphanRule, 0);
+  assert.equal(verification.verification.inactiveTarget, 0);
 });

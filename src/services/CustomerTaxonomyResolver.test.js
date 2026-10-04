@@ -50,7 +50,7 @@ function product(overrides = {}) {
 }
 
 test("TYPE_CODE contract is closed and detector version is fixed", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 5);
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 6);
   assert.equal(isKnownCustomerProductTypeCode("FILTER_OIL"), true);
   assert.equal(isKnownCustomerProductTypeCode("arbitrary words"), false);
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
@@ -459,7 +459,10 @@ test("unknown TYPE_CODE and unsupported detector version are ignored safely", ()
     product: product(),
     rules: [
       rule({ code: "UNKNOWN", matchValue: "FREE FORM REGEX" }),
-      rule({ code: "FUTURE", detectorVersion: 6 }),
+      rule({
+        code: "FUTURE",
+        detectorVersion: CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION + 1,
+      }),
     ],
   });
   assert.equal(resolution.unclassified, true);

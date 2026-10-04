@@ -12,6 +12,11 @@ import {
   isReviewedPhase2ESafeTopLevel,
 } from "./CustomerTaxonomyPhase2EPreviewService.js";
 import {
+  buildCustomerTaxonomyPhase2FCoverage,
+  CUSTOMER_TAXONOMY_PHASE2F_SECTIONS,
+  isReviewedPhase2FSafeTopLevel,
+} from "./CustomerTaxonomyPhase2FPreviewService.js";
+import {
   CUSTOMER_APPROVAL_STATUS,
   CUSTOMER_ASSIGNMENT_ORIGIN,
   CUSTOMER_ASSIGNMENT_SOURCE,
@@ -98,6 +103,8 @@ function buildBreakdown(candidates) {
     steering: 0,
     exhaust: 0,
     wheels: 0,
+    engine: 0,
+    suspension: 0,
   };
   const leaves = {};
   for (const candidate of candidates) {
@@ -207,6 +214,7 @@ function countSections(items) {
   const sections = [...new Set([
     ...CUSTOMER_TAXONOMY_BATCH2_SECTIONS,
     ...CUSTOMER_TAXONOMY_PHASE2E_SECTIONS,
+    ...CUSTOMER_TAXONOMY_PHASE2F_SECTIONS,
   ])];
   return Object.fromEntries(sections.map((section) => [
     section,
@@ -231,6 +239,7 @@ function emptyBatch2Coverage() {
     missingRule: [],
     realReview: [],
     phase2e: null,
+    phase2f: null,
   };
 }
 
@@ -264,21 +273,29 @@ async function buildBackfillCandidates({
     evaluations: preview.evaluations || [],
     additions: preview.additions || [],
   });
+  const phase2fCoverage = buildCustomerTaxonomyPhase2FCoverage({
+    evaluations: preview.evaluations || [],
+    additions: preview.additions || [],
+  });
   const coverage = {
     summary: batch2Coverage.summary,
     safeTopLevel: [
       ...batch2Coverage.safeTopLevel,
       ...phase2eCoverage.safeTopLevel,
+      ...phase2fCoverage.safeTopLevel,
     ],
     missingRule: [
       ...batch2Coverage.missingRule,
       ...phase2eCoverage.missingRuleRemaining,
+      ...phase2fCoverage.missingRuleRemaining,
     ],
     realReview: [
       ...batch2Coverage.realReview,
       ...phase2eCoverage.realReview,
+      ...phase2fCoverage.realReview,
     ],
     phase2e: phase2eCoverage,
+    phase2f: phase2fCoverage,
   };
   const safeSections = [...new Set(coverage.safeTopLevel.map((item) => (
     item.targetSection || item.section
@@ -416,6 +433,11 @@ function preflight({
           article: candidate.article,
           technicalEpcGroups: candidate.technicalEpc,
         }, candidate.sectionSlug);
+      const reviewedPhase2F = candidate.reviewSource === "PHASE_2F_AUDIT"
+        && isReviewedPhase2FSafeTopLevel({
+          article: candidate.article,
+          technicalEpcGroups: candidate.technicalEpc,
+        }, candidate.sectionSlug);
       if (
         includeSafeTopLevel !== true
         || candidate.approvalStatus !== CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
@@ -428,7 +450,7 @@ function preflight({
         || candidate.categoryParentId !== null
         || candidate.categoryStatus !== "ACTIVE"
         || candidate.categoryIsActive !== true
-        || (!reviewedPhase2E && (
+        || (!reviewedPhase2E && !reviewedPhase2F && (
           !dedicatedEpc
           || !(candidate.technicalEpc || []).map(String).includes(dedicatedEpc)
         ))

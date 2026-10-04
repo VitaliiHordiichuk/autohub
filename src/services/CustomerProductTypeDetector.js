@@ -1,6 +1,7 @@
 import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
 
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 5;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 6;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -88,6 +89,41 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "AC_RECEIVER_DRIER",
   "AC_REFRIGERANT_LINE",
   "FILTER_CABIN_KIT",
+  "ENGINE_GASKET_SEAL",
+  "ENGINE_MOUNT",
+  "ENGINE_BELT_TENSIONER",
+  "ENGINE_COVER_CRANKCASE",
+  "ENGINE_VALVETRAIN_COMPONENT",
+  "ENGINE_TIMING_COMPONENT",
+  "ENGINE_OIL_SYSTEM_COMPONENT",
+  "ENGINE_INTAKE_MANIFOLD_THROTTLE",
+  "ENGINE_INTAKE_AIR_DUCT",
+  "ENGINE_BLOCK_CRANKSHAFT_PISTON",
+  "ENGINE_CRANKCASE_VENTILATION",
+  "ENGINE_BELT_ROLLER_IDLER",
+  "ENGINE_CYLINDER_HEAD_COMPONENT",
+  "ENGINE_TURBO_CHARGE_AIR",
+  "ENGINE_VACUUM_COMPONENT",
+  "ENGINE_OIL_LINE_COOLER",
+  "ENGINE_OIL_PUMP",
+  "ENGINE_AIR_FILTER_HOUSING",
+  "ENGINE_DRIVE_PULLEY",
+  "ENGINE_SENSOR",
+  "SUSPENSION_SHOCK_ABSORBER",
+  "SUSPENSION_CONTROL_ARM",
+  "SUSPENSION_STABILIZER_LINK",
+  "SUSPENSION_BUSHING_MOUNT",
+  "SUSPENSION_SPRING",
+  "SUSPENSION_STRUT_MOUNT_PROTECTION",
+  "SUSPENSION_LINK_ROD",
+  "SUSPENSION_AIR_COMPONENT",
+  "SUSPENSION_WHEEL_HUB_BEARING",
+  "SUSPENSION_BALL_JOINT",
+  "SUSPENSION_STABILIZER_BUSHING",
+  "SUSPENSION_KNUCKLE_CARRIER",
+  "SUSPENSION_HYDRAULIC_COMPONENT",
+  "SUSPENSION_LEVEL_CONTROL",
+  "SUSPENSION_SUBFRAME_MOUNT",
 ]);
 
 const knownTypeCodes = new Set(CUSTOMER_PRODUCT_TYPE_CODES);
@@ -99,6 +135,15 @@ const phase2eReviewedTypeByArticleAndEpc = new Map(
 const phase2eReviewedArticleAndEpc = new Set(
   CUSTOMER_TAXONOMY_PHASE2E_REVIEW.map((row) => `${row.article}:${row.epc}`),
 );
+const phase2fReviewByArticleAndEpc = new Map(
+  CUSTOMER_TAXONOMY_PHASE2F_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
+);
+const phase2fExactFilterEpc = new Map([
+  ["FILTER_AIR_ENGINE", new Set(["18", "32"])],
+  ["FILTER_CABIN", new Set(["32"])],
+  ["FILTER_FUEL", new Set(["09"])],
+  ["FILTER_OIL", new Set(["01", "32"])],
+]);
 
 const detectors = Object.freeze([
   ["IGNITION_SPARK_PLUG", /(?:(?:^|[\s(,/.-])св[іе]ч|(?:котушк|катушк).*?(?:запал|зажиг)|(?:запал|зажиг).*?(?:котушк|катушк)|spark\s+plug|glow\s+plug)/iu],
@@ -168,6 +213,15 @@ function hasReviewedPhase2EDisposition(product, epcGroups) {
   return [...epcGroups].some((epc) => (
     phase2eReviewedArticleAndEpc.has(`${article}:${epc}`)
   ));
+}
+
+function reviewedPhase2FDisposition(product, epcGroups) {
+  const article = normalizedArticle(product);
+  for (const epc of epcGroups) {
+    const row = phase2fReviewByArticleAndEpc.get(`${article}:${epc}`);
+    if (row) return row;
+  }
+  return null;
 }
 
 function detectFilterType(text, epcGroups) {
@@ -475,6 +529,14 @@ export function isKnownCustomerProductTypeCode(value) {
 export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
+  const epcGroups = technicalEpcGroups(product);
+  const phase2fDisposition = reviewedPhase2FDisposition(product, epcGroups);
+  if (phase2fDisposition?.finalBucket === "HIGH") {
+    return phase2fDisposition.typeCode ? [phase2fDisposition.typeCode] : [];
+  }
+  if (["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(phase2fDisposition?.finalBucket)) {
+    return [];
+  }
   const detected = detectors
     .filter(([, pattern]) => pattern.test(text))
     .map(([typeCode]) => typeCode);
@@ -486,11 +548,13 @@ export function detectCustomerProductTypes(product = {}) {
     const index = detected.indexOf("BRAKE_CALIPER");
     if (index >= 0) detected.splice(index, 1);
   }
-  const epcGroups = technicalEpcGroups(product);
   const reviewedPhase2E = hasReviewedPhase2EDisposition(product, epcGroups);
   detected.push(...reviewedPhase2ETypes(product, epcGroups));
   const filterType = detectFilterType(text, epcGroups);
-  if (filterType) detected.unshift(filterType);
+  const phase2fExactOnlyEpc = phase2fExactFilterEpc.get(filterType);
+  const exactOnlyCombination = phase2fExactOnlyEpc
+    && [...epcGroups].some((epc) => phase2fExactOnlyEpc.has(epc));
+  if (filterType && !exactOnlyCombination) detected.unshift(filterType);
 
   detected.push(...detectSteeringTypes(text, epcGroups));
   detected.push(...detectExhaustTypes(text, epcGroups));

@@ -1,13 +1,10 @@
 import { pool } from "../config/db.js";
-import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
 import { runCustomerTaxonomyPreview } from "./CustomerTaxonomyPreviewService.js";
-import { CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION } from "./CustomerProductTypeDetector.js";
 
-export const CUSTOMER_TAXONOMY_PHASE2E_SECTIONS = Object.freeze([
-  "transmission-drivetrain",
-  "fuel-system",
-  "cooling",
-  "climate",
+export const CUSTOMER_TAXONOMY_PHASE2F_SECTIONS = Object.freeze([
+  "engine",
+  "suspension",
 ]);
 
 const approvedStatuses = new Set(["AUTO_APPROVED", "MANUAL_APPROVED"]);
@@ -23,13 +20,14 @@ function key(article, epc) {
   return `${normalizeArticle(article)}:${String(epc || "").trim().toUpperCase()}`;
 }
 
-function countBy(items, field, values = CUSTOMER_TAXONOMY_PHASE2E_SECTIONS) {
-  const counts = Object.fromEntries(values.map((value) => [value, 0]));
+function countBy(items, field) {
+  const result = {};
   for (const item of items) {
     const value = item?.[field];
-    counts[value] = (counts[value] || 0) + 1;
+    if (!value) continue;
+    result[value] = (result[value] || 0) + 1;
   }
-  return counts;
+  return Object.fromEntries(Object.entries(result).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function detail(row, evaluation, extra = {}) {
@@ -37,7 +35,7 @@ function detail(row, evaluation, extra = {}) {
     productId: evaluation?.productId ?? null,
     article: row.article,
     name: evaluation?.name ?? row.name ?? null,
-    technicalEpc: evaluation?.technicalEpc || [row.epc],
+    technicalEpc: evaluation?.technicalEpc || (row.epc ? [row.epc] : []),
     detectedTypeCodes: evaluation?.detectedTypeCodes || [],
     section: row.section,
     targetSection: row.targetSection || null,
@@ -47,24 +45,28 @@ function detail(row, evaluation, extra = {}) {
     categorySlug: row.categorySlug || null,
     reason: row.reason,
     collision: row.collision || null,
-    reviewSource: "PHASE_2E_AUDIT",
+    deferredFromPhase2E: row.deferredFromPhase2E === true,
+    reviewSource: "PHASE_2F_AUDIT",
     ...extra,
   };
 }
 
-export function reviewedPhase2ERowForProduct(product = {}) {
-  const groups = product.technicalEpcGroups ?? product.technical_epc_groups ?? [];
-  const epcGroups = new Set((Array.isArray(groups) ? groups : [groups]).map(String));
+export function reviewedPhase2FRowForProduct(product = {}) {
+  const rawGroups = product.technicalEpcGroups ?? product.technical_epc_groups ?? [];
+  const groups = (Array.isArray(rawGroups) ? rawGroups : [rawGroups])
+    .map((value) => String(value || "").trim().toUpperCase())
+    .filter(Boolean);
+  if (!groups.length) groups.push("");
   const article = normalizeArticle(
     product.articleNormalized ?? product.article_normalized ?? product.article,
   );
-  return CUSTOMER_TAXONOMY_PHASE2E_REVIEW.find((row) => (
-    row.article === article && epcGroups.has(row.epc)
+  return CUSTOMER_TAXONOMY_PHASE2F_REVIEW.find((row) => (
+    row.article === article && groups.includes(row.epc)
   )) || null;
 }
 
-export function isReviewedPhase2ESafeTopLevel(product = {}, expectedSection = null) {
-  const row = reviewedPhase2ERowForProduct(product);
+export function isReviewedPhase2FSafeTopLevel(product = {}, expectedSection = null) {
+  const row = reviewedPhase2FRowForProduct(product);
   return Boolean(
     row
     && row.finalBucket === "SAFE_TOPLEVEL"
@@ -72,15 +74,41 @@ export function isReviewedPhase2ESafeTopLevel(product = {}, expectedSection = nu
   );
 }
 
-export function buildCustomerTaxonomyPhase2ECoverage({
-  evaluations = [],
-  additions = [],
-} = {}) {
+function buildReconciliation() {
+  const transition = (originalBucket, finalBucket) => CUSTOMER_TAXONOMY_PHASE2F_REVIEW
+    .filter((row) => row.originalBucket === originalBucket && row.finalBucket === finalBucket)
+    .length;
+  return {
+    originalHigh: {
+      finalHigh: transition("HIGH", "HIGH"),
+      finalReview: transition("HIGH", "REAL_REVIEW"),
+    },
+    originalSafe: {
+      finalSafe: transition("SAFE_TOPLEVEL", "SAFE_TOPLEVEL"),
+      finalHigh: transition("SAFE_TOPLEVEL", "HIGH"),
+      finalReview: transition("SAFE_TOPLEVEL", "REAL_REVIEW"),
+    },
+    originalMissingRule: {
+      finalHigh: transition("MISSING_RULE", "HIGH"),
+      finalSafe: transition("MISSING_RULE", "SAFE_TOPLEVEL"),
+      finalReview: transition("MISSING_RULE", "REAL_REVIEW"),
+    },
+    originalReview: {
+      unchanged: transition("REAL_REVIEW", "REAL_REVIEW"),
+      promotedHigh: transition("REAL_REVIEW", "HIGH"),
+      promotedSafe: transition("REAL_REVIEW", "SAFE_TOPLEVEL"),
+    },
+    alreadyMemberProtected: CUSTOMER_TAXONOMY_PHASE2F_REVIEW.filter((row) => (
+      row.originalBucket === "ALREADY_MEMBER" && row.finalBucket === "ALREADY_MEMBER"
+    )).length,
+  };
+}
+
+export function buildCustomerTaxonomyPhase2FCoverage({ evaluations = [], additions = [] } = {}) {
   const evaluationByKey = new Map();
   for (const evaluation of evaluations) {
-    for (const epc of evaluation.technicalEpc || []) {
-      evaluationByKey.set(key(evaluation.article, epc), evaluation);
-    }
+    const groups = evaluation.technicalEpc?.length ? evaluation.technicalEpc : [""];
+    for (const epc of groups) evaluationByKey.set(key(evaluation.article, epc), evaluation);
   }
   const additionsByProduct = new Map();
   for (const addition of additions) {
@@ -94,18 +122,21 @@ export function buildCustomerTaxonomyPhase2ECoverage({
     newHigh: [],
     safeTopLevel: [],
     missingRuleRemaining: [],
-    deferredToEngine: [],
     realReview: [],
     crossSectionAssignments: [],
+    deferredFromPhase2E: [],
     suspicious: [],
   };
 
-  for (const row of CUSTOMER_TAXONOMY_PHASE2E_REVIEW) {
+  for (const row of CUSTOMER_TAXONOMY_PHASE2F_REVIEW) {
     const evaluation = evaluationByKey.get(key(row.article, row.epc));
     if (!evaluation) {
       buckets.suspicious.push(detail(row, null, { issue: "SOURCE_PRODUCT_MISSING" }));
       continue;
     }
+    if (row.collision) buckets.crossSectionAssignments.push(detail(row, evaluation));
+    if (row.deferredFromPhase2E) buckets.deferredFromPhase2E.push(detail(row, evaluation));
+
     const approvedMembership = (evaluation.existingMemberships || []).find((membership) => (
       membership.isPrimary && approvedStatuses.has(membership.approvalStatus)
     ));
@@ -116,7 +147,6 @@ export function buildCustomerTaxonomyPhase2ECoverage({
       }));
       continue;
     }
-
     if (row.originalBucket === "ALREADY_MEMBER") {
       buckets.suspicious.push(detail(row, evaluation, {
         issue: "AUDIT_BASELINE_MEMBERSHIP_MISSING",
@@ -130,13 +160,11 @@ export function buildCustomerTaxonomyPhase2ECoverage({
         && item.assignmentSource === "RULE"
       ));
       if (matchingAddition) {
-        const high = detail(row, evaluation, {
+        buckets.newHigh.push(detail(row, evaluation, {
           categoryId: matchingAddition.categoryId,
           ruleCode: matchingAddition.ruleCode,
           ruleVersion: matchingAddition.ruleVersion,
-        });
-        buckets.newHigh.push(high);
-        if (row.section !== row.targetSection) buckets.crossSectionAssignments.push(high);
+        }));
       } else {
         buckets.missingRuleRemaining.push(detail(row, evaluation, {
           issue: "EXPECTED_HIGH_RULE_DID_NOT_RESOLVE",
@@ -146,10 +174,6 @@ export function buildCustomerTaxonomyPhase2ECoverage({
     }
     if (row.finalBucket === "SAFE_TOPLEVEL") {
       buckets.safeTopLevel.push(detail(row, evaluation));
-      continue;
-    }
-    if (row.finalBucket === "DEFER_TO_ENGINE") {
-      buckets.deferredToEngine.push(detail(row, evaluation));
       continue;
     }
     if (row.finalBucket === "REAL_REVIEW") {
@@ -162,46 +186,56 @@ export function buildCustomerTaxonomyPhase2ECoverage({
   const missingSourceProducts = buckets.suspicious.filter((item) => (
     item.issue === "SOURCE_PRODUCT_MISSING"
   )).length;
+  const deferredHigh = buckets.deferredFromPhase2E.filter((item) => item.finalBucket === "HIGH");
+  const deferredSafe = buckets.deferredFromPhase2E.filter((item) => (
+    item.finalBucket === "SAFE_TOPLEVEL"
+  ));
+  const deferredReview = buckets.deferredFromPhase2E.filter((item) => (
+    item.finalBucket === "REAL_REVIEW"
+  ));
   const summary = {
-    technicalTotal: CUSTOMER_TAXONOMY_PHASE2E_REVIEW.length,
-    sourceProductsFound: CUSTOMER_TAXONOMY_PHASE2E_REVIEW.length - missingSourceProducts,
+    technicalTotal: CUSTOMER_TAXONOMY_PHASE2F_REVIEW.length,
+    sourceProductsFound: CUSTOMER_TAXONOMY_PHASE2F_REVIEW.length - missingSourceProducts,
     alreadyMember: buckets.alreadyMember.length,
     newHigh: buckets.newHigh.length,
     safeTopLevel: buckets.safeTopLevel.length,
     missingRuleRemaining: buckets.missingRuleRemaining.length,
-    deferredToEngine: buckets.deferredToEngine.length,
     realReview: buckets.realReview.length,
     crossSectionAssignments: buckets.crossSectionAssignments.length,
     suspicious: buckets.suspicious.length,
-    bySection: Object.fromEntries(CUSTOMER_TAXONOMY_PHASE2E_SECTIONS.map((section) => {
+    bySection: Object.fromEntries(CUSTOMER_TAXONOMY_PHASE2F_SECTIONS.map((section) => {
       const inSection = (items) => items.filter((item) => item.section === section).length;
       return [section, {
-        technicalTotal: CUSTOMER_TAXONOMY_PHASE2E_REVIEW.filter((row) => row.section === section).length,
+        technicalTotal: CUSTOMER_TAXONOMY_PHASE2F_REVIEW.filter((row) => row.section === section).length,
         alreadyMember: inSection(buckets.alreadyMember),
         newHigh: inSection(buckets.newHigh),
         safeTopLevel: inSection(buckets.safeTopLevel),
         missingRuleRemaining: inSection(buckets.missingRuleRemaining),
-        deferredToEngine: inSection(buckets.deferredToEngine),
         realReview: inSection(buckets.realReview),
       }];
     })),
-    highByLeaf: countBy(buckets.newHigh, "categorySlug", [
-      ...new Set(buckets.newHigh.map((item) => item.categorySlug).filter(Boolean)),
-    ]),
+    highByLeaf: countBy(buckets.newHigh, "categorySlug"),
+    reconciliation: buildReconciliation(),
+    deferredFromPhase2E: {
+      total: buckets.deferredFromPhase2E.length,
+      high: deferredHigh.length,
+      safeTopLevel: deferredSafe.length,
+      realReview: deferredReview.length,
+      highByLeaf: countBy(deferredHigh, "categorySlug"),
+    },
   };
-
   return { summary, ...buckets };
 }
 
-export function buildCustomerTaxonomyPhase2EReport(report) {
-  const coverage = buildCustomerTaxonomyPhase2ECoverage({
+export function buildCustomerTaxonomyPhase2FReport(report) {
+  const coverage = buildCustomerTaxonomyPhase2FCoverage({
     evaluations: report.evaluations || [],
     additions: report.additions || [],
   });
   return {
     mode: report.mode,
-    batch: "PHASE_2E",
-    detectorVersion: CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION,
+    batch: "PHASE_2F",
+    detectorVersion: 6,
     summary: {
       ...coverage.summary,
       existingMemberships: report.summary.existingMemberships,
@@ -211,14 +245,11 @@ export function buildCustomerTaxonomyPhase2EReport(report) {
   };
 }
 
-export async function runCustomerTaxonomyPhase2EPreview({ dbPool = pool } = {}) {
-  const report = await runCustomerTaxonomyPreview({
-    dbPool,
-    includeEvaluations: true,
-  });
-  return buildCustomerTaxonomyPhase2EReport(report);
+export async function runCustomerTaxonomyPhase2FPreview({ dbPool = pool } = {}) {
+  const report = await runCustomerTaxonomyPreview({ dbPool, includeEvaluations: true });
+  return buildCustomerTaxonomyPhase2FReport(report);
 }
 
-export const CustomerTaxonomyPhase2EPreviewService = {
-  run: runCustomerTaxonomyPhase2EPreview,
+export const CustomerTaxonomyPhase2FPreviewService = {
+  run: runCustomerTaxonomyPhase2FPreview,
 };
