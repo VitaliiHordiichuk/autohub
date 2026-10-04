@@ -7,6 +7,11 @@ import {
 } from "./CustomerTaxonomyBatchPreviewService.js";
 import { buildCustomerTaxonomyPreview } from "./CustomerTaxonomyPreviewService.js";
 import {
+  buildCustomerTaxonomyPhase2ECoverage,
+  CUSTOMER_TAXONOMY_PHASE2E_SECTIONS,
+  isReviewedPhase2ESafeTopLevel,
+} from "./CustomerTaxonomyPhase2EPreviewService.js";
+import {
   CUSTOMER_APPROVAL_STATUS,
   CUSTOMER_ASSIGNMENT_ORIGIN,
   CUSTOMER_ASSIGNMENT_SOURCE,
@@ -199,7 +204,11 @@ function proposalFromCandidate(candidate) {
 }
 
 function countSections(items) {
-  return Object.fromEntries(CUSTOMER_TAXONOMY_BATCH2_SECTIONS.map((section) => [
+  const sections = [...new Set([
+    ...CUSTOMER_TAXONOMY_BATCH2_SECTIONS,
+    ...CUSTOMER_TAXONOMY_PHASE2E_SECTIONS,
+  ])];
+  return Object.fromEntries(sections.map((section) => [
     section,
     items.filter((item) => item.section === section).length,
   ]));
@@ -221,6 +230,7 @@ function emptyBatch2Coverage() {
     safeTopLevel: [],
     missingRule: [],
     realReview: [],
+    phase2e: null,
   };
 }
 
@@ -246,23 +256,47 @@ async function buildBackfillCandidates({
     };
   }
 
-  const coverage = buildCustomerTaxonomyBatch2Coverage({
+  const batch2Coverage = buildCustomerTaxonomyBatch2Coverage({
     evaluations: preview.evaluations || [],
     additions: preview.additions || [],
   });
+  const phase2eCoverage = buildCustomerTaxonomyPhase2ECoverage({
+    evaluations: preview.evaluations || [],
+    additions: preview.additions || [],
+  });
+  const coverage = {
+    summary: batch2Coverage.summary,
+    safeTopLevel: [
+      ...batch2Coverage.safeTopLevel,
+      ...phase2eCoverage.safeTopLevel,
+    ],
+    missingRule: [
+      ...batch2Coverage.missingRule,
+      ...phase2eCoverage.missingRuleRemaining,
+    ],
+    realReview: [
+      ...batch2Coverage.realReview,
+      ...phase2eCoverage.realReview,
+    ],
+    phase2e: phase2eCoverage,
+  };
+  const safeSections = [...new Set(coverage.safeTopLevel.map((item) => (
+    item.targetSection || item.section
+  )))];
   const categories = await repository.listCategoriesBySlugs(
-    CUSTOMER_TAXONOMY_BATCH2_SECTIONS,
+    safeSections,
     client,
   );
   const categoryBySlug = new Map(categories.map((category) => [category.slug, category]));
   const safeTopLevel = coverage.safeTopLevel.map((item) => {
-    const category = categoryBySlug.get(item.section);
+    const section = item.targetSection || item.section;
+    const category = categoryBySlug.get(section);
     return {
       ...item,
       categoryId: category?.id ?? null,
-      categorySlug: item.section,
+      categorySlug: section,
       parentSlug: null,
-      sectionSlug: item.section,
+      sectionSlug: section,
       categoryStatus: category?.status ?? null,
       categoryIsActive: category?.isActive ?? false,
       categoryParentId: category?.parentId ?? null,
@@ -377,6 +411,11 @@ function preflight({
         exhaust: "49",
         wheels: "40",
       }[candidate.sectionSlug];
+      const reviewedPhase2E = candidate.reviewSource === "PHASE_2E_AUDIT"
+        && isReviewedPhase2ESafeTopLevel({
+          article: candidate.article,
+          technicalEpcGroups: candidate.technicalEpc,
+        }, candidate.sectionSlug);
       if (
         includeSafeTopLevel !== true
         || candidate.approvalStatus !== CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
@@ -389,8 +428,10 @@ function preflight({
         || candidate.categoryParentId !== null
         || candidate.categoryStatus !== "ACTIVE"
         || candidate.categoryIsActive !== true
-        || !dedicatedEpc
-        || !(candidate.technicalEpc || []).map(String).includes(dedicatedEpc)
+        || (!reviewedPhase2E && (
+          !dedicatedEpc
+          || !(candidate.technicalEpc || []).map(String).includes(dedicatedEpc)
+        ))
       ) {
         errors.push(`UNSAFE_SAFE_TOPLEVEL:${candidate.productId}:${candidate.categorySlug}`);
       }

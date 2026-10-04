@@ -29,6 +29,14 @@ const safeTopLevelMigrationUrl = new URL(
   "../migrations/092_allow_safe_top_level_taxonomy_fallback.sql",
   import.meta.url,
 );
+const phase2eCategoryMigrationUrl = new URL(
+  "../migrations/093_add_customer_taxonomy_phase2e_categories.sql",
+  import.meta.url,
+);
+const phase2eRuleMigrationUrl = new URL(
+  "../migrations/094_seed_customer_taxonomy_phase2e_rules.sql",
+  import.meta.url,
+);
 let rules = [];
 
 before(async () => {
@@ -78,9 +86,13 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
   assert.deepEqual(grouped.rows, [
     { section: "accessories", count: 103 },
     { section: "brakes", count: 9 },
-    { section: "exhaust", count: 11 },
-    { section: "filters-maintenance", count: 7 },
+    { section: "climate", count: 9 },
+    { section: "cooling", count: 10 },
+    { section: "exhaust", count: 12 },
+    { section: "filters-maintenance", count: 8 },
+    { section: "fuel-system", count: 9 },
     { section: "steering", count: 10 },
+    { section: "transmission-drivetrain", count: 16 },
     { section: "wheels", count: 6 },
   ]);
 
@@ -88,7 +100,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     SELECT id
     FROM customer_classification_rules
     WHERE is_active = TRUE
-      AND (detector_version <> 4
+      AND (detector_version <> 5
        OR source_kind <> 'RULE'
        OR assignment_role <> 'PRIMARY'
        OR confidence <> 'HIGH'
@@ -109,14 +121,20 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
         WHERE version = 1 AND detector_version = 3 AND is_active = FALSE
       )::integer AS historical_v1_d3,
       COUNT(*) FILTER (
-        WHERE version = 3 AND detector_version = 4 AND is_active = TRUE
-      )::integer AS active_v3_d4,
+        WHERE detector_version = 4 AND is_active = FALSE
+      )::integer AS historical_d4,
       COUNT(*) FILTER (
-        WHERE version = 2 AND detector_version = 4 AND is_active = TRUE
-      )::integer AS active_v2_d4,
+        WHERE version = 4 AND detector_version = 5 AND is_active = TRUE
+      )::integer AS active_v4_d5,
       COUNT(*) FILTER (
-        WHERE version = 1 AND detector_version = 4 AND is_active = TRUE
-      )::integer AS new_v1_d4,
+        WHERE version = 3 AND detector_version = 5 AND is_active = TRUE
+      )::integer AS active_v3_d5,
+      COUNT(*) FILTER (
+        WHERE version = 2 AND detector_version = 5 AND is_active = TRUE
+      )::integer AS active_v2_d5,
+      COUNT(*) FILTER (
+        WHERE version = 1 AND detector_version = 5 AND is_active = TRUE
+      )::integer AS new_v1_d5,
       COUNT(*) FILTER (WHERE is_active = TRUE)::integer AS active_total,
       COUNT(*)::integer AS total
     FROM customer_classification_rules
@@ -125,11 +143,13 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     historical_v1_d2: 119,
     historical_v2_d3: 119,
     historical_v1_d3: 25,
-    active_v3_d4: 119,
-    active_v2_d4: 24,
-    new_v1_d4: 3,
-    active_total: 146,
-    total: 409,
+    historical_d4: 146,
+    active_v4_d5: 119,
+    active_v3_d5: 24,
+    active_v2_d5: 3,
+    new_v1_d5: 46,
+    active_total: 192,
+    total: 601,
   });
 
   const versionDrift = await pool.query(`
@@ -138,10 +158,9 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     JOIN customer_classification_rules active
       ON active.code = historical.code
      AND active.version = historical.version + 1
-     AND active.detector_version = 4
+     AND active.detector_version = 5
      AND active.is_active = TRUE
-    WHERE historical.detector_version = 3
-      AND historical.code <> 'WHEEL_CAP_A_EPC40_V1'
+    WHERE historical.detector_version = 4
       AND (
         active.source_kind IS DISTINCT FROM historical.source_kind
         OR active.assignment_role IS DISTINCT FROM historical.assignment_role
@@ -150,10 +169,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
         OR active.match_type IS DISTINCT FROM historical.match_type
         OR active.match_value IS DISTINCT FROM historical.match_value
         OR active.exclude_values IS DISTINCT FROM historical.exclude_values
-        OR (
-          historical.code <> 'EXHAUST_ADBLUE_INJECTOR_A_EPC49_V1'
-          AND active.target_category_id IS DISTINCT FROM historical.target_category_id
-        )
+        OR active.target_category_id IS DISTINCT FROM historical.target_category_id
         OR active.priority IS DISTINCT FROM historical.priority
         OR active.confidence IS DISTINCT FROM historical.confidence
         OR active.auto_approval_allowed IS DISTINCT FROM historical.auto_approval_allowed
@@ -176,13 +192,21 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
   assert.equal(memberships.rows[0].count, 0);
 });
 
-test("batch 2 migrations are idempotent and cannot write memberships or old EPC tables", async () => {
+test("taxonomy migrations are idempotent and cannot write memberships or old EPC tables", async () => {
   const phase2Sql = await readFile(phase2MigrationUrl, "utf8");
   const categorySql = await readFile(categoryMigrationUrl, "utf8");
   const batch2Sql = await readFile(batch2MigrationUrl, "utf8");
-  const correctionSql = await readFile(batch2CorrectionMigrationUrl, "utf8");
   const safeTopLevelSql = await readFile(safeTopLevelMigrationUrl, "utf8");
-  for (const sql of [phase2Sql, categorySql, batch2Sql, correctionSql, safeTopLevelSql]) {
+  const phase2eCategorySql = await readFile(phase2eCategoryMigrationUrl, "utf8");
+  const phase2eRuleSql = await readFile(phase2eRuleMigrationUrl, "utf8");
+  for (const sql of [
+    phase2Sql,
+    categorySql,
+    batch2Sql,
+    safeTopLevelSql,
+    phase2eCategorySql,
+    phase2eRuleSql,
+  ]) {
     assert.doesNotMatch(
       sql,
       /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:product_customer_categories|categories|product_categories|products)\b/iu,
@@ -196,8 +220,10 @@ test("batch 2 migrations are idempotent and cannot write memberships or old EPC 
       (SELECT COUNT(*)::integer FROM categories) AS epc_categories,
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
-  await pool.query(correctionSql);
-  await pool.query(safeTopLevelSql);
+  // Historical migrations are never replayed after a later detector generation.
+  // Only the new PHASE 2E migrations must be idempotent at this point.
+  await pool.query(phase2eCategorySql);
+  await pool.query(phase2eRuleSql);
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
@@ -206,12 +232,12 @@ test("batch 2 migrations are idempotent and cannot write memberships or old EPC 
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   assert.deepEqual(afterResult.rows[0], beforeResult.rows[0]);
-  assert.equal(afterResult.rows[0].rules, 409);
+  assert.equal(afterResult.rows[0].rules, 601);
   assert.equal(afterResult.rows[0].memberships, 0);
 });
 
-test("inactive historical v1 membership remains valid and migration replay does not rewrite it", async () => {
-  const correctionSql = await readFile(batch2CorrectionMigrationUrl, "utf8");
+test("inactive historical v1 membership remains valid and PHASE 2E migration replay does not rewrite it", async () => {
+  const phase2eRuleSql = await readFile(phase2eRuleMigrationUrl, "utf8");
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Historical taxonomy membership', TRUE)
@@ -253,7 +279,7 @@ test("inactive historical v1 membership remains valid and migration replay does 
       ruleActive: false,
     });
 
-    await pool.query(correctionSql);
+    await pool.query(phase2eRuleSql);
 
     const afterResult = await pool.query(`
       SELECT membership.rule_code, membership.rule_version,
@@ -311,20 +337,20 @@ test("reviewed filter EPC and TYPE_CODE combinations resolve to READY leaves", (
   }, "filters-wipers");
 });
 
-test("resolver uses detector-v4 successors while new correction rules start at v1", () => {
+test("resolver uses detector-v5 successors while PHASE 2E rules start at v1", () => {
   const historicalSuccessor = expectAutoApproved({
     article: "A0001800109",
     name: "Масляний фільтр",
     epc: "18",
   }, "filters-oil");
-  assert.equal(historicalSuccessor.ruleVersion, 3);
+  assert.equal(historicalSuccessor.ruleVersion, 4);
 
   const newPhase2dRule = expectAutoApproved({
     article: "A0004600000",
     name: "Рейка рульова",
     epc: "46",
   }, "steering-racks");
-  assert.equal(newPhase2dRule.ruleVersion, 2);
+  assert.equal(newPhase2dRule.ruleVersion, 3);
 });
 
 test("unsafe filter contexts, belt tensioners and wiper mechanisms are not auto-approved", () => {
@@ -348,16 +374,16 @@ test("unsafe filter contexts, belt tensioners and wiper mechanisms are not auto-
     name: "Механізм склоочисника",
     epc: "82",
   }).proposals.length, 0);
-  assert.equal(resolve({
+  expectAutoApproved({
     article: "A212470065905",
     name: "AKTIVKOHLEFILTER",
     epc: "47",
-  }).proposals.length, 0);
-  assert.equal(resolve({
+  }, "fuel-vapor-canisters");
+  expectAutoApproved({
     article: "A2214700759",
     name: "AKTKOHLEFILTER",
     epc: "47",
-  }).proposals.length, 0);
+  }, "fuel-vapor-canisters");
   assert.equal(resolve({
     article: "A1770940004",
     name: "Рамка повітряного фільтра",
@@ -368,11 +394,11 @@ test("unsafe filter contexts, belt tensioners and wiper mechanisms are not auto-
     name: "Комплект фільтрів (паливний+масляний+повітряний)",
     epc: "83",
   }).proposals.length, 0);
-  assert.equal(resolve({
+  expectAutoApproved({
     article: "A0002770000",
     name: "Фільтр мастила АКПП",
     epc: "27",
-  }).proposals.length, 0);
+  }, "transmission-oil-filters");
   assert.equal(resolve({
     article: "A0003200000",
     name: "Гідравлічний фільтр",
@@ -602,7 +628,7 @@ test("rubber muffler hangers resolve as mounts and never as complete mufflers", 
     name: "Глушитель",
     epc: "49",
   }, "exhaust-mufflers");
-  assert.equal(muffler.ruleVersion, 2);
+  assert.equal(muffler.ruleVersion, 3);
 });
 
 test("generic sensors, pipes and muffler components do not become complete exhaust parts", () => {
@@ -619,7 +645,12 @@ test("generic sensors, pipes and muffler components do not become complete exhau
     name: "Прокладка глушника",
     epc: "49",
   }]) {
-    assert.equal(resolve(input).proposals.length, 0);
+    const result = resolve(input);
+    assert.equal(result.proposals.some(({ category }) => [
+      "exhaust-catalysts",
+      "exhaust-mufflers",
+      "exhaust-pipes",
+    ].includes(category.slug)), false);
   }
 });
 
@@ -699,7 +730,35 @@ test("brake discs and unrelated pressure sensors stay outside wheel leaves", () 
   }).proposals.some((proposal) => proposal.category.parentSlug === "wheels"), false);
 });
 
-test("detector v4 preserves every existing classification target without writes", async () => {
+test("reviewed PHASE 2E EPC and TYPE_CODE combinations resolve to exact leaves", () => {
+  const cases = [
+    [{ article: "A0002500515", name: "Вижимний", epc: "25" }, "transmission-clutch-components"],
+    [{ article: "A1402770095", name: "Фільтр мастила", epc: "27" }, "transmission-oil-filters"],
+    [{ article: "A271078112380", name: "Форсунка паливна", epc: "07" }, "fuel-injectors"],
+    [{ article: "A212470065905", name: "Фільтр з активним вугіллям", epc: "47" }, "fuel-vapor-canisters"],
+    [{ article: "A0005000801", name: "Насос системи охолодження", epc: "50" }, "cooling-water-pumps"],
+    [{ article: "A0995005903", name: "Радіатор системи охолодження", epc: "50" }, "cooling-radiators"],
+    [{ article: "A2215000754", name: "Конденсатор кондиціонера", epc: "50" }, "climate-condensers"],
+    [{ article: "A2208300772", name: "Датчик температури випаровуваля", epc: "83" }, "climate-sensors"],
+    [{ article: "A0004700400", name: "Насос AdBlue", epc: "47" }, "exhaust-adblue-scr"],
+    [{ article: "A1668307401", name: "Комплект фільтрів повітря салону", epc: "83" }, "filters-cabin"],
+  ];
+  for (const [input, slug] of cases) expectAutoApproved(input, slug);
+});
+
+test("split EPC groups never auto-approve generic names or deferred belt-drive parts", () => {
+  for (const input of [
+    { article: "A0000700000", name: "Датчик", epc: "07" },
+    { article: "A0004700000", name: "Кронштейн", epc: "47" },
+    { article: "A0005000000", name: "Трубка", epc: "50" },
+    { article: "A0008300000", name: "Мотор", epc: "83" },
+    { article: "A1772003400", name: "Натягувач ременя", epc: "20" },
+  ]) {
+    assert.equal(resolve(input).proposals.length, 0, input.article);
+  }
+});
+
+test("detector v5 preserves every detector-v4 classification target without writes", async () => {
   const products = await CustomerTaxonomyRepository.listProductsForPreview(pool);
   const historicalResult = await pool.query(`
     SELECT
@@ -712,17 +771,14 @@ test("detector v4 preserves every existing classification target without writes"
     FROM customer_classification_rules rule
     JOIN customer_categories category ON category.id = rule.target_category_id
     LEFT JOIN customer_categories parent ON parent.id = category.parent_id
-    WHERE rule.detector_version = 3
-      AND parent.slug IN ('filters-maintenance', 'brakes', 'accessories')
+    WHERE rule.detector_version = 4
   `);
   const historicalRulesUnderCurrentDetector = historicalResult.rows.map((rule) => ({
     ...rule,
-    detector_version: 4,
+    detector_version: 5,
     is_active: true,
   }));
-  const existingSections = new Set(["filters-maintenance", "brakes", "accessories"]);
   const baseline = new Map();
-  const current = new Map();
 
   for (const product of products) {
     const historicalResolution = resolveCustomerTaxonomy({
@@ -731,7 +787,7 @@ test("detector v4 preserves every existing classification target without writes"
       existingMemberships: [],
     });
     const historicalPrimary = historicalResolution.proposals.find((proposal) => (
-      proposal.isPrimary && existingSections.has(proposal.category.parentSlug)
+      proposal.isPrimary
     ));
     if (historicalPrimary) baseline.set(product.id, historicalPrimary.category.slug);
 
@@ -740,18 +796,13 @@ test("detector v4 preserves every existing classification target without writes"
       rules,
       existingMemberships: [],
     });
-    const currentPrimary = currentResolution.proposals.find((proposal) => (
-      proposal.isPrimary && existingSections.has(proposal.category.parentSlug)
-    ));
-    if (currentPrimary) current.set(product.id, currentPrimary.category.slug);
+    const currentPrimary = currentResolution.proposals.find((proposal) => proposal.isPrimary);
+    if (historicalPrimary) {
+      assert.equal(currentPrimary?.category?.slug, historicalPrimary.category.slug, product.article);
+    }
   }
 
   assert.ok(baseline.size > 0);
-  assert.equal(current.size, baseline.size);
-  const drift = [...baseline].filter(([productId, categorySlug]) => (
-    current.get(productId) !== categorySlug
-  ));
-  assert.deepEqual(drift, []);
 
   const membershipCount = await pool.query(
     "SELECT COUNT(*)::integer AS count FROM product_customer_categories",

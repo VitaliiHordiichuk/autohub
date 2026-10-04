@@ -1,4 +1,6 @@
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 4;
+import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
+
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 5;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -47,9 +49,56 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "WHEEL_SPARE_COVER",
   "WHEEL_BOLT_NUT",
   "TPMS_SENSOR",
+  "CLUTCH_ASSEMBLY",
+  "CLUTCH_RELEASE_BEARING",
+  "TRANSMISSION_SELECTOR_LINKAGE",
+  "TRANSMISSION_OIL_FILTER",
+  "TRANSMISSION_OIL_PAN",
+  "TRANSMISSION_FLUID_LINE",
+  "TRANSMISSION_COOLER_LINE",
+  "TRANSMISSION_VALVE_BODY",
+  "TRANSMISSION_SEAL_GASKET",
+  "TRANSMISSION_INTERNAL_COMPONENT",
+  "TRANSMISSION_TEMPERATURE_CONTROL",
+  "TRANSFER_CASE_COMPONENT",
+  "DRIVETRAIN_CV_BOOT",
+  "DRIVETRAIN_PROPELLER_SHAFT",
+  "DRIVETRAIN_COUPLING_DAMPER",
+  "FUEL_INJECTOR",
+  "FUEL_PUMP",
+  "FUEL_LINE_HOSE",
+  "FUEL_RAIL",
+  "FUEL_PRESSURE_VALVE",
+  "FUEL_TANK_MODULE",
+  "ADBLUE_SCR_COMPONENT",
+  "COOLING_WATER_PUMP",
+  "COOLING_THERMOSTAT",
+  "COOLING_RADIATOR",
+  "COOLING_HOSE_PIPE",
+  "COOLING_EXPANSION_TANK",
+  "COOLING_CONTROL_VALVE",
+  "COOLING_RADIATOR_AIR_GUIDE",
+  "ENGINE_BELT_DRIVE_COMPONENT",
+  "HVAC_AIR_DUCT_VENT",
+  "HVAC_BLOWER_MOTOR",
+  "HVAC_CONTROL_VALVE",
+  "HVAC_HOSE_PIPE",
+  "HVAC_DRAIN_LINE",
+  "HVAC_TEMPERATURE_SENSOR",
+  "AC_RECEIVER_DRIER",
+  "AC_REFRIGERANT_LINE",
+  "FILTER_CABIN_KIT",
 ]);
 
 const knownTypeCodes = new Set(CUSTOMER_PRODUCT_TYPE_CODES);
+const phase2eReviewedTypeByArticleAndEpc = new Map(
+  CUSTOMER_TAXONOMY_PHASE2E_REVIEW
+    .filter((row) => row.finalBucket === "HIGH" && row.typeCode)
+    .map((row) => [`${row.article}:${row.epc}`, row.typeCode]),
+);
+const phase2eReviewedArticleAndEpc = new Set(
+  CUSTOMER_TAXONOMY_PHASE2E_REVIEW.map((row) => `${row.article}:${row.epc}`),
+);
 
 const detectors = Object.freeze([
   ["IGNITION_SPARK_PLUG", /(?:(?:^|[\s(,/.-])св[іе]ч|(?:котушк|катушк).*?(?:запал|зажиг)|(?:запал|зажиг).*?(?:котушк|катушк)|spark\s+plug|glow\s+plug)/iu],
@@ -95,10 +144,36 @@ function technicalEpcGroups(product = {}) {
   );
 }
 
+function normalizedArticle(product = {}) {
+  return String(
+    product.articleNormalized ?? product.article_normalized ?? product.article ?? "",
+  )
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function reviewedPhase2ETypes(product, epcGroups) {
+  const article = normalizedArticle(product);
+  const result = [];
+  for (const epc of epcGroups) {
+    const typeCode = phase2eReviewedTypeByArticleAndEpc.get(`${article}:${epc}`);
+    if (typeCode) result.push(typeCode);
+  }
+  return result;
+}
+
+function hasReviewedPhase2EDisposition(product, epcGroups) {
+  const article = normalizedArticle(product);
+  return [...epcGroups].some((epc) => (
+    phase2eReviewedArticleAndEpc.has(`${article}:${epc}`)
+  ));
+}
+
 function detectFilterType(text, epcGroups) {
   const fuelVapor = /(?:charcoal\s+canister|carbon\s+canister|kraftstoffverdunst|fuel\s+vapou?r|\bevap\b|адсорбер|испарени\w*\s+топлив|паров\w*\s+топлив|випаров\w*\s+палив|пар[іи]в\w*\s+палив)/iu.test(text);
   const activatedCharcoalAtFuelEpc = epcGroups.has("47")
-    && /(?:activated\s+charcoal\s+filter|aktivkohlefilter|aktkohlefilter|вугіль|уголь|charcoal|carbon)/iu.test(text);
+    && /(?:activated\s+(?:charcoal|carbon)(?:\s+filter)?|aktivkohlefilter|aktkohlefilter|актив[^\s]*(?:\s+[зс])?\s+(?:вугілл[^\s]*|угл[^\s]*)|вугіль|угольн[^\s]*\s+ф[іи]льтр|charcoal|carbon)/iu.test(text);
   if (fuelVapor || activatedCharcoalAtFuelEpc) {
     return "FUEL_VAPOR_CANISTER";
   }
@@ -245,6 +320,154 @@ function detectWheelTypes(text, epcGroups) {
   return types;
 }
 
+function detectTransmissionTypes(text, epcGroups) {
+  const types = [];
+  if (epcGroups.has("25")) {
+    if (/(?:корзин\w*\s+зчеп|зчеплен|сцеплен|clutch)/iu.test(text)) {
+      types.push("CLUTCH_ASSEMBLY");
+    }
+    if (/(?:вижим|выжим|release\s+bearing)/iu.test(text)) {
+      types.push("CLUTCH_RELEASE_BEARING");
+    }
+  }
+  if (epcGroups.has("26") && /(?:селектор|перемикан\w*\s+(?:кпп|передач)|переключен\w*\s+(?:кпп|передач)|трос\w*\s+(?:кпп|селектор)|тяг\w*\s+кпп|shift\s+(?:cable|linkage))/iu.test(text)) {
+    types.push("TRANSMISSION_SELECTOR_LINKAGE");
+  }
+  const transmissionEpc = epcGroups.has("27") || epcGroups.has("37");
+  if (transmissionEpc) {
+    if (/(?:ф[іи]льтр|filter).*(?:кпп|акпп|трансм|масл|мастил|олив)|(?:кпп|акпп|трансм).*(?:ф[іи]льтр|filter)/iu.test(text)) {
+      types.push("TRANSMISSION_OIL_FILTER");
+    }
+    if (/(?:п[іи]ддон|поддон|oil\s+pan).*(?:кпп|акпп|трансм|масл|мастил|олив)|(?:кпп|акпп|трансм).*(?:п[іи]ддон|поддон|oil\s+pan)/iu.test(text)) {
+      types.push("TRANSMISSION_OIL_PAN");
+    }
+    if (/(?:г[іи]дроблок|valve\s+body)/iu.test(text)) {
+      types.push("TRANSMISSION_VALVE_BODY");
+    }
+    if (/(?:(?:прокладк|ущ[іи]льн|уплотн|сальник|seal|gasket|к[іи]льц|кольц).*(?:кпп|акпп|трансм|г[іи]дроблок)|(?:кпп|акпп|трансм|г[іи]дроблок).*(?:прокладк|ущ[іи]льн|уплотн|сальник|seal|gasket|к[іи]льц|кольц))/iu.test(text)) {
+      types.push("TRANSMISSION_SEAL_GASKET");
+    }
+    if (/(?:(?:шланг|труб|патруб|оливопров|маслопров|oil\s+line).*(?:кпп|акпп|трансм|масл|мастил|олив)|(?:кпп|акпп|трансм).*(?:шланг|труб|патруб|оливопров|маслопров|oil\s+line))/iu.test(text)) {
+      types.push("TRANSMISSION_FLUID_LINE");
+    }
+  }
+  if (epcGroups.has("28") && /(?:роздав|раздат|transfer\s+case|маслозалив|оливи|сальник)/iu.test(text)) {
+    types.push("TRANSFER_CASE_COMPONENT");
+  }
+  if (epcGroups.has("36") && /(?:пиловик|пыльник|чохол|boot).*(?:шрус|шркш|п[іи]вос|полуос)|^(?:пиловик|пыльник)$/iu.test(text.trim())) {
+    types.push("DRIVETRAIN_CV_BOOT");
+  }
+  if (epcGroups.has("41")) {
+    if (/(?:карданн?\w*\s+(?:вал|вала)|вал\w*\s+кардан|propeller\s+shaft|^кардан$)/iu.test(text)) {
+      types.push("DRIVETRAIN_PROPELLER_SHAFT");
+    }
+    if (/(?:демпфер|муфт|диск\s+привод).*(?:кардан|вал)|(?:кардан|вал).*(?:демпфер|муфт)/iu.test(text)) {
+      types.push("DRIVETRAIN_COUPLING_DAMPER");
+    }
+  }
+  if (epcGroups.has("50") && /(?:труб|шланг).*(?:охолодж|охлажд).*(?:трансм|кпп|акпп)|(?:трансм|кпп|акпп).*(?:охолодж|охлажд).*(?:труб|шланг)/iu.test(text)) {
+    types.push("TRANSMISSION_COOLER_LINE");
+  }
+  return types;
+}
+
+function detectFuelTypes(text, epcGroups) {
+  const types = [];
+  const fuelEpc = epcGroups.has("07") || epcGroups.has("47");
+  if (!fuelEpc) return types;
+  const fuelContext = /(?:палив|топлив|fuel)/iu.test(text);
+  if (/(?:ad.?blue|адблю|едблю|scr)/iu.test(text)) {
+    types.push("ADBLUE_SCR_COMPONENT");
+  }
+  if (fuelContext && /(?:форсунк|інжектор|инжектор|injector)/iu.test(text)) {
+    types.push("FUEL_INJECTOR");
+  }
+  if (fuelContext && /(?:насос|pump)/iu.test(text)) types.push("FUEL_PUMP");
+  if (fuelContext && /(?:шланг|труб|трубопров|hose|pipe|line)/iu.test(text)) {
+    types.push("FUEL_LINE_HOSE");
+  }
+  if (fuelContext && /(?:рейк|рамп|розпод[іи]лювач|распределител|rail)/iu.test(text)) {
+    types.push("FUEL_RAIL");
+  }
+  if (fuelContext && /(?:клапан|регулятор|valve|regulator)/iu.test(text)) {
+    types.push("FUEL_PRESSURE_VALVE");
+  }
+  if (fuelContext && /(?:бак|модул|tank|module)/iu.test(text)) {
+    types.push("FUEL_TANK_MODULE");
+  }
+  return types;
+}
+
+function detectCoolingTypes(text, epcGroups) {
+  const types = [];
+  const coolingEpc = epcGroups.has("20") || epcGroups.has("50");
+  if (!coolingEpc) return types;
+  const coolingContext = /(?:охолодж|охлажд|водян|водяной|coolant|cooling|радіатор|радиатор)/iu.test(text);
+  if (/(?:насос|помпа|pump)/iu.test(text) && coolingContext) {
+    types.push("COOLING_WATER_PUMP");
+  }
+  if (/(?:термостат|термоклапан|thermostat)/iu.test(text)) {
+    types.push("COOLING_THERMOSTAT");
+  }
+  const acContext = /(?:кондиц|a\/?c|хладоген|refrigerant)/iu.test(text);
+  if (epcGroups.has("50") && /(?:конденсатор|конденсор|радіатор|радиатор|condenser)/iu.test(text) && acContext) {
+    types.push("AC_CONDENSER");
+  } else if (epcGroups.has("50") && /(?:радіатор|радиатор|kuehler|radiator)/iu.test(text) && coolingContext) {
+    types.push("COOLING_RADIATOR");
+  }
+  if (/(?:шланг|труб|патруб|з.?єднувач|соединител|hose|pipe)/iu.test(text) && coolingContext) {
+    types.push("COOLING_HOSE_PIPE");
+  }
+  if (epcGroups.has("50") && /(?:бачок|бак|expansion\s+tank)/iu.test(text) && /(?:розшир|расшир|компенсац|охолодж|охлажд)/iu.test(text)) {
+    types.push("COOLING_EXPANSION_TANK");
+  }
+  if (epcGroups.has("50") && /(?:клапан|valve)/iu.test(text) && coolingContext) {
+    types.push("COOLING_CONTROL_VALVE");
+  }
+  if (epcGroups.has("50") && /(?:пов[іи]тро?в[іи]д|повітропров|воздуховод|канал\s+пов[іи]тр|air\s+guide|кронштейн|опор|накладк|реш[іе]тк).*(?:радіатор|радиатор)|(?:радіатор|радиатор).*(?:пов[іи]тро?в[іи]д|повітропров|воздуховод|кронштейн|опор|накладк|реш[іе]тк)/iu.test(text)) {
+    types.push("COOLING_RADIATOR_AIR_GUIDE");
+  }
+  if (epcGroups.has("20") && /(?:ролик|натягувач|натяжник|натяжител|tensioner|pulley)/iu.test(text)) {
+    types.push("ENGINE_BELT_DRIVE_COMPONENT");
+  }
+  if (epcGroups.has("50") && acContext && /(?:шланг|труб|маг[іи]страл|line|hose|pipe)/iu.test(text)) {
+    types.push("AC_REFRIGERANT_LINE");
+  }
+  return types;
+}
+
+function detectClimateTypes(text, epcGroups) {
+  const types = [];
+  if (!epcGroups.has("83")) return types;
+  const climateContext = /(?:кондиц|клімат|климат|опален|обігр|вентиляц|салон|хладоген|refrigerant|hvac|heater|a\/?c)/iu.test(text);
+  if (/(?:дефлектор|реш[іе]тк\w*\s+обдув|пов[іи]тро?в[іи]д|повітропров|канал\s+пов[іи]тр|air\s+duct|vent)/iu.test(text)) {
+    types.push("HVAC_AIR_DUCT_VENT");
+  }
+  if (climateContext && /(?:вентилятор|blower)/iu.test(text)) {
+    types.push("HVAC_BLOWER_MOTOR");
+  }
+  if (climateContext && /(?:клапан|valve)/iu.test(text)) {
+    types.push("HVAC_CONTROL_VALVE");
+  }
+  if (climateContext && /(?:шланг|трубопров|патруб|hose|pipe)/iu.test(text)) {
+    types.push("HVAC_HOSE_PIPE");
+  }
+  if (/(?:дренаж|водов[іи]дв|drain)/iu.test(text)) {
+    types.push("HVAC_DRAIN_LINE");
+  }
+  if (climateContext && /(?:датчик\s+температур|temperature\s+sensor)/iu.test(text)) {
+    types.push("HVAC_TEMPERATURE_SENSOR");
+  }
+  if (climateContext && /(?:осушувач|осушител|receiver.?drier|dryer)/iu.test(text)) {
+    types.push("AC_RECEIVER_DRIER");
+  }
+  if (/(?:комплект\s+ф[іи]льтр|filter\s+(?:kit|set))/iu.test(text)
+      && /(?:салон|cabin)/iu.test(text)) {
+    types.push("FILTER_CABIN_KIT");
+  }
+  return types;
+}
+
 export function isKnownCustomerProductTypeCode(value) {
   return knownTypeCodes.has(String(value || "").trim().toUpperCase());
 }
@@ -264,12 +487,20 @@ export function detectCustomerProductTypes(product = {}) {
     if (index >= 0) detected.splice(index, 1);
   }
   const epcGroups = technicalEpcGroups(product);
+  const reviewedPhase2E = hasReviewedPhase2EDisposition(product, epcGroups);
+  detected.push(...reviewedPhase2ETypes(product, epcGroups));
   const filterType = detectFilterType(text, epcGroups);
   if (filterType) detected.unshift(filterType);
 
   detected.push(...detectSteeringTypes(text, epcGroups));
   detected.push(...detectExhaustTypes(text, epcGroups));
   detected.push(...detectWheelTypes(text, epcGroups));
+  if (!reviewedPhase2E) {
+    detected.push(...detectTransmissionTypes(text, epcGroups));
+    detected.push(...detectFuelTypes(text, epcGroups));
+    detected.push(...detectCoolingTypes(text, epcGroups));
+    detected.push(...detectClimateTypes(text, epcGroups));
+  }
 
   const serviceBelt = /(?:рем[іе]нь|пасок|belt)/iu.test(text);
   const tensioner = detected.includes("BELT_TENSIONER");

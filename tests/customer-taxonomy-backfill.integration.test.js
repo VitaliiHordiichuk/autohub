@@ -21,6 +21,7 @@ const ids = {
   safeSteering: null,
   safeExhaust: null,
   safeWheels: null,
+  safePhase2EFuel: null,
   reviewTransmission: null,
   reviewIgnition: null,
   reviewValveSensor: null,
@@ -178,6 +179,7 @@ before(async () => {
   ids.safeSteering = await insertNamedProduct(`A00046${unique}`, "Хомут");
   ids.safeExhaust = await insertNamedProduct(`A00049${unique}`, "Прокладка");
   ids.safeWheels = await insertNamedProduct(`A00040${unique}`, "Подкладка");
+  ids.safePhase2EFuel = await insertNamedProduct("A0000780580", "Прокладка");
   ids.reviewTransmission = await insertNamedProduct("A2214600325", "GETRIEBE");
   ids.reviewIgnition = await insertNamedProduct(
     "A9014600104",
@@ -485,6 +487,10 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
     steering: 1,
     exhaust: 1,
     wheels: 1,
+    "transmission-drivetrain": 0,
+    "fuel-system": 0,
+    cooling: 0,
+    climate: 0,
   });
   assert.equal(dryRun.summary.realReview, 3);
   assert.equal(dryRun.summary.wouldInsertSafeTopLevel, 3);
@@ -577,4 +583,60 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
   assert.equal(verification.verification.orphanRule, 0);
   assert.equal(verification.verification.inactiveTarget, 0);
   assert.deepEqual(await taxonomyEpcFingerprint(), epcBefore);
+});
+
+test("PHASE 2E SAFE_TOPLEVEL uses only the accepted article + EPC review", async () => {
+  const repository = scopedRepository([ids.safePhase2EFuel]);
+  const defaultReport = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(defaultReport.candidateCount, 0);
+
+  const dryRun = await runCustomerTaxonomyBackfill({
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(dryRun.candidateCount, 1);
+  assert.equal(dryRun.safeTopLevelCandidates[0].article, "A0000780580");
+  assert.equal(dryRun.safeTopLevelCandidates[0].categorySlug, "fuel-system");
+  assert.equal(dryRun.safeTopLevelCandidates[0].reviewSource, "PHASE_2E_AUDIT");
+
+  const applied = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(applied.inserted, 1);
+  assert.equal(applied.insertedSafeTopLevel, 1);
+
+  const repeated = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 0,
+    confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(repeated.inserted, 0);
+  assert.equal(repeated.candidateCount, 0);
+
+  const membership = await pool.query(`
+    SELECT category.slug, membership.assignment_source,
+           membership.assignment_origin, membership.confidence,
+           membership.approval_status, membership.rule_code
+    FROM product_customer_categories membership
+    JOIN customer_categories category
+      ON category.id = membership.customer_category_id
+    WHERE membership.product_id = $1
+  `, [ids.safePhase2EFuel]);
+  assert.deepEqual(membership.rows, [{
+    slug: "fuel-system",
+    assignment_source: "EPC_FALLBACK",
+    assignment_origin: "BACKFILL",
+    confidence: "MEDIUM",
+    approval_status: "AUTO_APPROVED",
+    rule_code: null,
+  }]);
 });

@@ -50,7 +50,7 @@ function product(overrides = {}) {
 }
 
 test("TYPE_CODE contract is closed and detector version is fixed", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 4);
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 5);
   assert.equal(isKnownCustomerProductTypeCode("FILTER_OIL"), true);
   assert.equal(isKnownCustomerProductTypeCode("arbitrary words"), false);
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
@@ -170,6 +170,27 @@ test("detector reproduces reviewed filter semantics with mixed-script names and 
     name: "Адсорбер паров топлива",
     technicalEpcGroups: ["47"],
   })), ["FUEL_VAPOR_CANISTER"]);
+  for (const name of [
+    "Фільтр з активним вугіллям",
+    "Фильтр с активированным углем",
+    "Угольный фильтр",
+    "Вугільний фільтр",
+    "Charcoal filter",
+    "Activated carbon filter",
+  ]) {
+    const types = detectCustomerProductTypes(product({
+      article: "A212470065905",
+      name,
+      technicalEpcGroups: ["47"],
+    }));
+    assert.equal(types.includes("FUEL_VAPOR_CANISTER"), true, name);
+    assert.equal(types.includes("FILTER_FUEL"), false, name);
+  }
+  assert.deepEqual(detectCustomerProductTypes(product({
+    article: "A0024776101",
+    name: "Фільтр паливний",
+    technicalEpcGroups: ["47"],
+  })), ["FILTER_FUEL"]);
   assert.deepEqual(detectCustomerProductTypes(product({
     name: "Activated charcoal filter",
     technicalEpcGroups: ["83"],
@@ -243,6 +264,54 @@ test("ignition detector does not confuse license-plate illumination with a spark
     })).includes("IGNITION_SPARK_PLUG"),
     false,
   );
+});
+
+test("PHASE 2E semantic types require reviewed EPC context", () => {
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A0004700400",
+    name: "Насос AdBlue",
+    technicalEpcGroups: ["47"],
+  })).includes("ADBLUE_SCR_COMPONENT"));
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A6540703203",
+    name: "Насос паливний високого тиску",
+    technicalEpcGroups: ["07"],
+  })).includes("FUEL_PUMP"));
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A1772003400",
+    name: "Натягувач ременя",
+    technicalEpcGroups: ["20"],
+  })).includes("ENGINE_BELT_DRIVE_COMPONENT"));
+  assert.equal(detectCustomerProductTypes(product({
+    article: "A1772003400",
+    name: "Натягувач ременя",
+    technicalEpcGroups: ["20"],
+  })).some((code) => code.startsWith("COOLING_")), false);
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A0005000801",
+    name: "Насос системи охолодження",
+    technicalEpcGroups: ["50"],
+  })).includes("COOLING_WATER_PUMP"));
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A2215000754",
+    name: "Конденсатор кондиціонера",
+    technicalEpcGroups: ["50"],
+  })).includes("AC_CONDENSER"));
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A0995005903",
+    name: "Радіатор системи охолодження",
+    technicalEpcGroups: ["50"],
+  })).includes("COOLING_RADIATOR"));
+  assert.ok(detectCustomerProductTypes(product({
+    article: "A1668307401",
+    name: "Комплект фільтрів повітря салону",
+    technicalEpcGroups: ["83"],
+  })).includes("FILTER_CABIN_KIT"));
+  assert.equal(detectCustomerProductTypes(product({
+    article: "A0008309999",
+    name: "Датчик",
+    technicalEpcGroups: ["83"],
+  })).includes("HVAC_TEMPERATURE_SENSOR"), false);
 });
 
 test("HIGH RULE auto-approves only when explicitly allowed", () => {
@@ -390,7 +459,7 @@ test("unknown TYPE_CODE and unsupported detector version are ignored safely", ()
     product: product(),
     rules: [
       rule({ code: "UNKNOWN", matchValue: "FREE FORM REGEX" }),
-      rule({ code: "FUTURE", detectorVersion: 5 }),
+      rule({ code: "FUTURE", detectorVersion: 6 }),
     ],
   });
   assert.equal(resolution.unclassified, true);
