@@ -2,9 +2,11 @@ import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { pool } from "../src/config/db.js";
+import { AdminCustomerTaxonomyRepository } from "../src/repositories/AdminCustomerTaxonomyRepository.js";
 import { CustomerTaxonomyRepository } from "../src/repositories/CustomerTaxonomyRepository.js";
 import {
   CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION,
+  CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
   CustomerTaxonomyBackfillError,
   runCustomerTaxonomyBackfill,
 } from "../src/services/CustomerTaxonomyBackfillService.js";
@@ -16,6 +18,12 @@ const ids = {
   rejected: null,
   historical: null,
   phase2d: null,
+  safeSteering: null,
+  safeExhaust: null,
+  safeWheels: null,
+  reviewTransmission: null,
+  reviewIgnition: null,
+  reviewValveSensor: null,
 };
 let filterCategoryId;
 let manualCategoryId;
@@ -74,13 +82,21 @@ function scopedRepository(productIds) {
           membership.isPrimary
           && ["AUTO_APPROVED", "MANUAL_APPROVED"].includes(membership.approvalStatus)
         )).length,
+        primary: memberships.filter((membership) => membership.isPrimary).length,
         rule: memberships.filter((membership) => membership.assignmentSource === "RULE").length,
+        epcFallback: memberships.filter((membership) => (
+          membership.assignmentSource === "EPC_FALLBACK"
+        )).length,
         backfill: memberships.filter((membership) => (
           membership.assignmentOrigin === "BACKFILL"
         )).length,
         high: memberships.filter((membership) => membership.confidence === "HIGH").length,
+        medium: memberships.filter((membership) => membership.confidence === "MEDIUM").length,
         autoApproved: memberships.filter((membership) => (
           membership.approvalStatus === "AUTO_APPROVED"
+        )).length,
+        review: memberships.filter((membership) => (
+          membership.approvalStatus === "REVIEW"
         )).length,
         duplicatePrimary: [...primaryCounts.values()].filter((count) => count > 1).length,
         orphanRule: memberships.filter((membership) => (
@@ -100,6 +116,15 @@ async function insertProduct(label, offset) {
     VALUES($1, $1, $2, TRUE)
     RETURNING id
   `, [article, `Фільтр оливи ${label}`]);
+  return Number(result.rows[0].id);
+}
+
+async function insertNamedProduct(article, name) {
+  const result = await pool.query(`
+    INSERT INTO products(article, article_normalized, name, is_active)
+    VALUES($1, $1, $2, TRUE)
+    RETURNING id
+  `, [article, name]);
   return Number(result.rows[0].id);
 }
 
@@ -148,6 +173,17 @@ before(async () => {
     FROM categories
     WHERE slug = 'mb-group-40'
   `, [ids.phase2d]);
+
+  const unique = String(Number(suffix)).padStart(8, "0").slice(-6);
+  ids.safeSteering = await insertNamedProduct(`A00046${unique}`, "Хомут");
+  ids.safeExhaust = await insertNamedProduct(`A00049${unique}`, "Прокладка");
+  ids.safeWheels = await insertNamedProduct(`A00040${unique}`, "Подкладка");
+  ids.reviewTransmission = await insertNamedProduct("A2214600325", "GETRIEBE");
+  ids.reviewIgnition = await insertNamedProduct(
+    "A9014600104",
+    "Корпус замка запалювання",
+  );
+  ids.reviewValveSensor = await insertNamedProduct("A0014012713", "Золотникдатчик");
 
   await pool.query(`
     INSERT INTO product_customer_categories(
@@ -387,6 +423,8 @@ test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel
     "filters-maintenance": 0,
     brakes: 0,
     accessories: 0,
+    steering: 0,
+    exhaust: 0,
     wheels: 1,
   });
 
@@ -419,4 +457,124 @@ test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel
     is_primary: true,
     rule_code: "WHEEL_RIM_A_EPC40_V1",
   }]);
+});
+
+test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempotent", async () => {
+  const productIds = [
+    ids.safeSteering,
+    ids.safeExhaust,
+    ids.safeWheels,
+    ids.reviewTransmission,
+    ids.reviewIgnition,
+    ids.reviewValveSensor,
+  ];
+  const repository = scopedRepository(productIds);
+  const epcBefore = await taxonomyEpcFingerprint();
+
+  const defaultReport = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(defaultReport.candidateCount, 0);
+  assert.equal(defaultReport.summary.safeTopLevelEpcFallback, 0);
+
+  const dryRun = await runCustomerTaxonomyBackfill({
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(dryRun.candidateCount, 3);
+  assert.deepEqual(dryRun.summary.safeTopLevelCandidates, {
+    steering: 1,
+    exhaust: 1,
+    wheels: 1,
+  });
+  assert.equal(dryRun.summary.realReview, 3);
+  assert.equal(dryRun.summary.wouldInsertSafeTopLevel, 3);
+  assert.deepEqual(
+    dryRun.realReview.map((item) => item.article).sort(),
+    ["A0014012713", "A2214600325", "A9014600104"],
+  );
+
+  const applied = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 3,
+    confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(applied.inserted, 3);
+  assert.equal(applied.insertedSafeTopLevel, 3);
+  assert.equal(applied.insertedHighRule, 0);
+
+  const rows = await pool.query(`
+    SELECT product.article, category.slug, category.parent_id,
+           membership.assignment_source, membership.assignment_origin,
+           membership.rule_code, membership.rule_version,
+           membership.confidence, membership.approval_status,
+           membership.is_primary
+    FROM product_customer_categories membership
+    JOIN products product ON product.id = membership.product_id
+    JOIN customer_categories category
+      ON category.id = membership.customer_category_id
+    WHERE membership.product_id = ANY($1::integer[])
+    ORDER BY category.slug
+  `, [productIds]);
+  assert.equal(rows.rowCount, 3);
+  assert.deepEqual(rows.rows.map((row) => row.slug), ["exhaust", "steering", "wheels"]);
+  assert.ok(rows.rows.every((row) => (
+    row.parent_id === null
+    && row.assignment_source === "EPC_FALLBACK"
+    && row.assignment_origin === "BACKFILL"
+    && row.rule_code === null
+    && row.rule_version === null
+    && row.confidence === "MEDIUM"
+    && row.approval_status === "AUTO_APPROVED"
+    && row.is_primary === true
+  )));
+  const adminRows = await AdminCustomerTaxonomyRepository.getProductDetails(
+    ids.safeSteering,
+    "uk",
+    pool,
+  );
+  assert.equal(adminRows.length, 1);
+  assert.equal(adminRows[0].technicalEpcGroup, "46");
+  assert.equal(adminRows[0].customerCategory.slug, "steering");
+  assert.equal(adminRows[0].assignmentSource, "EPC_FALLBACK");
+  assert.equal(adminRows[0].assignmentOrigin, "BACKFILL");
+  assert.equal(adminRows[0].ruleCode, null);
+  assert.equal(adminRows[0].confidence, "MEDIUM");
+
+  const repeated = await runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 3,
+    confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(repeated.inserted, 0);
+  assert.equal(repeated.updated, 0);
+  assert.equal(repeated.unchanged, 3);
+
+  const verification = await runCustomerTaxonomyBackfill({
+    mode: "VERIFY",
+    expectedCount: 3,
+    includeSafeTopLevel: true,
+    dbPool: pool,
+    repository,
+  });
+  assert.equal(verification.errors.length, 0);
+  assert.deepEqual(verification.candidateVerification, {
+    memberships: 3,
+    primary: 3,
+    rule: 0,
+    epcFallback: 3,
+    high: 0,
+    medium: 3,
+    autoApproved: 3,
+    review: 0,
+  });
+  assert.equal(verification.verification.duplicatePrimary, 0);
+  assert.equal(verification.verification.orphanRule, 0);
+  assert.equal(verification.verification.inactiveTarget, 0);
+  assert.deepEqual(await taxonomyEpcFingerprint(), epcBefore);
 });

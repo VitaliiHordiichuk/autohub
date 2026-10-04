@@ -25,6 +25,10 @@ const batch2CorrectionMigrationUrl = new URL(
   "../migrations/091_tighten_customer_taxonomy_batch2.sql",
   import.meta.url,
 );
+const safeTopLevelMigrationUrl = new URL(
+  "../migrations/092_allow_safe_top_level_taxonomy_fallback.sql",
+  import.meta.url,
+);
 let rules = [];
 
 before(async () => {
@@ -177,7 +181,8 @@ test("batch 2 migrations are idempotent and cannot write memberships or old EPC 
   const categorySql = await readFile(categoryMigrationUrl, "utf8");
   const batch2Sql = await readFile(batch2MigrationUrl, "utf8");
   const correctionSql = await readFile(batch2CorrectionMigrationUrl, "utf8");
-  for (const sql of [phase2Sql, categorySql, batch2Sql, correctionSql]) {
+  const safeTopLevelSql = await readFile(safeTopLevelMigrationUrl, "utf8");
+  for (const sql of [phase2Sql, categorySql, batch2Sql, correctionSql, safeTopLevelSql]) {
     assert.doesNotMatch(
       sql,
       /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:product_customer_categories|categories|product_categories|products)\b/iu,
@@ -192,6 +197,7 @@ test("batch 2 migrations are idempotent and cannot write memberships or old EPC 
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   await pool.query(correctionSql);
+  await pool.query(safeTopLevelSql);
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,

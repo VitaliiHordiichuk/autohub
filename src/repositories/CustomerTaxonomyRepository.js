@@ -95,6 +95,23 @@ export const CustomerTaxonomyRepository = {
     return result.rows.map(mapRule);
   },
 
+  async listCategoriesBySlugs(slugs, db = pool) {
+    if (!Array.isArray(slugs) || slugs.length === 0) return [];
+    const result = await db.query(`
+      SELECT id, slug, parent_id, status, is_active
+      FROM customer_categories
+      WHERE slug = ANY($1::text[])
+      ORDER BY slug
+    `, [slugs]);
+    return result.rows.map((row) => ({
+      id: Number(row.id),
+      slug: row.slug,
+      parentId: row.parent_id === null ? null : Number(row.parent_id),
+      status: row.status,
+      isActive: Boolean(row.is_active),
+    }));
+  },
+
   async listProductsForPreview(db = pool) {
     const result = await db.query(`
       SELECT
@@ -185,8 +202,14 @@ export const CustomerTaxonomyRepository = {
             AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
         )::integer AS approved_primary,
         COUNT(*) FILTER (
+          WHERE membership.is_primary = TRUE
+        )::integer AS primary_count,
+        COUNT(*) FILTER (
           WHERE membership.assignment_source = 'RULE'
         )::integer AS rule,
+        COUNT(*) FILTER (
+          WHERE membership.assignment_source = 'EPC_FALLBACK'
+        )::integer AS epc_fallback,
         COUNT(*) FILTER (
           WHERE membership.assignment_origin = 'BACKFILL'
         )::integer AS backfill,
@@ -194,8 +217,14 @@ export const CustomerTaxonomyRepository = {
           WHERE membership.confidence = 'HIGH'
         )::integer AS high,
         COUNT(*) FILTER (
+          WHERE membership.confidence = 'MEDIUM'
+        )::integer AS medium,
+        COUNT(*) FILTER (
           WHERE membership.approval_status = 'AUTO_APPROVED'
         )::integer AS auto_approved,
+        COUNT(*) FILTER (
+          WHERE membership.approval_status = 'REVIEW'
+        )::integer AS review,
         COUNT(*) FILTER (
           WHERE membership.rule_code IS NOT NULL AND rule.id IS NULL
         )::integer AS orphan_rule,
@@ -222,10 +251,14 @@ export const CustomerTaxonomyRepository = {
     return {
       memberships: totals.rows[0].memberships,
       approvedPrimary: totals.rows[0].approved_primary,
+      primary: totals.rows[0].primary_count,
       rule: totals.rows[0].rule,
+      epcFallback: totals.rows[0].epc_fallback,
       backfill: totals.rows[0].backfill,
       high: totals.rows[0].high,
+      medium: totals.rows[0].medium,
       autoApproved: totals.rows[0].auto_approved,
+      review: totals.rows[0].review,
       duplicatePrimary: duplicatePrimary.rows[0].count,
       orphanRule: totals.rows[0].orphan_rule,
       inactiveTarget: totals.rows[0].inactive_target,

@@ -204,6 +204,62 @@ test("assignment_source and assignment_origin are independent and invalid source
   `, [ids.product, categoryBySlug.get("accessories")]), "23514");
 });
 
+test("schema explicitly supports reviewed MEDIUM EPC fallback without a fake rule", async () => {
+  const category = await pool.query(`
+    SELECT id
+    FROM customer_categories
+    WHERE slug = 'steering'
+  `);
+  const categoryId = Number(category.rows[0].id);
+  await pool.query(`
+    INSERT INTO product_customer_categories(
+      product_id, customer_category_id, is_primary,
+      assignment_source, assignment_origin, rule_code, rule_version,
+      confidence, approval_status, approved_at
+    ) VALUES($1, $2, FALSE, 'EPC_FALLBACK', 'BACKFILL', NULL, NULL,
+             'MEDIUM', 'AUTO_APPROVED', NOW())
+  `, [ids.product, categoryId]);
+  const result = await pool.query(`
+    SELECT assignment_source, assignment_origin, rule_code, rule_version,
+           confidence, approval_status
+    FROM product_customer_categories
+    WHERE product_id = $1 AND customer_category_id = $2
+  `, [ids.product, categoryId]);
+  assert.deepEqual(result.rows[0], {
+    assignment_source: "EPC_FALLBACK",
+    assignment_origin: "BACKFILL",
+    rule_code: null,
+    rule_version: null,
+    confidence: "MEDIUM",
+    approval_status: "AUTO_APPROVED",
+  });
+
+  const otherCategory = await pool.query(`
+    SELECT id
+    FROM customer_categories
+    WHERE slug = 'exhaust'
+  `);
+  await expectConstraint(pool.query(`
+    INSERT INTO product_customer_categories(
+      product_id, customer_category_id, assignment_source, assignment_origin,
+      confidence, approval_status, approved_at
+    ) VALUES($1, $2, 'RULE', 'BACKFILL', 'MEDIUM', 'AUTO_APPROVED', NOW())
+  `, [ids.product, Number(otherCategory.rows[0].id)]), "23514");
+
+  const wheelsCategory = await pool.query(`
+    SELECT id
+    FROM customer_categories
+    WHERE slug = 'wheels'
+  `);
+  await expectConstraint(pool.query(`
+    INSERT INTO product_customer_categories(
+      product_id, customer_category_id, assignment_source, assignment_origin,
+      confidence, approval_status, approved_at
+    ) VALUES($1, $2, 'EPC_FALLBACK', 'SYSTEM',
+             'MEDIUM', 'AUTO_APPROVED', NOW())
+  `, [ids.product, Number(wheelsCategory.rows[0].id)]), "23514");
+});
+
 test("duplicate membership and second primary path are prohibited", async () => {
   const existing = await pool.query(`
     SELECT customer_category_id

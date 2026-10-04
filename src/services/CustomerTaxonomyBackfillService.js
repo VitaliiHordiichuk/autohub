@@ -1,6 +1,10 @@
 import { pool } from "../config/db.js";
 import { CustomerTaxonomyRepository } from "../repositories/CustomerTaxonomyRepository.js";
 import { CustomerTaxonomyAssignmentService } from "./CustomerTaxonomyAssignmentService.js";
+import {
+  buildCustomerTaxonomyBatch2Coverage,
+  CUSTOMER_TAXONOMY_BATCH2_SECTIONS,
+} from "./CustomerTaxonomyBatchPreviewService.js";
 import { buildCustomerTaxonomyPreview } from "./CustomerTaxonomyPreviewService.js";
 import {
   CUSTOMER_APPROVAL_STATUS,
@@ -10,6 +14,7 @@ import {
 import { CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION } from "./CustomerProductTypeDetector.js";
 
 export const CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION = "AUTO_APPROVED_ONLY";
+export const CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION = "SAFE_TOPLEVEL_EPC_FALLBACK";
 
 export class CustomerTaxonomyBackfillError extends Error {
   constructor(message, report = null) {
@@ -23,6 +28,7 @@ export function parseCustomerTaxonomyBackfillArguments(argumentsList = []) {
   let mode = "DRY_RUN";
   let expectedCount = null;
   let confirmation = null;
+  let includeSafeTopLevel = false;
 
   for (const argument of argumentsList) {
     if (argument === "--apply") {
@@ -33,6 +39,10 @@ export function parseCustomerTaxonomyBackfillArguments(argumentsList = []) {
     if (argument === "--verify") {
       if (mode === "APPLY") throw new Error("--apply and --verify cannot be combined");
       mode = "VERIFY";
+      continue;
+    }
+    if (argument === "--include-safe-top-level") {
+      includeSafeTopLevel = true;
       continue;
     }
     if (argument.startsWith("--confirm=")) {
@@ -51,12 +61,20 @@ export function parseCustomerTaxonomyBackfillArguments(argumentsList = []) {
     throw new Error(`Unknown argument: ${argument}`);
   }
 
-  if (mode === "APPLY" && confirmation !== CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION) {
+  const requiredConfirmation = includeSafeTopLevel
+    ? CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION
+    : CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION;
+  if (mode === "APPLY" && confirmation !== requiredConfirmation) {
     throw new Error(
-      `--apply requires --confirm=${CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION}`,
+      `--apply requires --confirm=${requiredConfirmation}`,
     );
   }
-  return { mode, expectedCount, confirmation };
+  return {
+    mode,
+    expectedCount,
+    confirmation,
+    includeSafeTopLevel,
+  };
 }
 
 function membershipKey(productId, categoryId) {
@@ -72,10 +90,14 @@ function buildBreakdown(candidates) {
     "filters-maintenance": 0,
     brakes: 0,
     accessories: 0,
+    steering: 0,
+    exhaust: 0,
+    wheels: 0,
   };
   const leaves = {};
   for (const candidate of candidates) {
-    sections[candidate.parentSlug] = (sections[candidate.parentSlug] || 0) + 1;
+    const section = candidate.sectionSlug || candidate.parentSlug || candidate.categorySlug;
+    sections[section] = (sections[section] || 0) + 1;
     leaves[candidate.categorySlug] = (leaves[candidate.categorySlug] || 0) + 1;
   }
   return {
@@ -89,12 +111,12 @@ function desiredMembership(candidate) {
     productId: candidate.productId,
     customerCategoryId: candidate.categoryId,
     isPrimary: true,
-    assignmentSource: CUSTOMER_ASSIGNMENT_SOURCE.RULE,
+    assignmentSource: candidate.assignmentSource,
     assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL,
-    ruleCode: candidate.ruleCode,
-    ruleVersion: candidate.ruleVersion,
-    confidence: "HIGH",
-    approvalStatus: CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED,
+    ruleCode: candidate.ruleCode ?? null,
+    ruleVersion: candidate.ruleVersion ?? null,
+    confidence: candidate.confidence,
+    approvalStatus: candidate.approvalStatus,
   };
 }
 
@@ -116,7 +138,7 @@ function equivalentApprovedMembership(membership, desired) {
     && membership.productId === desired.productId
     && membership.customerCategoryId === desired.customerCategoryId
     && membership.isPrimary === true
-    && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+    && membership.assignmentSource === desired.assignmentSource
     && membership.ruleCode === desired.ruleCode
     && membership.confidence === desired.confidence
     && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED;
@@ -134,9 +156,8 @@ function classifyExisting(candidate, memberships) {
   const rejected = target?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REJECTED
     ? target
     : null;
-  const otherApprovedPrimary = memberships.find((membership) => (
+  const approvedPrimary = memberships.find((membership) => (
     membership.isPrimary
-    && membership.customerCategoryId !== candidate.categoryId
     && [
       CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED,
       CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED,
@@ -145,14 +166,14 @@ function classifyExisting(candidate, memberships) {
 
   if (manual) return { action: "MANUAL_PRESERVED", membership: manual };
   if (rejected) return { action: "REJECTED_PRESERVED", membership: rejected };
-  if (otherApprovedPrimary) {
-    return { action: "APPROVED_PRIMARY_PRESERVED", membership: otherApprovedPrimary };
-  }
   if (exactDesiredMembership(target, desired)) {
     return { action: "UNCHANGED", membership: target };
   }
   if (equivalentApprovedMembership(target, desired)) {
     return { action: "APPROVED_PRIMARY_PRESERVED", membership: target };
+  }
+  if (approvedPrimary) {
+    return { action: "APPROVED_PRIMARY_PRESERVED", membership: approvedPrimary };
   }
   if (target?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW) {
     return { action: "REVIEW_BLOCKED", membership: target };
@@ -177,12 +198,110 @@ function proposalFromCandidate(candidate) {
   };
 }
 
-function createBaseReport({ mode, expectedCount, preview, candidates }) {
+function countSections(items) {
+  return Object.fromEntries(CUSTOMER_TAXONOMY_BATCH2_SECTIONS.map((section) => [
+    section,
+    items.filter((item) => item.section === section).length,
+  ]));
+}
+
+function emptyBatch2Coverage() {
+  return {
+    summary: Object.fromEntries(CUSTOMER_TAXONOMY_BATCH2_SECTIONS.map((section) => [
+      section,
+      {
+        technicalTotal: 0,
+        alreadyMember: 0,
+        newHighProposal: 0,
+        safeTopLevelPossible: 0,
+        missingRule: 0,
+        realReview: 0,
+      },
+    ])),
+    safeTopLevel: [],
+    missingRule: [],
+    realReview: [],
+  };
+}
+
+async function buildBackfillCandidates({
+  client,
+  repository,
+  preview,
+  includeSafeTopLevel,
+}) {
+  const highRule = preview.autoApproved
+    .filter((candidate) => candidate.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE)
+    .map((candidate) => ({
+      ...candidate,
+      sectionSlug: candidate.parentSlug || candidate.categorySlug,
+      candidateKind: "HIGH_RULE",
+    }));
+  if (!includeSafeTopLevel) {
+    return {
+      highRule,
+      safeTopLevel: [],
+      all: highRule,
+      coverage: emptyBatch2Coverage(),
+    };
+  }
+
+  const coverage = buildCustomerTaxonomyBatch2Coverage({
+    evaluations: preview.evaluations || [],
+    additions: preview.additions || [],
+  });
+  const categories = await repository.listCategoriesBySlugs(
+    CUSTOMER_TAXONOMY_BATCH2_SECTIONS,
+    client,
+  );
+  const categoryBySlug = new Map(categories.map((category) => [category.slug, category]));
+  const safeTopLevel = coverage.safeTopLevel.map((item) => {
+    const category = categoryBySlug.get(item.section);
+    return {
+      ...item,
+      categoryId: category?.id ?? null,
+      categorySlug: item.section,
+      parentSlug: null,
+      sectionSlug: item.section,
+      categoryStatus: category?.status ?? null,
+      categoryIsActive: category?.isActive ?? false,
+      categoryParentId: category?.parentId ?? null,
+      assignmentSource: CUSTOMER_ASSIGNMENT_SOURCE.EPC_FALLBACK,
+      assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL,
+      ruleCode: null,
+      ruleVersion: null,
+      confidence: "MEDIUM",
+      approvalStatus: CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED,
+      isPrimary: true,
+      candidateKind: "SAFE_TOPLEVEL_EPC_FALLBACK",
+      reason: `${item.reason}; reviewed SAFE_TOPLEVEL EPC fallback`,
+    };
+  });
+  return {
+    highRule,
+    safeTopLevel,
+    all: [...highRule, ...safeTopLevel],
+    coverage,
+  };
+}
+
+function createBaseReport({
+  mode,
+  expectedCount,
+  includeSafeTopLevel,
+  preview,
+  memberships,
+  candidateGroups,
+}) {
+  const { all: candidates, highRule, safeTopLevel, coverage } = candidateGroups;
   return {
     mode,
     expectedCount,
+    includeSafeTopLevel,
     candidateCount: candidates.length,
     inserted: 0,
+    insertedHighRule: 0,
+    insertedSafeTopLevel: 0,
     updated: 0,
     unchanged: 0,
     manualPreserved: preview.summary.manualPreserved,
@@ -192,10 +311,30 @@ function createBaseReport({ mode, expectedCount, preview, candidates }) {
     review: preview.summary.review,
     errors: [],
     breakdown: buildBreakdown(candidates),
+    summary: {
+      existingMemberships: memberships.length,
+      highRule: highRule.length,
+      safeTopLevelEpcFallback: safeTopLevel.length,
+      safeTopLevelCandidates: countSections(safeTopLevel),
+      realReview: coverage.realReview.length,
+      realReviewBySection: countSections(coverage.realReview),
+      wouldInsertSafeTopLevel: 0,
+      futureMemberships: memberships.length,
+    },
+    safeTopLevelCandidates: safeTopLevel,
+    realReview: coverage.realReview,
   };
 }
 
-function preflight({ report, preview, candidates, rules, memberships, expectedCount }) {
+function preflight({
+  report,
+  preview,
+  candidates,
+  rules,
+  memberships,
+  expectedCount,
+  includeSafeTopLevel,
+}) {
   const errors = [];
   if (preview.summary.conflicts > 0) errors.push(`CONFLICTS:${preview.summary.conflicts}`);
   if (preview.summary.review > 0) errors.push(`REVIEW:${preview.summary.review}`);
@@ -226,6 +365,37 @@ function preflight({ report, preview, candidates, rules, memberships, expectedCo
       candidate.productId,
       (candidateCountByProduct.get(candidate.productId) || 0) + 1,
     );
+    const isHighRule = candidate.candidateKind === "HIGH_RULE";
+    const isSafeTopLevel = candidate.candidateKind === "SAFE_TOPLEVEL_EPC_FALLBACK";
+    if (!isHighRule && !isSafeTopLevel) {
+      errors.push(`UNSAFE_PROPOSAL:${candidate.productId}:${candidate.categoryId}`);
+      continue;
+    }
+    if (isSafeTopLevel) {
+      const dedicatedEpc = {
+        steering: "46",
+        exhaust: "49",
+        wheels: "40",
+      }[candidate.sectionSlug];
+      if (
+        includeSafeTopLevel !== true
+        || candidate.approvalStatus !== CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+        || candidate.confidence !== "MEDIUM"
+        || candidate.assignmentSource !== CUSTOMER_ASSIGNMENT_SOURCE.EPC_FALLBACK
+        || candidate.isPrimary !== true
+        || candidate.ruleCode !== null
+        || candidate.ruleVersion !== null
+        || candidate.categorySlug !== candidate.sectionSlug
+        || candidate.categoryParentId !== null
+        || candidate.categoryStatus !== "ACTIVE"
+        || candidate.categoryIsActive !== true
+        || !dedicatedEpc
+        || !(candidate.technicalEpc || []).map(String).includes(dedicatedEpc)
+      ) {
+        errors.push(`UNSAFE_SAFE_TOPLEVEL:${candidate.productId}:${candidate.categorySlug}`);
+      }
+      continue;
+    }
     if (
       candidate.approvalStatus !== CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
       || candidate.confidence !== "HIGH"
@@ -273,6 +443,7 @@ function preflight({ report, preview, candidates, rules, memberships, expectedCo
   let unchanged = 0;
   let wouldInsert = 0;
   let wouldUpdate = 0;
+  let wouldInsertSafeTopLevel = 0;
   for (const candidate of candidates) {
     const classification = classifyExisting(
       candidate,
@@ -287,7 +458,12 @@ function preflight({ report, preview, candidates, rules, memberships, expectedCo
       errors.push(`EXISTING_REVIEW_DECISION:${candidate.productId}:${candidate.categoryId}`);
     }
     if (classification.action === "UNCHANGED") unchanged += 1;
-    if (classification.action === "INSERT") wouldInsert += 1;
+    if (classification.action === "INSERT") {
+      wouldInsert += 1;
+      if (candidate.candidateKind === "SAFE_TOPLEVEL_EPC_FALLBACK") {
+        wouldInsertSafeTopLevel += 1;
+      }
+    }
     if (classification.action === "UPDATE") wouldUpdate += 1;
   }
   report.manualPreserved = manualProducts.size;
@@ -296,6 +472,8 @@ function preflight({ report, preview, candidates, rules, memberships, expectedCo
   report.unchanged = unchanged;
   report.wouldInsert = wouldInsert;
   report.wouldUpdate = wouldUpdate;
+  report.summary.wouldInsertSafeTopLevel = wouldInsertSafeTopLevel;
+  report.summary.futureMemberships = memberships.length + wouldInsert;
   report.errors.push(...new Set(errors));
   return membershipsByProduct;
 }
@@ -305,6 +483,7 @@ function verifyCandidateMemberships(report, candidates, memberships) {
     membershipKey(membership.productId, membership.customerCategoryId),
     membership,
   ]));
+  const verified = [];
   for (const candidate of candidates) {
     const membership = byKey.get(membershipKey(candidate.productId, candidate.categoryId));
     if (!membership) {
@@ -317,14 +496,35 @@ function verifyCandidateMemberships(report, candidates, memberships) {
       && !equivalentApprovedMembership(membership, desired)
     ) {
       report.errors.push(`STALE_BACKFILL_MEMBERSHIP:${candidate.productId}:${candidate.categoryId}`);
+      continue;
     }
+    verified.push(membership);
   }
+  return {
+    memberships: verified.length,
+    primary: verified.filter((item) => item.isPrimary).length,
+    rule: verified.filter((item) => (
+      item.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+    )).length,
+    epcFallback: verified.filter((item) => (
+      item.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.EPC_FALLBACK
+    )).length,
+    high: verified.filter((item) => item.confidence === "HIGH").length,
+    medium: verified.filter((item) => item.confidence === "MEDIUM").length,
+    autoApproved: verified.filter((item) => (
+      item.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+    )).length,
+    review: verified.filter((item) => (
+      item.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW
+    )).length,
+  };
 }
 
 export async function runCustomerTaxonomyBackfill({
   mode = "DRY_RUN",
   expectedCount = null,
   confirmation = null,
+  includeSafeTopLevel = false,
   dbPool = pool,
   repository = CustomerTaxonomyRepository,
   assignmentService = CustomerTaxonomyAssignmentService,
@@ -333,9 +533,12 @@ export async function runCustomerTaxonomyBackfill({
   if (!["DRY_RUN", "APPLY", "VERIFY"].includes(mode)) {
     throw new Error(`Unsupported customer taxonomy backfill mode: ${mode}`);
   }
-  if (mode === "APPLY" && confirmation !== CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION) {
+  const requiredConfirmation = includeSafeTopLevel
+    ? CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION
+    : CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION;
+  if (mode === "APPLY" && confirmation !== requiredConfirmation) {
     throw new Error(
-      `APPLY requires confirmation ${CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION}`,
+      `APPLY requires confirmation ${requiredConfirmation}`,
     );
   }
 
@@ -354,32 +557,44 @@ export async function runCustomerTaxonomyBackfill({
       repository,
       resolver,
       assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL,
+      includeEvaluations: includeSafeTopLevel,
     });
-    const candidates = [...preview.autoApproved].sort((left, right) => (
+    const candidateGroups = await buildBackfillCandidates({
+      client,
+      repository,
+      preview,
+      includeSafeTopLevel,
+    });
+    const candidates = [...candidateGroups.all].sort((left, right) => (
       left.productId - right.productId || left.categoryId - right.categoryId
     ));
     const rules = await repository.listActiveRules(client);
     const memberships = await repository.listMemberships(client);
-    const report = createBaseReport({ mode, expectedCount, preview, candidates });
-    preflight({ report, preview, candidates, rules, memberships, expectedCount });
+    const report = createBaseReport({
+      mode,
+      expectedCount,
+      includeSafeTopLevel,
+      preview,
+      memberships,
+      candidateGroups,
+    });
+    preflight({
+      report,
+      preview,
+      candidates,
+      rules,
+      memberships,
+      expectedCount,
+      includeSafeTopLevel,
+    });
 
     if (mode === "VERIFY") {
       report.verification = await repository.getBackfillVerification(client);
-      verifyCandidateMemberships(report, candidates, memberships);
-      for (const field of [
-        "memberships",
-        "approvedPrimary",
-        "rule",
-        "backfill",
-        "high",
-        "autoApproved",
-      ]) {
-        if (report.verification[field] !== candidates.length) {
-          report.errors.push(
-            `VERIFY_COUNT_MISMATCH:${field}:${candidates.length}:${report.verification[field]}`,
-          );
-        }
-      }
+      report.candidateVerification = verifyCandidateMemberships(
+        report,
+        candidates,
+        memberships,
+      );
       if (report.verification.duplicatePrimary > 0) {
         report.errors.push(`DUPLICATE_PRIMARY:${report.verification.duplicatePrimary}`);
       }
@@ -417,7 +632,6 @@ export async function runCustomerTaxonomyBackfill({
       );
       const classification = classifyExisting(candidate, existing);
       if (classification.action === "MANUAL_PRESERVED") {
-        report.manualPreserved += 1;
         continue;
       }
       if (classification.action === "REJECTED_PRESERVED") {
@@ -451,8 +665,22 @@ export async function runCustomerTaxonomyBackfill({
         );
       }
       if (classification.action === "INSERT") report.inserted += 1;
+      if (
+        classification.action === "INSERT"
+        && candidate.candidateKind === "HIGH_RULE"
+      ) {
+        report.insertedHighRule += 1;
+      }
+      if (
+        classification.action === "INSERT"
+        && candidate.candidateKind === "SAFE_TOPLEVEL_EPC_FALLBACK"
+      ) {
+        report.insertedSafeTopLevel += 1;
+      }
       if (classification.action === "UPDATE") report.updated += 1;
     }
+
+    report.summary.futureMemberships = memberships.length + report.inserted;
 
     await client.query("COMMIT");
     transactionOpen = false;

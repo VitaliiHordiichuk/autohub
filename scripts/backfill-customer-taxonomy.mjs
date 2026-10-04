@@ -10,12 +10,19 @@ function printHelp() {
 
 Usage:
   npm run customer-taxonomy:backfill
+  npm run customer-taxonomy:backfill -- --include-safe-top-level
   npm run customer-taxonomy:backfill -- --verify
   npm run customer-taxonomy:backfill -- --apply \\
-    --confirm=AUTO_APPROVED_ONLY --expected-count=901
+    --confirm=AUTO_APPROVED_ONLY \\
+    --expected-count=NNN
+  npm run customer-taxonomy:backfill -- --include-safe-top-level --apply \\
+    --confirm=SAFE_TOPLEVEL_EPC_FALLBACK \\
+    --expected-count=NNN
 
 The default mode is DRY_RUN. APPLY uses one SERIALIZABLE transaction and
-aborts without writes when any hard precondition fails.`);
+aborts without writes when any hard precondition fails. SAFE_TOPLEVEL is an
+explicit opt-in; without its flag the command remains HIGH RULE only. Replace
+NNN with candidateCount from the immediately preceding current dry run.`);
 }
 
 async function main() {
