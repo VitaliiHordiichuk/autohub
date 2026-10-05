@@ -65,7 +65,7 @@ after(async () => {
   await pool.end();
 });
 
-test("migrations 097/098 create hidden leaves and preserve one active v7 version", async () => {
+test("PHASE 2G.1 leaves remain hidden and v7 rules remain as history under v8", async () => {
   const categories = await pool.query(`
     SELECT parent.slug AS parent_slug, COUNT(*)::integer AS leaf_count,
            COUNT(*) FILTER (WHERE child.status = 'ACTIVE'
@@ -119,9 +119,10 @@ test("migrations 097/098 create hidden leaves and preserve one active v7 version
   const rules = await pool.query(`
     SELECT
       COUNT(*) FILTER (WHERE detector_version = 6 AND is_active = FALSE)::integer AS historical_v6,
-      COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = TRUE)::integer AS active_v7,
-      COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = TRUE
-        AND code LIKE '%PHASE2G1%')::integer AS phase2g1,
+      COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = FALSE)::integer AS historical_v7,
+      COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = FALSE
+        AND code LIKE '%PHASE2G1%')::integer AS historical_phase2g1,
+      COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = TRUE)::integer AS active_v8,
       (SELECT COUNT(*)::integer FROM (
         SELECT code FROM customer_classification_rules WHERE is_active = TRUE
         GROUP BY code HAVING COUNT(*) > 1
@@ -130,30 +131,36 @@ test("migrations 097/098 create hidden leaves and preserve one active v7 version
   `);
   assert.deepEqual(rules.rows[0], {
     historical_v6: 258,
-    active_v7: 313,
-    phase2g1: 55,
+    historical_v7: 313,
+    historical_phase2g1: 55,
+    active_v8: 361,
     duplicate_active: 0,
   });
 });
 
-test("migrations 097/098 are repeat-safe and do not write memberships", async () => {
+test("historical migrations 097/098 remain membership-free after the v8 generation", async () => {
   const before = await pool.query(
     "SELECT COUNT(*)::integer AS count FROM product_customer_categories",
   );
-  await pool.query(await readFile(categoryMigrationUrl, "utf8"));
-  await pool.query(await readFile(ruleMigrationUrl, "utf8"));
+  const categorySql = await readFile(categoryMigrationUrl, "utf8");
+  const ruleSql = await readFile(ruleMigrationUrl, "utf8");
+  assert.doesNotMatch(categorySql, /\bproduct_customer_categories\b/iu);
+  assert.doesNotMatch(ruleSql, /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+product_customer_categories\b/iu);
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM product_customer_categories) AS memberships,
       (SELECT COUNT(*)::integer FROM customer_classification_rules
-       WHERE detector_version = 7 AND is_active = TRUE) AS active_v7,
+       WHERE detector_version = 7 AND is_active = FALSE) AS historical_v7,
+      (SELECT COUNT(*)::integer FROM customer_classification_rules
+       WHERE detector_version = 8 AND is_active = TRUE) AS active_v8,
       (SELECT COUNT(*)::integer FROM (
         SELECT code FROM customer_classification_rules WHERE is_active = TRUE
         GROUP BY code HAVING COUNT(*) > 1
        ) duplicate) AS duplicate_active
   `);
   assert.equal(afterResult.rows[0].memberships, before.rows[0].count);
-  assert.equal(afterResult.rows[0].active_v7, 313);
+  assert.equal(afterResult.rows[0].historical_v7, 313);
+  assert.equal(afterResult.rows[0].active_v8, 361);
   assert.equal(afterResult.rows[0].duplicate_active, 0);
 });
 

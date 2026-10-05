@@ -24,8 +24,8 @@ function assertExactType(typeCode) {
   assert.deepEqual(detectCustomerProductTypes(reviewed(typeCode)), [typeCode]);
 }
 
-test("detector v7 exposes reviewed Body/Glass and Interior/Safety semantic types", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 7);
+test("detector v8 preserves reviewed Body/Glass and Interior/Safety semantic types", () => {
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 8);
   for (const typeCode of [
     "BODY_BUMPER",
     "INTERIOR_TRIM_PANEL",
@@ -76,7 +76,7 @@ test("unreviewed mirror motors, steering locks and airbag modules are not passiv
   }
 });
 
-test("existing Accessories and Climate reviewed semantics remain available in detector v7", () => {
+test("existing Accessories and Climate reviewed semantics remain available in detector v8", () => {
   assert.ok(detectCustomerProductTypes({
     article: "B9996800001",
     name: "Комплект ковриков салона",

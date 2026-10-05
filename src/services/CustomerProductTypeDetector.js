@@ -1,8 +1,9 @@
 import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
 import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
 import { CUSTOMER_TAXONOMY_PHASE2G1_REVIEW } from "../data/CustomerTaxonomyPhase2G1Review.js";
+import { CUSTOMER_TAXONOMY_PHASE2G2_REVIEW } from "../data/CustomerTaxonomyPhase2G2Review.js";
 
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 7;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 8;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -149,6 +150,25 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "INTERIOR_PEDAL",
   "INTERIOR_SEAT_MECHANISM",
   "SAFETY_RESTRAINT_COMPONENT",
+  "ELECTRICAL_CONTROL_UNIT",
+  "ELECTRICAL_WIRING_HARNESS",
+  "LIGHTING_HEADLIGHT",
+  "ELECTRICAL_CONNECTOR",
+  "ELECTRICAL_SENSOR",
+  "ELECTRICAL_FUSE_BOX",
+  "ELECTRICAL_SWITCH",
+  "ELECTRICAL_BATTERY",
+  "ELECTRICAL_CAMERA",
+  "ELECTRICAL_PARKING_SENSOR",
+  "ELECTRICAL_RELAY",
+  "ELECTRICAL_ALTERNATOR",
+  "ELECTRICAL_ANTENNA",
+  "ELECTRICAL_FUSE",
+  "LIGHTING_FOG_LIGHT",
+  "ELECTRICAL_DRIVER_ASSISTANCE",
+  "ELECTRICAL_STARTER",
+  "ELECTRICAL_INFOTAINMENT",
+  "LIGHTING_BULB",
 ]);
 
 const knownTypeCodes = new Set(CUSTOMER_PRODUCT_TYPE_CODES);
@@ -165,6 +185,9 @@ const phase2fReviewByArticleAndEpc = new Map(
 );
 const phase2g1ReviewByArticleAndEpc = new Map(
   CUSTOMER_TAXONOMY_PHASE2G1_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
+);
+const phase2g2ReviewByArticleAndEpc = new Map(
+  CUSTOMER_TAXONOMY_PHASE2G2_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
 );
 const phase2fExactFilterEpc = new Map([
   ["FILTER_AIR_ENGINE", new Set(["18", "32"])],
@@ -256,6 +279,15 @@ function reviewedPhase2G1Disposition(product, epcGroups) {
   const article = normalizedArticle(product);
   for (const epc of epcGroups) {
     const row = phase2g1ReviewByArticleAndEpc.get(`${article}:${epc}`);
+    if (row) return row;
+  }
+  return null;
+}
+
+function reviewedPhase2G2Disposition(product, epcGroups) {
+  const article = normalizedArticle(product);
+  for (const epc of epcGroups) {
+    const row = phase2g2ReviewByArticleAndEpc.get(`${article}:${epc}`);
     if (row) return row;
   }
   return null;
@@ -567,6 +599,13 @@ export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
   const epcGroups = technicalEpcGroups(product);
+  const phase2g2Disposition = reviewedPhase2G2Disposition(product, epcGroups);
+  if (phase2g2Disposition?.finalBucket === "HIGH") {
+    return phase2g2Disposition.typeCode ? [phase2g2Disposition.typeCode] : [];
+  }
+  if (["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(phase2g2Disposition?.finalBucket)) {
+    return [];
+  }
   const phase2g1Disposition = reviewedPhase2G1Disposition(product, epcGroups);
   if (phase2g1Disposition?.finalBucket === "HIGH") {
     return phase2g1Disposition.typeCode ? [phase2g1Disposition.typeCode] : [];
