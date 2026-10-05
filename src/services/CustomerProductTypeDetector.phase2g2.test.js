@@ -52,8 +52,8 @@ function reviewedType(typeCode) {
   return row;
 }
 
-test("detector v8 exposes only the 19 reviewed Electrical semantic types", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 8);
+test("detector v9 preserves the 19 reviewed Electrical semantic types", () => {
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 9);
   for (const typeCode of phase2G2TypeCodes) {
     assert.deepEqual(
       detectCustomerProductTypes(productFor(reviewedType(typeCode))),

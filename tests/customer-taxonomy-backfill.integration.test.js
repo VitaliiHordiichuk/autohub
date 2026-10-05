@@ -459,6 +459,7 @@ test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel
     engine: 0,
     suspension: 0,
     "electrical-electronics-lighting": 0,
+    "fasteners-seals-standard-parts": 0,
   });
 
   const applied = await runCustomerTaxonomyBackfill({
@@ -527,6 +528,7 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
     "body-glass": 0,
     "interior-safety": 0,
     "electrical-electronics-lighting": 0,
+    "fasteners-seals-standard-parts": 0,
   });
   assert.equal(dryRun.summary.realReview, 3);
   assert.equal(dryRun.summary.wouldInsertSafeTopLevel, 3);

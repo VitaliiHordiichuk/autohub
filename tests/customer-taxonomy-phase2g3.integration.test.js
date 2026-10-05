@@ -11,11 +11,11 @@ import {
 } from "../src/services/CustomerTaxonomyBackfillService.js";
 
 const categoryMigrationUrl = new URL(
-  "../migrations/099_add_customer_taxonomy_phase2g2_electrical_categories.sql",
+  "../migrations/101_add_customer_taxonomy_phase2g3_fasteners_categories.sql",
   import.meta.url,
 );
 const ruleMigrationUrl = new URL(
-  "../migrations/100_seed_customer_taxonomy_phase2g2_electrical_rules.sql",
+  "../migrations/102_seed_customer_taxonomy_phase2g3_fasteners_rules.sql",
   import.meta.url,
 );
 const touchedProductIds = new Set();
@@ -60,7 +60,7 @@ after(async () => {
   await pool.end();
 });
 
-test("migrations 099/100 Electrical leaves and v8 rules remain historical under v9", async () => {
+test("migrations 101/102 create 12 hidden Fasteners leaves and version rules to v9", async () => {
   const categories = await pool.query(`
     SELECT COUNT(DISTINCT child.id)::integer AS leaves,
            COUNT(DISTINCT child.id) FILTER (WHERE child.status = 'ACTIVE'
@@ -72,27 +72,27 @@ test("migrations 099/100 Electrical leaves and v8 rules remain historical under 
     LEFT JOIN customer_category_translations translation
       ON translation.category_id = child.id
      AND translation.language_code IN ('uk','ru','en')
-    WHERE parent.slug = 'electrical-electronics-lighting'
+    WHERE parent.slug = 'fasteners-seals-standard-parts'
   `);
   assert.deepEqual(categories.rows[0], {
-    leaves: 19,
-    hidden_active: 19,
-    translations: 57,
+    leaves: 12,
+    hidden_active: 12,
+    translations: 36,
   });
 
   const rules = await pool.query(`
     SELECT
-      COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = FALSE)::integer
-        AS historical_v7,
-      COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = FALSE
+      COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = FALSE)::integer
+        AS historical_v8,
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE
         AND EXISTS (
           SELECT 1 FROM customer_classification_rules historical
           WHERE historical.code = customer_classification_rules.code
-            AND historical.detector_version = 7
+            AND historical.detector_version = 8
             AND historical.version + 1 = customer_classification_rules.version
-        ))::integer AS v8_successors,
-      COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = FALSE
-        AND version = 1 AND code LIKE '%PHASE2G2_V1')::integer AS phase2g2,
+        ))::integer AS v9_successors,
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE
+        AND version = 1 AND code LIKE '%PHASE2G3_V1')::integer AS phase2g3,
       COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE)::integer AS active_v9,
       COUNT(*)::integer AS total,
       (SELECT COUNT(*)::integer FROM (
@@ -102,9 +102,9 @@ test("migrations 099/100 Electrical leaves and v8 rules remain historical under 
     FROM customer_classification_rules
   `);
   assert.deepEqual(rules.rows[0], {
-    historical_v7: 313,
-    v8_successors: 313,
-    phase2g2: 48,
+    historical_v8: 361,
+    v9_successors: 361,
+    phase2g3: 12,
     active_v9: 373,
     total: 1906,
     duplicate_active: 0,
@@ -116,9 +116,9 @@ test("migrations 099/100 Electrical leaves and v8 rules remain historical under 
     JOIN customer_classification_rules successor
       ON successor.code = historical.code
      AND successor.version = historical.version + 1
-     AND successor.detector_version = 8
-     AND successor.is_active = FALSE
-    WHERE historical.detector_version = 7
+     AND successor.detector_version = 9
+     AND successor.is_active = TRUE
+    WHERE historical.detector_version = 8
       AND (successor.source_kind IS DISTINCT FROM historical.source_kind
         OR successor.assignment_role IS DISTINCT FROM historical.assignment_role
         OR successor.number_family IS DISTINCT FROM historical.number_family
@@ -134,7 +134,7 @@ test("migrations 099/100 Electrical leaves and v8 rules remain historical under 
   assert.equal(successorDrift.rowCount, 0);
 });
 
-test("historical migrations 099/100 remain membership-free and preserve EPC taxonomy", async () => {
+test("migrations 101/102 are repeat-safe and never write memberships or EPC taxonomy", async () => {
   const categorySql = await readFile(categoryMigrationUrl, "utf8");
   const ruleSql = await readFile(ruleMigrationUrl, "utf8");
   for (const sql of [categorySql, ruleSql]) {
@@ -143,23 +143,38 @@ test("historical migrations 099/100 remain membership-free and preserve EPC taxo
       /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:product_customer_categories|categories|product_categories|products)\b/iu,
     );
   }
-  assert.doesNotMatch(categorySql, /\bproduct_customer_categories\b/iu);
-  assert.doesNotMatch(ruleSql, /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+product_customer_categories\b/iu);
+  const before = await pool.query(`
+    SELECT
+      (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
+      (SELECT COUNT(*)::integer FROM product_customer_categories) AS memberships,
+      (SELECT COUNT(*)::integer FROM categories) AS epc_categories,
+      (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
+  `);
+  await pool.query(categorySql);
+  await pool.query(ruleSql);
+  const afterResult = await pool.query(`
+    SELECT
+      (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
+      (SELECT COUNT(*)::integer FROM product_customer_categories) AS memberships,
+      (SELECT COUNT(*)::integer FROM categories) AS epc_categories,
+      (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
+  `);
+  assert.deepEqual(afterResult.rows[0], before.rows[0]);
 });
 
-test("an inactive v7 rule remains valid provenance for its historical membership", async () => {
+test("an inactive v8 rule remains valid provenance for its historical membership", async () => {
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
-    VALUES($1, $1, 'Historical detector v7 membership', TRUE)
+    VALUES($1, $1, 'Historical detector v8 membership', TRUE)
     RETURNING id
-  `, [`HISTORYV8${process.pid}${Date.now()}`]);
+  `, [`HISTORYV9${process.pid}${Date.now()}`]);
   const id = Number(fixture.rows[0].id);
   createdProductIds.push(id);
   touchedProductIds.add(id);
   const historical = await pool.query(`
     SELECT code, version, target_category_id
     FROM customer_classification_rules
-    WHERE detector_version = 7 AND is_active = FALSE
+    WHERE detector_version = 8 AND is_active = FALSE
     ORDER BY id LIMIT 1
   `);
   await pool.query(`
@@ -175,6 +190,7 @@ test("an inactive v7 rule remains valid provenance for its historical membership
     SELECT rule_code, rule_version, updated_at
     FROM product_customer_categories WHERE product_id = $1
   `, [id]);
+  await pool.query(await readFile(ruleMigrationUrl, "utf8"));
   const afterResult = await pool.query(`
     SELECT membership.rule_code, membership.rule_version, membership.updated_at,
            rule.detector_version, rule.is_active
@@ -187,24 +203,40 @@ test("an inactive v7 rule remains valid provenance for its historical membership
   assert.equal(afterResult.rows[0].rule_code, before.rows[0].rule_code);
   assert.equal(afterResult.rows[0].rule_version, before.rows[0].rule_version);
   assert.deepEqual(afterResult.rows[0].updated_at, before.rows[0].updated_at);
-  assert.equal(afterResult.rows[0].detector_version, 7);
+  assert.equal(afterResult.rows[0].detector_version, 8);
   assert.equal(afterResult.rows[0].is_active, false);
   const verification = await CustomerTaxonomyRepository.getBackfillVerification(pool);
   assert.equal(verification.orphanRule, 0);
 });
 
-test("controlled PHASE 2G.2 HIGH and SAFE backfills apply once and remain idempotent", async () => {
-  const highId = await productId("A0001512013");
-  const safeId = await productId("A0005402605");
+test("PHASE 2G.3 REAL_REVIEW overrides an older SAFE fallback", async () => {
+  const reviewId = await productId("A0004901241");
+  await pool.query(
+    "DELETE FROM product_customer_categories WHERE product_id = $1",
+    [reviewId],
+  );
+  const report = await runCustomerTaxonomyBackfill({
+    includeSafeTopLevel: true,
+    repository: scopedRepository([reviewId]),
+  });
+  assert.equal(report.candidateCount, 0);
+  assert.equal(report.safeTopLevelCandidates.length, 0);
+  assert.equal(report.realReview.some((item) => item.article === "A0004901241"), true);
+});
+
+test("controlled PHASE 2G.3 HIGH and SAFE backfills apply once and remain idempotent", async () => {
+  const highId = await productId("A0003330771");
+  const safeId = await productId("A0009811178");
+  const supplementaryId = await productId("A2033200056");
   await pool.query(
     "DELETE FROM product_customer_categories WHERE product_id = ANY($1::integer[])",
-    [[highId, safeId]],
+    [[highId, safeId, supplementaryId]],
   );
 
   const highRepository = scopedRepository([highId]);
   const highDry = await runCustomerTaxonomyBackfill({ repository: highRepository });
   assert.equal(highDry.candidateCount, 1);
-  assert.equal(highDry.breakdown.leaves["electrical-starters"], 1);
+  assert.equal(highDry.breakdown.leaves["fasteners-bolts"], 1);
   const highApply = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
     expectedCount: 1,
@@ -221,32 +253,37 @@ test("controlled PHASE 2G.2 HIGH and SAFE backfills apply once and remain idempo
   assert.equal(highRepeat.inserted, 0);
   assert.equal(highRepeat.unchanged, 1);
 
-  const safeRepository = scopedRepository([safeId]);
+  const safeRepository = scopedRepository([safeId, supplementaryId]);
   const safeDry = await runCustomerTaxonomyBackfill({
     includeSafeTopLevel: true,
     repository: safeRepository,
   });
-  assert.equal(safeDry.candidateCount, 1);
-  assert.equal(safeDry.safeTopLevelCandidates[0].categorySlug,
-    "electrical-electronics-lighting");
-  assert.equal(safeDry.safeTopLevelCandidates[0].reviewSource, "PHASE_2G2_AUDIT");
+  assert.equal(safeDry.candidateCount, 2);
+  assert.deepEqual(safeDry.safeTopLevelCandidates.map((item) => item.article).sort(), [
+    "A0009811178",
+    "A2033200056",
+  ]);
+  assert.ok(safeDry.safeTopLevelCandidates.every((item) => (
+    item.categorySlug === "fasteners-seals-standard-parts"
+    && item.reviewSource === "PHASE_2G3_AUDIT"
+  )));
   const safeApply = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
     includeSafeTopLevel: true,
-    expectedCount: 1,
+    expectedCount: 2,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     repository: safeRepository,
   });
-  assert.equal(safeApply.insertedSafeTopLevel, 1);
+  assert.equal(safeApply.insertedSafeTopLevel, 2);
   const safeRepeat = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
     includeSafeTopLevel: true,
-    expectedCount: 1,
+    expectedCount: 2,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     repository: safeRepository,
   });
   assert.equal(safeRepeat.inserted, 0);
-  assert.equal(safeRepeat.unchanged, 1);
+  assert.equal(safeRepeat.unchanged, 2);
 
   const memberships = await pool.query(`
     SELECT product_id, assignment_source, assignment_origin, confidence,
@@ -254,18 +291,20 @@ test("controlled PHASE 2G.2 HIGH and SAFE backfills apply once and remain idempo
     FROM product_customer_categories
     WHERE product_id = ANY($1::integer[])
     ORDER BY product_id
-  `, [[highId, safeId]]);
-  assert.equal(memberships.rowCount, 2);
+  `, [[highId, safeId, supplementaryId]]);
+  assert.equal(memberships.rowCount, 3);
   const high = memberships.rows.find((row) => Number(row.product_id) === highId);
-  const safe = memberships.rows.find((row) => Number(row.product_id) === safeId);
+  const safe = memberships.rows.filter((row) => Number(row.product_id) !== highId);
   assert.equal(high.assignment_source, "RULE");
   assert.equal(high.assignment_origin, "BACKFILL");
   assert.equal(high.confidence, "HIGH");
   assert.ok(high.rule_code);
-  assert.equal(safe.assignment_source, "EPC_FALLBACK");
-  assert.equal(safe.assignment_origin, "BACKFILL");
-  assert.equal(safe.confidence, "MEDIUM");
-  assert.equal(safe.rule_code, null);
+  assert.ok(safe.every((row) => (
+    row.assignment_source === "EPC_FALLBACK"
+    && row.assignment_origin === "BACKFILL"
+    && row.confidence === "MEDIUM"
+    && row.rule_code === null
+  )));
 
   const verification = await CustomerTaxonomyRepository.getBackfillVerification(pool);
   assert.equal(verification.duplicatePrimary, 0);

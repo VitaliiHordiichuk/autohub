@@ -27,6 +27,11 @@ import {
   isReviewedPhase2G2SafeTopLevel,
 } from "./CustomerTaxonomyPhase2G2PreviewService.js";
 import {
+  buildCustomerTaxonomyPhase2G3Coverage,
+  CUSTOMER_TAXONOMY_PHASE2G3_SECTIONS,
+  isReviewedPhase2G3SafeTopLevel,
+} from "./CustomerTaxonomyPhase2G3PreviewService.js";
+import {
   CUSTOMER_APPROVAL_STATUS,
   CUSTOMER_ASSIGNMENT_ORIGIN,
   CUSTOMER_ASSIGNMENT_SOURCE,
@@ -116,6 +121,7 @@ function buildBreakdown(candidates) {
     engine: 0,
     suspension: 0,
     "electrical-electronics-lighting": 0,
+    "fasteners-seals-standard-parts": 0,
   };
   const leaves = {};
   for (const candidate of candidates) {
@@ -228,6 +234,7 @@ function countSections(items) {
     ...CUSTOMER_TAXONOMY_PHASE2F_SECTIONS,
     ...CUSTOMER_TAXONOMY_PHASE2G1_SECTIONS,
     ...CUSTOMER_TAXONOMY_PHASE2G2_SECTIONS,
+    ...CUSTOMER_TAXONOMY_PHASE2G3_SECTIONS,
   ])];
   return Object.fromEntries(sections.map((section) => [
     section,
@@ -255,6 +262,7 @@ function emptyBatch2Coverage() {
     phase2f: null,
     phase2g1: null,
     phase2g2: null,
+    phase2g3: null,
   };
 }
 
@@ -308,16 +316,40 @@ async function buildBackfillCandidates({
     item.finalBucket === "SAFE_TOPLEVEL"
     && item.actualCategorySlug === (item.targetSection || item.section)
   ));
+  const phase2g3Coverage = buildCustomerTaxonomyPhase2G3Coverage({
+    evaluations: preview.evaluations || [],
+    additions: preview.additions || [],
+  });
+  const phase2g3AppliedSafeTopLevel = phase2g3Coverage.alreadyMember.filter((item) => (
+    item.finalBucket === "SAFE_TOPLEVEL"
+    && item.actualCategorySlug === (item.targetSection || item.section)
+  ));
+  const phase2g3AppliedSupplementarySafeTopLevel = phase2g3Coverage.supplementaryBacklog
+    .filter((item) => (
+      item.finalBucket === "SAFE_TOPLEVEL"
+      && item.status === "ALREADY_MEMBER"
+      && item.actualCategorySlug === (item.targetSection || item.section)
+    ));
+  const phase2g3RealReviewProductIds = new Set(
+    phase2g3Coverage.realReview.map((item) => item.productId).filter(Number.isInteger),
+  );
+  const earlierSafeTopLevel = [
+    ...batch2Coverage.safeTopLevel,
+    ...phase2eCoverage.safeTopLevel,
+    ...phase2fCoverage.safeTopLevel,
+    ...phase2g1Coverage.safeTopLevel,
+    ...phase2g1AppliedSafeTopLevel,
+    ...phase2g2Coverage.safeTopLevel,
+    ...phase2g2AppliedSafeTopLevel,
+  ].filter((item) => !phase2g3RealReviewProductIds.has(item.productId));
   const coverage = {
     summary: batch2Coverage.summary,
     safeTopLevel: [
-      ...batch2Coverage.safeTopLevel,
-      ...phase2eCoverage.safeTopLevel,
-      ...phase2fCoverage.safeTopLevel,
-      ...phase2g1Coverage.safeTopLevel,
-      ...phase2g1AppliedSafeTopLevel,
-      ...phase2g2Coverage.safeTopLevel,
-      ...phase2g2AppliedSafeTopLevel,
+      ...earlierSafeTopLevel,
+      ...phase2g3Coverage.safeTopLevel,
+      ...phase2g3Coverage.supplementarySafeTopLevel,
+      ...phase2g3AppliedSafeTopLevel,
+      ...phase2g3AppliedSupplementarySafeTopLevel,
     ],
     missingRule: [
       ...batch2Coverage.missingRule,
@@ -325,6 +357,7 @@ async function buildBackfillCandidates({
       ...phase2fCoverage.missingRuleRemaining,
       ...phase2g1Coverage.missingRuleRemaining,
       ...phase2g2Coverage.missingRuleRemaining,
+      ...phase2g3Coverage.missingRuleRemaining,
     ],
     realReview: [
       ...batch2Coverage.realReview,
@@ -332,11 +365,13 @@ async function buildBackfillCandidates({
       ...phase2fCoverage.realReview,
       ...phase2g1Coverage.realReview,
       ...phase2g2Coverage.realReview,
+      ...phase2g3Coverage.realReview,
     ],
     phase2e: phase2eCoverage,
     phase2f: phase2fCoverage,
     phase2g1: phase2g1Coverage,
     phase2g2: phase2g2Coverage,
+    phase2g3: phase2g3Coverage,
   };
   const safeSections = [...new Set(coverage.safeTopLevel.map((item) => (
     item.targetSection || item.section
@@ -489,6 +524,11 @@ function preflight({
           article: candidate.article,
           technicalEpcGroups: candidate.technicalEpc,
         }, candidate.sectionSlug);
+      const reviewedPhase2G3 = candidate.reviewSource === "PHASE_2G3_AUDIT"
+        && isReviewedPhase2G3SafeTopLevel({
+          article: candidate.article,
+          technicalEpcGroups: candidate.technicalEpc,
+        }, candidate.sectionSlug);
       if (
         includeSafeTopLevel !== true
         || candidate.approvalStatus !== CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
@@ -502,7 +542,7 @@ function preflight({
         || candidate.categoryStatus !== "ACTIVE"
         || candidate.categoryIsActive !== true
         || (!reviewedPhase2E && !reviewedPhase2F && !reviewedPhase2G1
-          && !reviewedPhase2G2 && (
+          && !reviewedPhase2G2 && !reviewedPhase2G3 && (
           !dedicatedEpc
           || !(candidate.technicalEpc || []).map(String).includes(dedicatedEpc)
         ))

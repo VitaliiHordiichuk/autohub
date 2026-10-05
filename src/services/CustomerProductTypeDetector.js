@@ -2,8 +2,9 @@ import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2
 import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
 import { CUSTOMER_TAXONOMY_PHASE2G1_REVIEW } from "../data/CustomerTaxonomyPhase2G1Review.js";
 import { CUSTOMER_TAXONOMY_PHASE2G2_REVIEW } from "../data/CustomerTaxonomyPhase2G2Review.js";
+import { CUSTOMER_TAXONOMY_PHASE2G3_REVIEW } from "../data/CustomerTaxonomyPhase2G3Review.js";
 
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 8;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 9;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -169,6 +170,17 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "ELECTRICAL_STARTER",
   "ELECTRICAL_INFOTAINMENT",
   "LIGHTING_BULB",
+  "FASTENER_SCREW",
+  "FASTENER_NUT",
+  "FASTENER_CLAMP",
+  "FASTENER_CLIP_RIVET",
+  "STANDARD_PLUG_CAP",
+  "FASTENER_WASHER",
+  "STANDARD_GROMMET",
+  "STANDARD_SEALING_RING",
+  "FASTENER_PIN_CIRCLIP",
+  "FASTENER_STUD",
+  "STANDARD_SEAL_GASKET",
 ]);
 
 const knownTypeCodes = new Set(CUSTOMER_PRODUCT_TYPE_CODES);
@@ -189,6 +201,9 @@ const phase2g1ReviewByArticleAndEpc = new Map(
 const phase2g2ReviewByArticleAndEpc = new Map(
   CUSTOMER_TAXONOMY_PHASE2G2_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
 );
+const phase2g3ReviewByArticleAndEpc = new Map(
+  CUSTOMER_TAXONOMY_PHASE2G3_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
+);
 const phase2fExactFilterEpc = new Map([
   ["FILTER_AIR_ENGINE", new Set(["18", "32"])],
   ["FILTER_CABIN", new Set(["32"])],
@@ -208,7 +223,6 @@ const detectors = Object.freeze([
   ["BRAKE_MASTER_CYLINDER", /(?:(?:головн|главн|master).*(?:гальм|тормоз|brake).*(?:циліндр|цилиндр|cylinder)|master\s+brake\s+cylinder)/iu],
   ["AC_CONDENSER", /(?:(?:конденсатор|condenser).*(?:кондиц|a\/?c)|(?:кондиц|a\/?c).*(?:конденсатор|condenser))/iu],
   ["THERMOSTAT", /(?:термостат|thermostat)/iu],
-  ["FASTENER_BOLT", /(?:^|\s)(?:болт|bolt)(?:\s|$)/iu],
   ["ACCESSORY_FLOOR_MAT", /(?:килим(?:ок|ки)?|коврик(?:и)?|floor\s+mat)/iu],
   ["ACCESSORY_LUGGAGE", /(?:багаж|luggage|roof\s+carrier)/iu],
   ["ACCESSORY_INTERIOR", /(?:інтер.?єр|интерьер|салон.*аксес|interior)/iu],
@@ -288,6 +302,16 @@ function reviewedPhase2G2Disposition(product, epcGroups) {
   const article = normalizedArticle(product);
   for (const epc of epcGroups) {
     const row = phase2g2ReviewByArticleAndEpc.get(`${article}:${epc}`);
+    if (row) return row;
+  }
+  return null;
+}
+
+function reviewedPhase2G3Disposition(product, epcGroups) {
+  const article = normalizedArticle(product);
+  const groups = epcGroups.size ? epcGroups : new Set([""]);
+  for (const epc of groups) {
+    const row = phase2g3ReviewByArticleAndEpc.get(`${article}:${epc}`);
     if (row) return row;
   }
   return null;
@@ -599,6 +623,13 @@ export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
   const epcGroups = technicalEpcGroups(product);
+  const phase2g3Disposition = reviewedPhase2G3Disposition(product, epcGroups);
+  if (phase2g3Disposition?.finalBucket === "HIGH") {
+    return phase2g3Disposition.typeCode ? [phase2g3Disposition.typeCode] : [];
+  }
+  if (["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(phase2g3Disposition?.finalBucket)) {
+    return [];
+  }
   const phase2g2Disposition = reviewedPhase2G2Disposition(product, epcGroups);
   if (phase2g2Disposition?.finalBucket === "HIGH") {
     return phase2g2Disposition.typeCode ? [phase2g2Disposition.typeCode] : [];

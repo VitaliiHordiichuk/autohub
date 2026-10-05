@@ -16,7 +16,8 @@
     "customer-taxonomy:preview:phase2f": "node scripts/preview-customer-taxonomy-phase2f.mjs",
     "customer-taxonomy:preview:phase2g1": "node scripts/preview-customer-taxonomy-phase2g1.mjs",
     "customer-taxonomy:preview:phase2g2": "node scripts/preview-customer-taxonomy-phase2g2.mjs",
-    "customer-taxonomy:backfill": "node scripts/backfill-customer-taxonomy.mjs"
+    "customer-taxonomy:backfill": "node scripts/backfill-customer-taxonomy.mjs",
+    "customer-taxonomy:preview:phase2g3": "node scripts/preview-customer-taxonomy-phase2g3.mjs"
   },
   "keywords": [],
   "author": "",

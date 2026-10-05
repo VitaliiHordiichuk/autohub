@@ -65,7 +65,7 @@ after(async () => {
   await pool.end();
 });
 
-test("PHASE 2G.1 leaves remain hidden and v7 rules remain as history under v8", async () => {
+test("PHASE 2G.1 leaves remain hidden and v7 rules remain historical under v9", async () => {
   const categories = await pool.query(`
     SELECT parent.slug AS parent_slug, COUNT(*)::integer AS leaf_count,
            COUNT(*) FILTER (WHERE child.status = 'ACTIVE'
@@ -122,7 +122,8 @@ test("PHASE 2G.1 leaves remain hidden and v7 rules remain as history under v8", 
       COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = FALSE)::integer AS historical_v7,
       COUNT(*) FILTER (WHERE detector_version = 7 AND is_active = FALSE
         AND code LIKE '%PHASE2G1%')::integer AS historical_phase2g1,
-      COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = TRUE)::integer AS active_v8,
+      COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = FALSE)::integer AS historical_v8,
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE)::integer AS active_v9,
       (SELECT COUNT(*)::integer FROM (
         SELECT code FROM customer_classification_rules WHERE is_active = TRUE
         GROUP BY code HAVING COUNT(*) > 1
@@ -133,12 +134,13 @@ test("PHASE 2G.1 leaves remain hidden and v7 rules remain as history under v8", 
     historical_v6: 258,
     historical_v7: 313,
     historical_phase2g1: 55,
-    active_v8: 361,
+    historical_v8: 361,
+    active_v9: 373,
     duplicate_active: 0,
   });
 });
 
-test("historical migrations 097/098 remain membership-free after the v8 generation", async () => {
+test("historical migrations 097/098 remain membership-free after the v9 generation", async () => {
   const before = await pool.query(
     "SELECT COUNT(*)::integer AS count FROM product_customer_categories",
   );
@@ -152,7 +154,9 @@ test("historical migrations 097/098 remain membership-free after the v8 generati
       (SELECT COUNT(*)::integer FROM customer_classification_rules
        WHERE detector_version = 7 AND is_active = FALSE) AS historical_v7,
       (SELECT COUNT(*)::integer FROM customer_classification_rules
-       WHERE detector_version = 8 AND is_active = TRUE) AS active_v8,
+       WHERE detector_version = 8 AND is_active = FALSE) AS historical_v8,
+      (SELECT COUNT(*)::integer FROM customer_classification_rules
+       WHERE detector_version = 9 AND is_active = TRUE) AS active_v9,
       (SELECT COUNT(*)::integer FROM (
         SELECT code FROM customer_classification_rules WHERE is_active = TRUE
         GROUP BY code HAVING COUNT(*) > 1
@@ -160,7 +164,8 @@ test("historical migrations 097/098 remain membership-free after the v8 generati
   `);
   assert.equal(afterResult.rows[0].memberships, before.rows[0].count);
   assert.equal(afterResult.rows[0].historical_v7, 313);
-  assert.equal(afterResult.rows[0].active_v8, 361);
+  assert.equal(afterResult.rows[0].historical_v8, 361);
+  assert.equal(afterResult.rows[0].active_v9, 373);
   assert.equal(afterResult.rows[0].duplicate_active, 0);
 });
 
