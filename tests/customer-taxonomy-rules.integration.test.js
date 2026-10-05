@@ -45,6 +45,14 @@ const phase2fRuleMigrationUrl = new URL(
   "../migrations/096_seed_customer_taxonomy_phase2f_rules.sql",
   import.meta.url,
 );
+const phase2g1CategoryMigrationUrl = new URL(
+  "../migrations/097_add_customer_taxonomy_phase2g1_categories.sql",
+  import.meta.url,
+);
+const phase2g1RuleMigrationUrl = new URL(
+  "../migrations/098_seed_customer_taxonomy_phase2g1_rules.sql",
+  import.meta.url,
+);
 let rules = [];
 
 before(async () => {
@@ -93,6 +101,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
   `);
   assert.deepEqual(grouped.rows, [
     { section: "accessories", count: 103 },
+    { section: "body-glass", count: 42 },
     { section: "brakes", count: 9 },
     { section: "climate", count: 9 },
     { section: "cooling", count: 10 },
@@ -100,6 +109,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     { section: "exhaust", count: 12 },
     { section: "filters-maintenance", count: 14 },
     { section: "fuel-system", count: 9 },
+    { section: "interior-safety", count: 13 },
     { section: "steering", count: 10 },
     { section: "suspension", count: 26 },
     { section: "transmission-drivetrain", count: 16 },
@@ -110,7 +120,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     SELECT id
     FROM customer_classification_rules
     WHERE is_active = TRUE
-      AND (detector_version <> 6
+      AND (detector_version <> 7
        OR source_kind <> 'RULE'
        OR assignment_role <> 'PRIMARY'
        OR confidence <> 'HIGH'
@@ -137,14 +147,23 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
         WHERE detector_version = 5 AND is_active = FALSE
       )::integer AS historical_d5,
       COUNT(*) FILTER (
-        WHERE detector_version = 6 AND is_active = TRUE
-          AND version > 1
-      )::integer AS active_v6_successors,
+        WHERE detector_version = 6 AND is_active = FALSE
+      )::integer AS historical_d6,
       COUNT(*) FILTER (
-        WHERE detector_version = 6 AND is_active = TRUE
+        WHERE detector_version = 7 AND is_active = TRUE
+          AND EXISTS (
+            SELECT 1
+            FROM customer_classification_rules historical
+            WHERE historical.code = customer_classification_rules.code
+              AND historical.detector_version = 6
+              AND historical.version + 1 = customer_classification_rules.version
+          )
+      )::integer AS active_v7_successors,
+      COUNT(*) FILTER (
+        WHERE detector_version = 7 AND is_active = TRUE
           AND version = 1
-          AND code LIKE '%PHASE2F_V1'
-      )::integer AS new_phase2f_v1_d6,
+          AND code LIKE '%PHASE2G1_V1'
+      )::integer AS new_phase2g1_v1_d7,
       COUNT(*) FILTER (WHERE is_active = TRUE)::integer AS active_total,
       COUNT(*)::integer AS total
     FROM customer_classification_rules
@@ -155,10 +174,11 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     historical_v1_d3: 25,
     historical_d4: 146,
     historical_d5: 192,
-    active_v6_successors: 192,
-    new_phase2f_v1_d6: 66,
-    active_total: 258,
-    total: 859,
+    historical_d6: 258,
+    active_v7_successors: 258,
+    new_phase2g1_v1_d7: 55,
+    active_total: 313,
+    total: 1172,
   });
 
   const versionDrift = await pool.query(`
@@ -167,9 +187,9 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     JOIN customer_classification_rules active
       ON active.code = historical.code
      AND active.version = historical.version + 1
-     AND active.detector_version = 6
+     AND active.detector_version = 7
      AND active.is_active = TRUE
-    WHERE historical.detector_version = 5
+    WHERE historical.detector_version = 6
       AND (
         active.source_kind IS DISTINCT FROM historical.source_kind
         OR active.assignment_role IS DISTINCT FROM historical.assignment_role
@@ -210,6 +230,8 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
   const phase2eRuleSql = await readFile(phase2eRuleMigrationUrl, "utf8");
   const phase2fCategorySql = await readFile(phase2fCategoryMigrationUrl, "utf8");
   const phase2fRuleSql = await readFile(phase2fRuleMigrationUrl, "utf8");
+  const phase2g1CategorySql = await readFile(phase2g1CategoryMigrationUrl, "utf8");
+  const phase2g1RuleSql = await readFile(phase2g1RuleMigrationUrl, "utf8");
   for (const sql of [
     phase2Sql,
     categorySql,
@@ -219,6 +241,8 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
     phase2eRuleSql,
     phase2fCategorySql,
     phase2fRuleSql,
+    phase2g1CategorySql,
+    phase2g1RuleSql,
   ]) {
     assert.doesNotMatch(
       sql,
@@ -234,9 +258,9 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   // Historical migrations are never replayed after a later detector generation.
-  // Only the current PHASE 2F migrations must be idempotent at this point.
-  await pool.query(phase2fCategorySql);
-  await pool.query(phase2fRuleSql);
+  // Only the current PHASE 2G.1 migrations must be idempotent at this point.
+  await pool.query(phase2g1CategorySql);
+  await pool.query(phase2g1RuleSql);
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
@@ -245,12 +269,12 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   assert.deepEqual(afterResult.rows[0], beforeResult.rows[0]);
-  assert.equal(afterResult.rows[0].rules, 859);
+  assert.equal(afterResult.rows[0].rules, 1172);
   assert.equal(afterResult.rows[0].memberships, 0);
 });
 
-test("inactive historical v1 membership remains valid and PHASE 2F migration replay does not rewrite it", async () => {
-  const phase2fRuleSql = await readFile(phase2fRuleMigrationUrl, "utf8");
+test("inactive historical v1 membership remains valid and PHASE 2G.1 migration replay does not rewrite it", async () => {
+  const phase2g1RuleSql = await readFile(phase2g1RuleMigrationUrl, "utf8");
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Historical taxonomy membership', TRUE)
@@ -292,7 +316,7 @@ test("inactive historical v1 membership remains valid and PHASE 2F migration rep
       ruleActive: false,
     });
 
-    await pool.query(phase2fRuleSql);
+    await pool.query(phase2g1RuleSql);
 
     const afterResult = await pool.query(`
       SELECT membership.rule_code, membership.rule_version,
@@ -350,20 +374,20 @@ test("reviewed filter EPC and TYPE_CODE combinations resolve to READY leaves", (
   }, "filters-wipers");
 });
 
-test("resolver uses detector-v6 successors while PHASE 2F rules start at v1", () => {
+test("resolver uses current detector-v7 successors", () => {
   const historicalSuccessor = expectAutoApproved({
     article: "A0001800109",
     name: "Масляний фільтр",
     epc: "18",
   }, "filters-oil");
-  assert.equal(historicalSuccessor.ruleVersion, 5);
+  assert.equal(historicalSuccessor.ruleVersion, 6);
 
   const newPhase2dRule = expectAutoApproved({
     article: "A0004600000",
     name: "Рейка рульова",
     epc: "46",
   }, "steering-racks");
-  assert.equal(newPhase2dRule.ruleVersion, 4);
+  assert.equal(newPhase2dRule.ruleVersion, 5);
 });
 
 test("unsafe filter contexts, belt tensioners and wiper mechanisms are not auto-approved", () => {
@@ -641,7 +665,7 @@ test("rubber muffler hangers resolve as mounts and never as complete mufflers", 
     name: "Глушитель",
     epc: "49",
   }, "exhaust-mufflers");
-  assert.equal(muffler.ruleVersion, 4);
+  assert.equal(muffler.ruleVersion, 5);
 });
 
 test("generic sensors, pipes and muffler components do not become complete exhaust parts", () => {
@@ -816,7 +840,7 @@ test("split EPC groups never auto-approve generic names", () => {
   }
 });
 
-test("detector v6 preserves every detector-v5 classification target without writes", async () => {
+test("detector v7 preserves every detector-v6 classification target without writes", async () => {
   const products = await CustomerTaxonomyRepository.listProductsForPreview(pool);
   const historicalResult = await pool.query(`
     SELECT
@@ -829,11 +853,11 @@ test("detector v6 preserves every detector-v5 classification target without writ
     FROM customer_classification_rules rule
     JOIN customer_categories category ON category.id = rule.target_category_id
     LEFT JOIN customer_categories parent ON parent.id = category.parent_id
-    WHERE rule.detector_version = 5
+    WHERE rule.detector_version = 6
   `);
   const historicalRulesUnderCurrentDetector = historicalResult.rows.map((rule) => ({
     ...rule,
-    detector_version: 6,
+    detector_version: 7,
     is_active: true,
   }));
   const baseline = new Map();

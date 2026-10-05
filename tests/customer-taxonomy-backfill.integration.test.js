@@ -523,6 +523,8 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
     climate: 0,
     engine: 0,
     suspension: 0,
+    "body-glass": 0,
+    "interior-safety": 0,
   });
   assert.equal(dryRun.summary.realReview, 3);
   assert.equal(dryRun.summary.wouldInsertSafeTopLevel, 3);

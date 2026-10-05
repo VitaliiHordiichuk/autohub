@@ -76,6 +76,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
   `);
   assert.deepEqual(leaves.rows, [
     { parent_slug: "accessories", count: 7 },
+    { parent_slug: "body-glass", count: 18 },
     { parent_slug: "brakes", count: 6 },
     { parent_slug: "climate", count: 7 },
     { parent_slug: "cooling", count: 7 },
@@ -83,6 +84,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
     { parent_slug: "exhaust", count: 8 },
     { parent_slug: "filters-maintenance", count: 8 },
     { parent_slug: "fuel-system", count: 7 },
+    { parent_slug: "interior-safety", count: 6 },
     { parent_slug: "steering", count: 8 },
     { parent_slug: "suspension", count: 15 },
     { parent_slug: "transmission-drivetrain", count: 11 },
@@ -106,7 +108,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
       (SELECT COUNT(*)::integer FROM product_customer_categories) AS membership_count
   `);
   assert.deepEqual(seededFoundation.rows[0], {
-    rule_count: 859,
+    rule_count: 1172,
     membership_count: 0,
   });
 });

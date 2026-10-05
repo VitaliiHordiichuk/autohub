@@ -14,6 +14,7 @@
     "customer-taxonomy:preview:batch2": "node scripts/preview-customer-taxonomy-batch2.mjs",
     "customer-taxonomy:preview:phase2e": "node scripts/preview-customer-taxonomy-phase2e.mjs",
     "customer-taxonomy:preview:phase2f": "node scripts/preview-customer-taxonomy-phase2f.mjs",
+    "customer-taxonomy:preview:phase2g1": "node scripts/preview-customer-taxonomy-phase2g1.mjs",
     "customer-taxonomy:backfill": "node scripts/backfill-customer-taxonomy.mjs"
   },
   "keywords": [],

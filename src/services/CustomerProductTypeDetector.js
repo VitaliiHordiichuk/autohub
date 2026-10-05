@@ -1,7 +1,8 @@
 import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
 import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2G1_REVIEW } from "../data/CustomerTaxonomyPhase2G1Review.js";
 
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 6;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 7;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -124,6 +125,30 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "SUSPENSION_HYDRAULIC_COMPONENT",
   "SUSPENSION_LEVEL_CONTROL",
   "SUSPENSION_SUBFRAME_MOUNT",
+  "BODY_BUMPER",
+  "BODY_EXTERIOR_TRIM",
+  "BODY_GRILLE",
+  "BODY_LOCK_LATCH",
+  "BODY_DOOR_HANDLE",
+  "BODY_FENDER",
+  "BODY_HOOD",
+  "BODY_BUMPER_MOUNT",
+  "BODY_MIRROR_PART",
+  "GLASS_SIDE_WINDOW",
+  "BODY_EMBLEM",
+  "BODY_TAILGATE_TRUNK_LID",
+  "BODY_WHEEL_ARCH_LINER",
+  "BODY_EXTERIOR_MIRROR",
+  "BODY_DOOR_HINGE",
+  "BODY_ROOF_PART",
+  "BODY_EXTERIOR_PANEL",
+  "BODY_UNDERBODY_SHIELD",
+  "INTERIOR_SEAT",
+  "SAFETY_AIRBAG",
+  "INTERIOR_TRIM_PANEL",
+  "INTERIOR_PEDAL",
+  "INTERIOR_SEAT_MECHANISM",
+  "SAFETY_RESTRAINT_COMPONENT",
 ]);
 
 const knownTypeCodes = new Set(CUSTOMER_PRODUCT_TYPE_CODES);
@@ -137,6 +162,9 @@ const phase2eReviewedArticleAndEpc = new Set(
 );
 const phase2fReviewByArticleAndEpc = new Map(
   CUSTOMER_TAXONOMY_PHASE2F_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
+);
+const phase2g1ReviewByArticleAndEpc = new Map(
+  CUSTOMER_TAXONOMY_PHASE2G1_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
 );
 const phase2fExactFilterEpc = new Map([
   ["FILTER_AIR_ENGINE", new Set(["18", "32"])],
@@ -219,6 +247,15 @@ function reviewedPhase2FDisposition(product, epcGroups) {
   const article = normalizedArticle(product);
   for (const epc of epcGroups) {
     const row = phase2fReviewByArticleAndEpc.get(`${article}:${epc}`);
+    if (row) return row;
+  }
+  return null;
+}
+
+function reviewedPhase2G1Disposition(product, epcGroups) {
+  const article = normalizedArticle(product);
+  for (const epc of epcGroups) {
+    const row = phase2g1ReviewByArticleAndEpc.get(`${article}:${epc}`);
     if (row) return row;
   }
   return null;
@@ -530,6 +567,13 @@ export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
   const epcGroups = technicalEpcGroups(product);
+  const phase2g1Disposition = reviewedPhase2G1Disposition(product, epcGroups);
+  if (phase2g1Disposition?.finalBucket === "HIGH") {
+    return phase2g1Disposition.typeCode ? [phase2g1Disposition.typeCode] : [];
+  }
+  if (["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(phase2g1Disposition?.finalBucket)) {
+    return [];
+  }
   const phase2fDisposition = reviewedPhase2FDisposition(product, epcGroups);
   if (phase2fDisposition?.finalBucket === "HIGH") {
     return phase2fDisposition.typeCode ? [phase2fDisposition.typeCode] : [];
