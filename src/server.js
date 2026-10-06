@@ -11,6 +11,7 @@ import {
 import { startTelegramBot } from "./services/TelegramBotService.js";
 import { startProductImageProcessingScheduler } from "./services/ProductImageProcessingScheduler.js";
 import { startDataRetentionScheduler } from "./services/DataRetentionScheduler.js";
+import { isCustomerTaxonomyImportEnabled } from "./config/featureFlags.js";
 
 
 const PORT =
@@ -20,6 +21,9 @@ const PORT =
 app.listen(PORT, () => {
   console.log(
     `🚀 MAKA server started on port ${PORT}`
+  );
+  console.log(
+    `Customer taxonomy import: ${isCustomerTaxonomyImportEnabled() ? "enabled" : "disabled"}`
   );
 
   startEmailImportScheduler();

@@ -32,6 +32,7 @@ import {
 } from "./ArticleNumberService.js";
 import { WarehousePricingService } from "./WarehousePricingService.js";
 import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
+import { isCustomerTaxonomyImportEnabled } from "../config/featureFlags.js";
 import {
   databaseNumberOrNull,
   OFFER_NUMBER_MAX_EXCLUSIVE,
@@ -391,6 +392,8 @@ export const ImportService = {
         taxonomyErrors: 0,
       };
 
+      const taxonomyImportEnabled =
+        isCustomerTaxonomyImportEnabled();
       let taxonomyContext = null;
 
       const importedOfferIds =
@@ -849,17 +852,19 @@ export const ImportService = {
             );
           }
 
-          result.taxonomyProcessed += 1;
-          try {
-            taxonomyContext ||= await CustomerTaxonomyImportService.createContext({ db });
-            const taxonomy = await CustomerTaxonomyImportService.classifyProduct({
-              productId: Number(product.id),
-              context: taxonomyContext,
-            }, { db });
-            recordTaxonomyDecision(result, taxonomy);
-          } catch (error) {
-            result.taxonomyErrors += 1;
-            throw error;
+          if (taxonomyImportEnabled) {
+            result.taxonomyProcessed += 1;
+            try {
+              taxonomyContext ||= await CustomerTaxonomyImportService.createContext({ db });
+              const taxonomy = await CustomerTaxonomyImportService.classifyProduct({
+                productId: Number(product.id),
+                context: taxonomyContext,
+              }, { db });
+              recordTaxonomyDecision(result, taxonomy);
+            } catch (error) {
+              result.taxonomyErrors += 1;
+              throw error;
+            }
           }
 
           const priceWasChanged =

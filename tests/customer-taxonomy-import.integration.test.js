@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 
 import { pool } from "../src/config/db.js";
+import { CustomerTaxonomyImportService } from "../src/services/CustomerTaxonomyImportService.js";
 import { ImportReviewService } from "../src/services/ImportReviewService.js";
 import { ImportService } from "../src/services/ImportService.js";
 import { SupplierService } from "../src/services/SupplierService.js";
@@ -179,6 +180,24 @@ async function saveProfile({ warehouseId, brandId, newProductsMode }) {
 }
 
 test("supplier and reviewed imports classify taxonomy while preserving approved history", async () => {
+  const previousTaxonomyFlag =
+    process.env.CUSTOMER_TAXONOMY_IMPORT_ENABLED;
+  const originalCreateContext =
+    CustomerTaxonomyImportService.createContext;
+  const originalClassifyProduct =
+    CustomerTaxonomyImportService.classifyProduct;
+  let createContextCalls = 0;
+  let classifyProductCalls = 0;
+
+  CustomerTaxonomyImportService.createContext = async (...args) => {
+    createContextCalls += 1;
+    return originalCreateContext(...args);
+  };
+  CustomerTaxonomyImportService.classifyProduct = async (...args) => {
+    classifyProductCalls += 1;
+    return originalClassifyProduct(...args);
+  };
+
   const token = `${process.pid}${Date.now()}`;
   const model = String(100 + (Number(token.slice(-3)) % 800)).padStart(3, "0");
   const highArticle = `A${model}1800001`;
@@ -186,12 +205,20 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
   const unclassifiedArticle = `A${model}9900003`;
   const reviewArticle = `A${model}1800004`;
   const unsupportedArticle = `PHASE3E${token}`;
+  const offArticle = `A${model}1800005`;
+  const offReviewArticle = `A${model}1800006`;
+  const offApproveAllArticleA = `A${model}1800007`;
+  const offApproveAllArticleB = `A${model}1800008`;
   const dynamicArticles = [
     highArticle,
     safeArticle,
     unclassifiedArticle,
     reviewArticle,
     unsupportedArticle,
+    offArticle,
+    offReviewArticle,
+    offApproveAllArticleA,
+    offApproveAllArticleB,
   ];
 
   let supplierId = null;
@@ -240,6 +267,88 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
     settingsId = Number(autoProfile.profile.supplierImportSettingsId);
     warehouseSupplierImportId = Number(autoProfile.profile.id);
 
+    delete process.env.CUSTOMER_TAXONOMY_IMPORT_ENABLED;
+    const disabled = await ImportService.importRows({
+      warehouseId,
+      warehouseSupplierImportId,
+      fileName: "phase3e-disabled.csv",
+      fileType: "CSV",
+      importMethod: "MANUAL",
+    }, [
+      { article: offArticle, name: "Фільтр масляний", price: 90, quantity: 2 },
+    ]);
+    assert.equal(disabled.errors, 0);
+    assert.equal(disabled.successRows, 1);
+    assert.equal(disabled.taxonomyProcessed, 0);
+    assert.equal(disabled.taxonomyAssignedHigh, 0);
+    assert.equal(disabled.taxonomyAssignedSafe, 0);
+    assert.equal(disabled.taxonomyErrors, 0);
+    assert.equal(createContextCalls, 0);
+    assert.equal(classifyProductCalls, 0);
+    assert.equal((await membershipForArticle(offArticle)).length, 0);
+
+    process.env.CUSTOMER_TAXONOMY_IMPORT_ENABLED = "false";
+    const disabledRepeat = await ImportService.importRows({
+      warehouseId,
+      warehouseSupplierImportId,
+      fileName: "phase3e-disabled-repeat.csv",
+      fileType: "CSV",
+      importMethod: "MANUAL",
+    }, [
+      { article: offArticle, name: "Фільтр масляний", price: 91, quantity: 4 },
+    ]);
+    assert.equal(disabledRepeat.errors, 0);
+    assert.equal(disabledRepeat.successRows, 1);
+    assert.equal(disabledRepeat.taxonomyProcessed, 0);
+    assert.equal(createContextCalls, 0);
+    assert.equal(classifyProductCalls, 0);
+    assert.equal((await membershipForArticle(offArticle)).length, 0);
+
+    await saveProfile({ warehouseId, brandId, newProductsMode: "REVIEW" });
+    await ImportService.importRows({
+      warehouseId,
+      warehouseSupplierImportId,
+      fileName: "phase3e-disabled-review.csv",
+      fileType: "CSV",
+      importMethod: "MANUAL",
+    }, [
+      { article: offReviewArticle, name: "Фільтр масляний", price: 92, quantity: 1 },
+    ]);
+    let pending = await ImportReviewService.getPending({ warehouseId });
+    const disabledPending = pending.items.find((item) => (
+      item.articleNormalized === offReviewArticle
+    ));
+    assert.ok(disabledPending);
+    const disabledApproved = await ImportReviewService.approve(disabledPending.id);
+    assert.equal(disabledApproved.status, "APPROVED");
+    assert.equal(Object.hasOwn(disabledApproved, "taxonomy"), false);
+    assert.equal(createContextCalls, 0);
+    assert.equal(classifyProductCalls, 0);
+    assert.equal((await membershipForArticle(offReviewArticle)).length, 0);
+
+    await ImportService.importRows({
+      warehouseId,
+      warehouseSupplierImportId,
+      fileName: "phase3e-disabled-approve-all.csv",
+      fileType: "CSV",
+      importMethod: "MANUAL",
+    }, [
+      { article: offApproveAllArticleA, name: "Фільтр масляний", price: 93, quantity: 1 },
+      { article: offApproveAllArticleB, name: "Фільтр масляний", price: 94, quantity: 1 },
+    ]);
+    const disabledApprovedAll = await ImportReviewService.approveAll(warehouseId);
+    assert.equal(disabledApprovedAll.approvedCount, 2);
+    assert.equal(disabledApprovedAll.items.every((item) => (
+      !Object.hasOwn(item, "taxonomy")
+    )), true);
+    assert.equal(createContextCalls, 0);
+    assert.equal(classifyProductCalls, 0);
+    assert.equal((await membershipForArticle(offApproveAllArticleA)).length, 0);
+    assert.equal((await membershipForArticle(offApproveAllArticleB)).length, 0);
+
+    await saveProfile({ warehouseId, brandId, newProductsMode: "AUTO" });
+    process.env.CUSTOMER_TAXONOMY_IMPORT_ENABLED = "true";
+
     const first = await ImportService.importRows({
       warehouseId,
       warehouseSupplierImportId,
@@ -268,6 +377,8 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
     assert.equal(first.taxonomyUnclassified, 1);
     assert.equal(first.taxonomyUnsupported, 1);
     assert.equal(first.taxonomyErrors, 0);
+    assert.ok(createContextCalls > 0);
+    assert.ok(classifyProductCalls > 0);
 
     const highMembership = await membershipForArticle(highArticle);
     assert.equal(highMembership.length, 1);
@@ -390,7 +501,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
     assert.equal(reviewImport.pendingNewProducts, 1);
     assert.equal(reviewImport.taxonomyProcessed, 0);
 
-    const pending = await ImportReviewService.getPending({ warehouseId });
+    pending = await ImportReviewService.getPending({ warehouseId });
     const pendingReview = pending.items.find((item) => (
       item.articleNormalized === reviewArticle
     ));
@@ -409,6 +520,13 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
       seededHistory,
     );
   } finally {
+    CustomerTaxonomyImportService.createContext = originalCreateContext;
+    CustomerTaxonomyImportService.classifyProduct = originalClassifyProduct;
+    if (previousTaxonomyFlag === undefined) {
+      delete process.env.CUSTOMER_TAXONOMY_IMPORT_ENABLED;
+    } else {
+      process.env.CUSTOMER_TAXONOMY_IMPORT_ENABLED = previousTaxonomyFlag;
+    }
     const cleanup = await pool.connect();
     try {
       await cleanup.query("BEGIN");

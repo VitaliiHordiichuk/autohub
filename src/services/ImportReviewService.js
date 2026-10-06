@@ -6,6 +6,7 @@ from "../repositories/ProductRepository.js";
 import { ImportNewProductRepository }
 from "../repositories/ImportNewProductRepository.js";
 import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
+import { isCustomerTaxonomyImportEnabled } from "../config/featureFlags.js";
 
 function positiveInteger(
   value,
@@ -233,10 +234,12 @@ async function approveLockedRow(
     );
   }
 
-  const taxonomy = await CustomerTaxonomyImportService.classifyProduct({
-    productId: Number(product.id),
-    context: taxonomyContext,
-  }, { db });
+  const taxonomy = taxonomyContext
+    ? await CustomerTaxonomyImportService.classifyProduct({
+        productId: Number(product.id),
+        context: taxonomyContext,
+      }, { db })
+    : null;
 
   const resolved =
     await ImportNewProductRepository
@@ -272,7 +275,10 @@ async function approveLockedRow(
       );
   }
 
-  return { resolved, taxonomy };
+  return {
+    resolved,
+    ...(taxonomy ? { taxonomy } : {}),
+  };
 }
 
 export const ImportReviewService = {
@@ -359,7 +365,9 @@ export const ImportReviewService = {
         return mapReview(row);
       }
 
-      const taxonomyContext = await CustomerTaxonomyImportService.createContext({ db });
+      const taxonomyContext = isCustomerTaxonomyImportEnabled()
+        ? await CustomerTaxonomyImportService.createContext({ db })
+        : null;
       const { resolved, taxonomy } =
         await approveLockedRow(
           row,
@@ -371,7 +379,7 @@ export const ImportReviewService = {
 
       return {
         ...mapReview(resolved),
-        taxonomy,
+        ...(taxonomy ? { taxonomy } : {}),
       };
     } catch (error) {
       await db.query("ROLLBACK");
@@ -400,7 +408,7 @@ export const ImportReviewService = {
           );
 
       const approved = [];
-      const taxonomyContext = rows.length
+      const taxonomyContext = rows.length && isCustomerTaxonomyImportEnabled()
         ? await CustomerTaxonomyImportService.createContext({ db })
         : null;
 
@@ -422,7 +430,7 @@ export const ImportReviewService = {
         items:
           approved.map(({ resolved, taxonomy }) => ({
             ...mapReview(resolved),
-            taxonomy,
+            ...(taxonomy ? { taxonomy } : {}),
           })),
       };
     } catch (error) {
