@@ -204,6 +204,11 @@ const phase2g2ReviewByArticleAndEpc = new Map(
 const phase2g3ReviewByArticleAndEpc = new Map(
   CUSTOMER_TAXONOMY_PHASE2G3_REVIEW.map((row) => [`${row.article}:${row.epc}`, row]),
 );
+const phase2g3FastenerTypeCodes = new Set(
+  CUSTOMER_TAXONOMY_PHASE2G3_REVIEW
+    .filter((row) => row.finalBucket === "HIGH" && row.typeCode)
+    .map((row) => row.typeCode),
+);
 const phase2fExactFilterEpc = new Map([
   ["FILTER_AIR_ENGINE", new Set(["18", "32"])],
   ["FILTER_CABIN", new Set(["32"])],
@@ -315,6 +320,10 @@ function reviewedPhase2G3Disposition(product, epcGroups) {
     if (row) return row;
   }
   return null;
+}
+
+export function reviewedPhase2G3DispositionForProduct(product = {}) {
+  return reviewedPhase2G3Disposition(product, technicalEpcGroups(product));
 }
 
 function detectFilterType(text, epcGroups) {
@@ -627,9 +636,8 @@ export function detectCustomerProductTypes(product = {}) {
   if (phase2g3Disposition?.finalBucket === "HIGH") {
     return phase2g3Disposition.typeCode ? [phase2g3Disposition.typeCode] : [];
   }
-  if (["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(phase2g3Disposition?.finalBucket)) {
-    return [];
-  }
+  const blocksPhase2G3FastenerTypes = ["SAFE_TOPLEVEL", "REAL_REVIEW"]
+    .includes(phase2g3Disposition?.finalBucket);
   const phase2g2Disposition = reviewedPhase2G2Disposition(product, epcGroups);
   if (phase2g2Disposition?.finalBucket === "HIGH") {
     return phase2g2Disposition.typeCode ? [phase2g2Disposition.typeCode] : [];
@@ -683,5 +691,7 @@ export function detectCustomerProductTypes(product = {}) {
   const serviceBelt = /(?:рем[іе]нь|пасок|belt)/iu.test(text);
   const tensioner = detected.includes("BELT_TENSIONER");
   if (serviceBelt && !tensioner) detected.push("SERVICE_BELT");
-  return [...new Set(detected)];
+  return [...new Set(detected)].filter((typeCode) => (
+    !blocksPhase2G3FastenerTypes || !phase2g3FastenerTypeCodes.has(typeCode)
+  ));
 }

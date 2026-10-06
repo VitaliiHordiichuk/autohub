@@ -22,6 +22,18 @@ const phase2G3TypeCodes = Object.freeze([
   "FASTENER_STUD",
 ]);
 
+const historicalExhaustMountArticles = Object.freeze([
+  "A0004901241",
+  "A0004901341",
+  "A0004901441",
+  "A0004901541",
+  "A0004901641",
+  "A0004902141",
+  "A2024900841",
+  "A2034900441",
+  "A2034900641",
+]);
+
 function productFor(row) {
   return {
     article: row.article,
@@ -82,6 +94,17 @@ test("PHASE 2G.3 SAFE and REVIEW decisions never become a narrow fastener type",
   }
 });
 
+test("historical PHASE 2G.3 exhaust REVIEW rows preserve their functional type", () => {
+  for (const article of historicalExhaustMountArticles) {
+    assert.deepEqual(detectCustomerProductTypes({
+      article,
+      articleNormalized: article,
+      name: "Хомут",
+      technicalEpcGroups: ["49"],
+    }), ["EXHAUST_MOUNT"], article);
+  }
+});
+
 test("generic names and mixed EPC 98/99 never create unreviewed narrow leaves", () => {
   for (const product of [
     { article: "A9999900001", name: "Кільце", technicalEpcGroups: ["99"] },
@@ -96,6 +119,16 @@ test("generic names and mixed EPC 98/99 never create unreviewed narrow leaves", 
     const types = detectCustomerProductTypes(product);
     assert.equal(types.some((typeCode) => phase2G3TypeCodes.includes(typeCode)), false);
   }
+});
+
+test("an unknown EPC 49 clamp can be an Exhaust mount but never a generic Fastener clamp", () => {
+  const types = detectCustomerProductTypes({
+    article: "A9994900001",
+    name: "Хомут",
+    technicalEpcGroups: ["49"],
+  });
+  assert.deepEqual(types, ["EXHAUST_MOUNT"]);
+  assert.equal(types.includes("FASTENER_CLAMP"), false);
 });
 
 test("functional Engine, Transmission, Exhaust, Wheels and Suspension rows stay outside Fasteners", () => {

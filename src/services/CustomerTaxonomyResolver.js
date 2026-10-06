@@ -2,6 +2,7 @@ import {
   CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION,
   detectCustomerProductTypes,
   isKnownCustomerProductTypeCode,
+  reviewedPhase2G3DispositionForProduct,
 } from "./CustomerProductTypeDetector.js";
 
 export const CUSTOMER_ASSIGNMENT_SOURCE = Object.freeze({
@@ -207,6 +208,21 @@ function manualPrimary(memberships = []) {
   )) || null;
 }
 
+function phase2G3PreservedFunctionalCategoryIds(disposition, memberships = []) {
+  if (!["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(disposition?.finalBucket)) {
+    return null;
+  }
+  return new Set(memberships.filter((membership) => (
+    value(membership, "assignmentSource", "assignment_source")
+      === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+    && value(membership, "approvalStatus", "approval_status")
+      === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+    && Boolean(value(membership, "isPrimary", "is_primary"))
+  )).map((membership) => Number(
+    value(membership, "customerCategoryId", "customer_category_id"),
+  )).filter(Number.isInteger));
+}
+
 export function resolveCustomerTaxonomy({
   product,
   rules = [],
@@ -214,6 +230,11 @@ export function resolveCustomerTaxonomy({
   assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
 } = {}) {
   const detectedTypeCodes = detectCustomerProductTypes(product);
+  const phase2g3Disposition = reviewedPhase2G3DispositionForProduct(product);
+  const preservedFunctionalCategoryIds = phase2G3PreservedFunctionalCategoryIds(
+    phase2g3Disposition,
+    existingMemberships,
+  );
   const context = {
     article: normalizeCustomerArticle(
       product?.articleNormalized ?? product?.article_normalized ?? product?.article,
@@ -251,7 +272,17 @@ export function resolveCustomerTaxonomy({
       });
       continue;
     }
-    if (ruleMatches(rule, context)) matching.push(rule);
+    if (!ruleMatches(rule, context)) continue;
+    if (preservedFunctionalCategoryIds) {
+      const target = ruleTarget(rule);
+      const targetSection = target.parentSlug || target.slug;
+      if (
+        target.parentSlug === "fasteners-seals-standard-parts"
+        || targetSection !== phase2g3Disposition.targetSection
+        || !preservedFunctionalCategoryIds.has(target.id)
+      ) continue;
+    }
+    matching.push(rule);
   }
 
   matching.sort(compareRules);

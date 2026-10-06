@@ -9,6 +9,7 @@ import {
   CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
   runCustomerTaxonomyBackfill,
 } from "../src/services/CustomerTaxonomyBackfillService.js";
+import { buildCustomerTaxonomyPreview } from "../src/services/CustomerTaxonomyPreviewService.js";
 
 const categoryMigrationUrl = new URL(
   "../migrations/101_add_customer_taxonomy_phase2g3_fasteners_categories.sql",
@@ -20,6 +21,17 @@ const ruleMigrationUrl = new URL(
 );
 const touchedProductIds = new Set();
 const createdProductIds = [];
+const historicalExhaustMountArticles = Object.freeze([
+  "A0004901241",
+  "A0004901341",
+  "A0004901441",
+  "A0004901541",
+  "A0004901641",
+  "A0004902141",
+  "A2024900841",
+  "A2034900441",
+  "A2034900641",
+]);
 
 function scopedRepository(productIds) {
   const allowed = new Set(productIds);
@@ -222,6 +234,55 @@ test("PHASE 2G.3 REAL_REVIEW overrides an older SAFE fallback", async () => {
   assert.equal(report.candidateCount, 0);
   assert.equal(report.safeTopLevelCandidates.length, 0);
   assert.equal(report.realReview.some((item) => item.article === "A0004901241"), true);
+});
+
+test("PostgreSQL preview preserves all nine historical Exhaust memberships", async () => {
+  const ids = [];
+  for (const article of historicalExhaustMountArticles) ids.push(await productId(article));
+  await pool.query(
+    "DELETE FROM product_customer_categories WHERE product_id = ANY($1::integer[])",
+    [ids],
+  );
+  const ruleResult = await pool.query(`
+    SELECT rule.code, rule.version, rule.target_category_id
+    FROM customer_classification_rules rule
+    JOIN customer_categories category ON category.id = rule.target_category_id
+    WHERE rule.is_active = TRUE
+      AND rule.detector_version = 9
+      AND rule.match_type = 'TYPE_CODE'
+      AND rule.match_value = 'EXHAUST_MOUNT'
+      AND category.slug = 'exhaust-mounts'
+    ORDER BY rule.priority, rule.id
+    LIMIT 1
+  `);
+  assert.equal(ruleResult.rowCount, 1);
+  const rule = ruleResult.rows[0];
+  for (const id of ids) {
+    await pool.query(`
+      INSERT INTO product_customer_categories(
+        product_id, customer_category_id, is_primary,
+        assignment_source, assignment_origin, rule_code, rule_version,
+        confidence, approval_status, approved_at
+      ) VALUES($1, $2, TRUE, 'RULE', 'BACKFILL', $3, $4,
+               'HIGH', 'AUTO_APPROVED', NOW())
+    `, [id, rule.target_category_id, rule.code, rule.version]);
+  }
+
+  const report = await buildCustomerTaxonomyPreview({
+    db: pool,
+    repository: scopedRepository(ids),
+    includeEvaluations: true,
+  });
+  assert.deepEqual(report.summary.classificationDrift, {
+    sameCategory: 9,
+    differentCategory: 0,
+    noLongerMatches: 0,
+  });
+  assert.equal(report.evaluations.length, 9);
+  assert.equal(report.evaluations.every((item) => (
+    item.detectedTypeCodes.includes("EXHAUST_MOUNT")
+    && item.proposals.some((proposal) => proposal.categorySlug === "exhaust-mounts")
+  )), true);
 });
 
 test("controlled PHASE 2G.3 HIGH and SAFE backfills apply once and remain idempotent", async () => {

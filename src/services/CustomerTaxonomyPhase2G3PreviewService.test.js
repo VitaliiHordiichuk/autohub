@@ -7,6 +7,18 @@ import {
 } from "../data/CustomerTaxonomyPhase2G3Review.js";
 import { buildCustomerTaxonomyPhase2G3Coverage } from "./CustomerTaxonomyPhase2G3PreviewService.js";
 
+const historicalExhaustMountArticles = Object.freeze([
+  "A0004901241",
+  "A0004901341",
+  "A0004901441",
+  "A0004901541",
+  "A0004901641",
+  "A0004902141",
+  "A2024900841",
+  "A2034900441",
+  "A2034900641",
+]);
+
 function acceptedAuditFixture() {
   const allRows = [
     ...CUSTOMER_TAXONOMY_PHASE2G3_REVIEW,
@@ -75,6 +87,32 @@ test("PHASE 2G.3 resolves all 271 MISSING rules without promoting REVIEW", () =>
   });
   assert.equal(coverage.newHigh.filter((row) => row.originalBucket === "MISSING_RULE").length, 271);
   assert.equal(coverage.realReview.every((row) => row.finalBucket === "REAL_REVIEW"), true);
+});
+
+test("live functional memberships stay separate from historical REVIEW reconciliation", () => {
+  const fixture = acceptedAuditFixture();
+  for (const evaluation of fixture.evaluations) {
+    if (!historicalExhaustMountArticles.includes(evaluation.article)) continue;
+    evaluation.existingMemberships = [{
+      isPrimary: true,
+      approvalStatus: "AUTO_APPROVED",
+      categorySlug: "exhaust-mounts",
+      parentSlug: "exhaust",
+    }];
+  }
+  const coverage = buildCustomerTaxonomyPhase2G3Coverage(fixture);
+  assert.equal(coverage.summary.alreadyMember, 256);
+  assert.equal(coverage.summary.realReview, 211);
+  assert.equal(coverage.alreadyMember.filter((row) => (
+    historicalExhaustMountArticles.includes(row.article)
+    && row.originalBucket === "REAL_REVIEW"
+    && row.actualCategorySlug === "exhaust-mounts"
+  )).length, 9);
+  assert.deepEqual(coverage.summary.reconciliation.originalReview, {
+    unchanged: 220,
+    promotedHigh: 0,
+    promotedSafe: 0,
+  });
 });
 
 test("PHASE 2G.3 creates exactly the 12 approved Fasteners leaves", () => {

@@ -73,6 +73,18 @@ const phase2g3RuleMigrationUrl = new URL(
 );
 let rules = [];
 
+const historicalExhaustMountArticles = Object.freeze([
+  "A0004901241",
+  "A0004901341",
+  "A0004901441",
+  "A0004901541",
+  "A0004901641",
+  "A0004902141",
+  "A2024900841",
+  "A2034900441",
+  "A2034900641",
+]);
+
 before(async () => {
   rules = await CustomerTaxonomyRepository.listActiveRules(pool);
 });
@@ -947,6 +959,60 @@ test("all 509 accepted PHASE 2G.3 SAFE and REVIEW rows receive no narrow proposa
     });
     assert.equal(result.proposals.length, 0, `${row.article}:${row.epc}`);
   }
+});
+
+test("all nine historical Exhaust memberships remain compatible with detector v9", () => {
+  const exhaustRule = rules.find((rule) => (
+    rule.targetCategorySlug === "exhaust-mounts"
+    && rule.matchType === "TYPE_CODE"
+    && rule.matchValue === "EXHAUST_MOUNT"
+  ));
+  assert.ok(exhaustRule);
+  const existingMembership = {
+    productId: 1,
+    customerCategoryId: exhaustRule.targetCategoryId,
+    categorySlug: "exhaust-mounts",
+    parentSlug: "exhaust",
+    assignmentSource: "RULE",
+    approvalStatus: "AUTO_APPROVED",
+    isPrimary: true,
+  };
+  for (const article of historicalExhaustMountArticles) {
+    const product = {
+      article,
+      articleNormalized: article,
+      name: "Хомут",
+      technicalEpcGroups: ["49"],
+    };
+    const preserved = resolveCustomerTaxonomy({
+      product,
+      rules,
+      existingMemberships: [existingMembership],
+    });
+    assert.deepEqual(preserved.typeCodes, ["EXHAUST_MOUNT"], article);
+    assert.equal(preserved.proposals.length, 1, article);
+    assert.equal(preserved.proposals[0].category.slug, "exhaust-mounts", article);
+
+    const unassigned = resolveCustomerTaxonomy({
+      product,
+      rules,
+      existingMemberships: [],
+    });
+    assert.deepEqual(unassigned.typeCodes, ["EXHAUST_MOUNT"], article);
+    assert.equal(unassigned.proposals.length, 0, article);
+  }
+});
+
+test("an unknown EPC 49 clamp never resolves to a generic Fasteners leaf", () => {
+  const result = resolve({
+    article: "A9994900001",
+    name: "Хомут",
+    epc: "49",
+  });
+  assert.deepEqual(result.typeCodes, ["EXHAUST_MOUNT"]);
+  assert.equal(result.proposals.length, 1);
+  assert.equal(result.proposals[0].category.slug, "exhaust-mounts");
+  assert.notEqual(result.proposals[0].category.parentSlug, "fasteners-seals-standard-parts");
 });
 
 test("detector v9 preserves every detector-v8 classification target without writes", async () => {
