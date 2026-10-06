@@ -31,6 +31,7 @@ import {
   ArticleNumberService,
 } from "./ArticleNumberService.js";
 import { WarehousePricingService } from "./WarehousePricingService.js";
+import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
 import {
   databaseNumberOrNull,
   OFFER_NUMBER_MAX_EXCLUSIVE,
@@ -207,6 +208,19 @@ function sourceRowNumber(row) {
     : null;
 }
 
+function recordTaxonomyDecision(result, taxonomy) {
+  const counter = {
+    ASSIGNED_NEW_HIGH: "taxonomyAssignedHigh",
+    ASSIGNED_SAFE: "taxonomyAssignedSafe",
+    PRESERVE_MANUAL: "taxonomyPreservedManual",
+    PRESERVE_EXISTING_APPROVED_PRIMARY: "taxonomyPreservedApproved",
+    REQUIRES_REVIEW: "taxonomyReview",
+    UNCLASSIFIED: "taxonomyUnclassified",
+    UNSUPPORTED: "taxonomyUnsupported",
+  }[taxonomy.decision];
+  if (counter) result[counter] += 1;
+}
+
 export const ImportService = {
   async importRows(
     importContext,
@@ -366,7 +380,18 @@ export const ImportService = {
         newProductsMode,
         priceDropThreshold,
         priceRiseThreshold,
+        taxonomyProcessed: 0,
+        taxonomyAssignedHigh: 0,
+        taxonomyAssignedSafe: 0,
+        taxonomyPreservedManual: 0,
+        taxonomyPreservedApproved: 0,
+        taxonomyReview: 0,
+        taxonomyUnclassified: 0,
+        taxonomyUnsupported: 0,
+        taxonomyErrors: 0,
       };
+
+      let taxonomyContext = null;
 
       const importedOfferIds =
         new Set();
@@ -822,6 +847,19 @@ export const ImportService = {
             productOfferId = Number(
               newOffer.id
             );
+          }
+
+          result.taxonomyProcessed += 1;
+          try {
+            taxonomyContext ||= await CustomerTaxonomyImportService.createContext({ db });
+            const taxonomy = await CustomerTaxonomyImportService.classifyProduct({
+              productId: Number(product.id),
+              context: taxonomyContext,
+            }, { db });
+            recordTaxonomyDecision(result, taxonomy);
+          } catch (error) {
+            result.taxonomyErrors += 1;
+            throw error;
           }
 
           const priceWasChanged =

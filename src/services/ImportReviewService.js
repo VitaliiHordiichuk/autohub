@@ -5,6 +5,7 @@ from "../repositories/ProductRepository.js";
 
 import { ImportNewProductRepository }
 from "../repositories/ImportNewProductRepository.js";
+import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
 
 function positiveInteger(
   value,
@@ -153,7 +154,8 @@ function mapReportRow(row) {
 
 async function approveLockedRow(
   row,
-  db
+  db,
+  taxonomyContext
 ) {
   let product =
     await ProductRepository
@@ -231,6 +233,11 @@ async function approveLockedRow(
     );
   }
 
+  const taxonomy = await CustomerTaxonomyImportService.classifyProduct({
+    productId: Number(product.id),
+    context: taxonomyContext,
+  }, { db });
+
   const resolved =
     await ImportNewProductRepository
       .markResolved(
@@ -265,7 +272,7 @@ async function approveLockedRow(
       );
   }
 
-  return resolved;
+  return { resolved, taxonomy };
 }
 
 export const ImportReviewService = {
@@ -352,15 +359,20 @@ export const ImportReviewService = {
         return mapReview(row);
       }
 
-      const resolved =
+      const taxonomyContext = await CustomerTaxonomyImportService.createContext({ db });
+      const { resolved, taxonomy } =
         await approveLockedRow(
           row,
-          db
+          db,
+          taxonomyContext
         );
 
       await db.query("COMMIT");
 
-      return mapReview(resolved);
+      return {
+        ...mapReview(resolved),
+        taxonomy,
+      };
     } catch (error) {
       await db.query("ROLLBACK");
       throw error;
@@ -388,12 +400,16 @@ export const ImportReviewService = {
           );
 
       const approved = [];
+      const taxonomyContext = rows.length
+        ? await CustomerTaxonomyImportService.createContext({ db })
+        : null;
 
       for (const row of rows) {
         approved.push(
           await approveLockedRow(
             row,
-            db
+            db,
+            taxonomyContext
           )
         );
       }
@@ -404,7 +420,10 @@ export const ImportReviewService = {
         approvedCount:
           approved.length,
         items:
-          approved.map(mapReview),
+          approved.map(({ resolved, taxonomy }) => ({
+            ...mapReview(resolved),
+            taxonomy,
+          })),
       };
     } catch (error) {
       await db.query("ROLLBACK");

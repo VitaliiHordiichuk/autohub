@@ -78,6 +78,21 @@ function technicalEpcGroups(row) {
   return [...groups].sort();
 }
 
+function mapProductForResolution(row) {
+  return {
+    id: Number(row.id),
+    article: row.article,
+    articleNormalized: row.article_normalized,
+    name: row.name,
+    brandId: row.brand_id === null || row.brand_id === undefined
+      ? null
+      : Number(row.brand_id),
+    brandName: row.brand_name || null,
+    technicalEpcGroups: technicalEpcGroups(row),
+    technicalCategories: row.technical_categories || [],
+  };
+}
+
 export const CustomerTaxonomyRepository = {
   async lockProductForAssignment(productId, db = pool) {
     const result = await db.query(`
@@ -163,14 +178,49 @@ export const CustomerTaxonomyRepository = {
       GROUP BY product.id
       ORDER BY product.id
     `);
-    return result.rows.map((row) => ({
-      id: Number(row.id),
-      article: row.article,
-      articleNormalized: row.article_normalized,
-      name: row.name,
-      technicalEpcGroups: technicalEpcGroups(row),
-      technicalCategories: row.technical_categories || [],
-    }));
+    return result.rows.map(mapProductForResolution);
+  },
+
+  async findProductForResolution(productId, db = pool) {
+    const result = await db.query(`
+      SELECT
+        product.id,
+        product.brand_id,
+        product.article,
+        product.article_normalized,
+        product.name,
+        brand.name AS brand_name,
+        CASE
+          WHEN COALESCE(product.article_normalized, product.article, '')
+            ~ '^A[0-9]{10}'
+          THEN SUBSTRING(
+            COALESCE(product.article_normalized, product.article, '')
+            FROM 5 FOR 2
+          )
+          ELSE NULL
+        END AS technical_epc_group,
+        COALESCE(
+          JSONB_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', category.id,
+              'slug', category.slug,
+              'name', category.name,
+              'assignmentSource', assignment.assignment_source
+            )
+          ) FILTER (WHERE category.id IS NOT NULL),
+          '[]'::JSONB
+        ) AS technical_categories
+      FROM products product
+      LEFT JOIN brands brand
+        ON brand.id = product.brand_id
+      LEFT JOIN product_categories assignment
+        ON assignment.product_id = product.id
+      LEFT JOIN categories category
+        ON category.id = assignment.category_id
+      WHERE product.id = $1
+      GROUP BY product.id, brand.name
+    `, [productId]);
+    return result.rows[0] ? mapProductForResolution(result.rows[0]) : null;
   },
 
   async listMemberships(db = pool) {
