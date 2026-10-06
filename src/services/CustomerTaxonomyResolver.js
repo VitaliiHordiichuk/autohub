@@ -26,6 +26,19 @@ export const CUSTOMER_APPROVAL_STATUS = Object.freeze({
   REJECTED: "REJECTED",
 });
 
+export const CUSTOMER_TAXONOMY_DECISION = Object.freeze({
+  EVALUATE_PROPOSALS: "EVALUATE_PROPOSALS",
+  PRESERVE_MANUAL: "PRESERVE_MANUAL",
+  PRESERVE_EXISTING_APPROVED_PRIMARY: "PRESERVE_EXISTING_APPROVED_PRIMARY",
+  INVALID_EXISTING_PRIMARY: "INVALID_EXISTING_PRIMARY",
+  ASSIGNED_NEW_HIGH: "ASSIGNED_NEW_HIGH",
+  ASSIGNED_SAFE: "ASSIGNED_SAFE",
+  REQUIRES_REVIEW: "REQUIRES_REVIEW",
+  PRESERVED_REJECTED: "PRESERVED_REJECTED",
+  REPLACED_BY_EXPLICIT_OVERRIDE: "REPLACED_BY_EXPLICIT_OVERRIDE",
+  NO_ACTION: "NO_ACTION",
+});
+
 const sourceRank = Object.freeze({ RULE: 2, EPC_FALLBACK: 1 });
 const confidenceRank = Object.freeze({ HIGH: 3, MEDIUM: 2, LOW: 1 });
 const specificityRank = Object.freeze({
@@ -208,6 +221,130 @@ function manualPrimary(memberships = []) {
   )) || null;
 }
 
+function membershipValue(membership, camel, snake = camel) {
+  return membership?.[camel] ?? membership?.[snake];
+}
+
+export function evaluateExistingApprovedPrimary(memberships = []) {
+  const primaries = memberships.filter((membership) => Boolean(
+    membershipValue(membership, "isPrimary", "is_primary"),
+  ));
+  if (primaries.length > 1) {
+    return {
+      decision: CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY,
+      existingPrimary: null,
+      approved: true,
+      valid: false,
+      manual: false,
+      issues: ["MULTIPLE_PRIMARY"],
+    };
+  }
+  const existingPrimary = primaries[0] || null;
+  if (!existingPrimary) {
+    return {
+      decision: CUSTOMER_TAXONOMY_DECISION.EVALUATE_PROPOSALS,
+      existingPrimary: null,
+      approved: false,
+      valid: false,
+      manual: false,
+      issues: [],
+    };
+  }
+
+  const approvalStatus = membershipValue(
+    existingPrimary,
+    "approvalStatus",
+    "approval_status",
+  );
+  const approved = [
+    CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED,
+    CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED,
+  ].includes(approvalStatus);
+  if (!approved) {
+    return {
+      decision: CUSTOMER_TAXONOMY_DECISION.EVALUATE_PROPOSALS,
+      existingPrimary,
+      approved: false,
+      valid: false,
+      manual: false,
+      issues: [],
+    };
+  }
+
+  const issues = [];
+  const categoryStatus = membershipValue(
+    existingPrimary,
+    "categoryStatus",
+    "category_status",
+  );
+  const categoryIsActive = membershipValue(
+    existingPrimary,
+    "categoryIsActive",
+    "category_is_active",
+  );
+  if (categoryStatus !== undefined && categoryStatus !== null && categoryStatus !== "ACTIVE") {
+    issues.push("INACTIVE_TARGET_CATEGORY");
+  }
+  if (categoryIsActive === false) issues.push("INACTIVE_TARGET_CATEGORY");
+
+  const assignmentSource = membershipValue(
+    existingPrimary,
+    "assignmentSource",
+    "assignment_source",
+  );
+  const manual = assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL;
+  if (assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE) {
+    const ruleCode = membershipValue(existingPrimary, "ruleCode", "rule_code");
+    const ruleVersion = membershipValue(existingPrimary, "ruleVersion", "rule_version");
+    const historicalRuleExists = membershipValue(
+      existingPrimary,
+      "historicalRuleExists",
+      "historical_rule_exists",
+    );
+    const historicalTarget = membershipValue(
+      existingPrimary,
+      "historicalRuleTargetCategoryId",
+      "historical_rule_target_category_id",
+    );
+    const membershipTarget = Number(membershipValue(
+      existingPrimary,
+      "customerCategoryId",
+      "customer_category_id",
+    ));
+    if (!ruleCode || !Number.isInteger(Number(ruleVersion))) {
+      issues.push("MISSING_HISTORICAL_RULE_REFERENCE");
+    } else if (historicalRuleExists === false) {
+      issues.push("MISSING_HISTORICAL_RULE_VERSION");
+    }
+    if (
+      historicalTarget !== undefined
+      && historicalTarget !== null
+      && Number(historicalTarget) !== membershipTarget
+    ) issues.push("HISTORICAL_RULE_TARGET_MISMATCH");
+  }
+
+  if (issues.length) {
+    return {
+      decision: CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY,
+      existingPrimary,
+      approved: true,
+      valid: false,
+      manual,
+      issues: [...new Set(issues)],
+    };
+  }
+  return {
+    decision: manual
+      ? CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL
+      : CUSTOMER_TAXONOMY_DECISION.PRESERVE_EXISTING_APPROVED_PRIMARY,
+    existingPrimary,
+    approved: true,
+    valid: true,
+    manual,
+    issues: [],
+  };
+}
+
 function phase2G3PreservedFunctionalCategoryIds(disposition, memberships = []) {
   if (!["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(disposition?.finalBucket)) {
     return null;
@@ -229,6 +366,7 @@ export function resolveCustomerTaxonomy({
   existingMemberships = [],
   assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
 } = {}) {
+  const existingPrimaryDecision = evaluateExistingApprovedPrimary(existingMemberships);
   const detectedTypeCodes = detectCustomerProductTypes(product);
   const phase2g3Disposition = reviewedPhase2G3DispositionForProduct(product);
   const preservedFunctionalCategoryIds = phase2G3PreservedFunctionalCategoryIds(
@@ -330,6 +468,8 @@ export function resolveCustomerTaxonomy({
     typeCodes: detectedTypeCodes,
     manualPrimaryPreserved: Boolean(preservedManualPrimary),
     manualPrimary: preservedManualPrimary,
+    decision: existingPrimaryDecision.decision,
+    existingPrimaryDecision,
     proposals,
     conflicts,
     diagnostics,

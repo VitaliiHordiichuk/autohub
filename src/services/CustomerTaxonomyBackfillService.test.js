@@ -258,6 +258,53 @@ test("MANUAL and REJECTED decisions are preserved", async () => {
   assert.equal(rejectedState.memberships[0].approvalStatus, "REJECTED");
 });
 
+test("invalid approved primary is not hidden by a rejected target membership", async () => {
+  const state = fixture({ memberships: [{
+    productId: 7,
+    customerCategoryId: 200,
+    categorySlug: "inactive-existing",
+    categoryStatus: "ARCHIVED",
+    categoryIsActive: false,
+    isPrimary: true,
+    assignmentSource: "EPC_FALLBACK",
+    assignmentOrigin: "BACKFILL",
+    ruleCode: null,
+    ruleVersion: null,
+    confidence: "MEDIUM",
+    approvalStatus: "AUTO_APPROVED",
+  }, {
+    productId: 7,
+    customerCategoryId: 100,
+    categorySlug: "filters-oil",
+    categoryStatus: "ACTIVE",
+    categoryIsActive: true,
+    isPrimary: false,
+    assignmentSource: "RULE",
+    assignmentOrigin: "ADMIN",
+    ruleCode: "BACKFILL_FILTER_OIL_V1",
+    ruleVersion: 1,
+    confidence: "HIGH",
+    approvalStatus: "REJECTED",
+  }] });
+
+  await assert.rejects(runCustomerTaxonomyBackfill({
+    mode: "APPLY",
+    expectedCount: 1,
+    confirmation: CUSTOMER_TAXONOMY_BACKFILL_CONFIRMATION,
+    dbPool: fakePool(),
+    repository: state.repository,
+    assignmentService: state.assignmentService,
+  }), (error) => {
+    assert.ok(error instanceof CustomerTaxonomyBackfillError);
+    assert.ok(error.report.errors.includes(
+      "INVALID_EXISTING_PRIMARY:7:INACTIVE_TARGET_CATEGORY",
+    ));
+    return true;
+  });
+  assert.equal(state.memberships.length, 2);
+  assert.equal(state.memberships.find((item) => item.isPrimary).customerCategoryId, 200);
+});
+
 test("REVIEW, conflict, and detector mismatch abort before writes", async () => {
   const scenarios = [{
     resolver: () => ({

@@ -50,6 +50,21 @@ function mapMembership(row) {
     assignedAt: row.assigned_at,
     approvedAt: row.approved_at,
     approvedBy: row.approved_by === null ? null : Number(row.approved_by),
+    categoryStatus: row.category_status || null,
+    categoryIsActive: row.category_is_active === undefined
+      ? null
+      : Boolean(row.category_is_active),
+    historicalRuleExists: row.historical_rule_id === undefined
+      ? null
+      : row.historical_rule_id !== null,
+    historicalRuleIsActive: row.historical_rule_is_active === undefined
+      ? null
+      : Boolean(row.historical_rule_is_active),
+    historicalRuleTargetCategoryId:
+      row.historical_rule_target_category_id === null
+        || row.historical_rule_target_category_id === undefined
+        ? null
+        : Number(row.historical_rule_target_category_id),
   };
 }
 
@@ -163,12 +178,20 @@ export const CustomerTaxonomyRepository = {
       SELECT
         membership.*,
         category.slug AS category_slug,
-        parent.slug AS parent_slug
+        category.status AS category_status,
+        category.is_active AS category_is_active,
+        parent.slug AS parent_slug,
+        historical_rule.id AS historical_rule_id,
+        historical_rule.is_active AS historical_rule_is_active,
+        historical_rule.target_category_id AS historical_rule_target_category_id
       FROM product_customer_categories membership
       JOIN customer_categories category
         ON category.id = membership.customer_category_id
       LEFT JOIN customer_categories parent
         ON parent.id = category.parent_id
+      LEFT JOIN customer_classification_rules historical_rule
+        ON historical_rule.code = membership.rule_code
+       AND historical_rule.version = membership.rule_version
       ORDER BY membership.product_id, membership.is_primary DESC,
                membership.customer_category_id
     `);
@@ -180,12 +203,20 @@ export const CustomerTaxonomyRepository = {
       SELECT
         membership.*,
         category.slug AS category_slug,
-        parent.slug AS parent_slug
+        category.status AS category_status,
+        category.is_active AS category_is_active,
+        parent.slug AS parent_slug,
+        historical_rule.id AS historical_rule_id,
+        historical_rule.is_active AS historical_rule_is_active,
+        historical_rule.target_category_id AS historical_rule_target_category_id
       FROM product_customer_categories membership
       JOIN customer_categories category
         ON category.id = membership.customer_category_id
       LEFT JOIN customer_categories parent
         ON parent.id = category.parent_id
+      LEFT JOIN customer_classification_rules historical_rule
+        ON historical_rule.code = membership.rule_code
+       AND historical_rule.version = membership.rule_version
       WHERE membership.product_id = $1
       ORDER BY membership.is_primary DESC, membership.customer_category_id
       ${lock ? "FOR UPDATE OF membership" : ""}

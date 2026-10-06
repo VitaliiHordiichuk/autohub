@@ -4,6 +4,8 @@ import {
   CUSTOMER_APPROVAL_STATUS,
   CUSTOMER_ASSIGNMENT_ORIGIN,
   CUSTOMER_ASSIGNMENT_SOURCE,
+  CUSTOMER_TAXONOMY_DECISION,
+  evaluateExistingApprovedPrimary,
 } from "./CustomerTaxonomyResolver.js";
 
 const validOrigins = new Set(Object.values(CUSTOMER_ASSIGNMENT_ORIGIN));
@@ -12,6 +14,39 @@ function assertOrigin(origin) {
   if (!validOrigins.has(origin)) {
     throw new Error(`Unsupported customer taxonomy assignment origin: ${origin}`);
   }
+}
+
+function assertReplacementOverride({
+  allowApprovedPrimaryReplacement,
+  approvedPrimaryReplacementReason,
+}) {
+  if (
+    allowApprovedPrimaryReplacement
+    && !String(approvedPrimaryReplacementReason || "").trim()
+  ) {
+    throw new Error(
+      "Approved primary replacement requires approvedPrimaryReplacementReason",
+    );
+  }
+}
+
+function assignedDecision(applied, rejectedPreserved, explicitReplacement) {
+  if (explicitReplacement && applied.some((membership) => membership.isPrimary)) {
+    return CUSTOMER_TAXONOMY_DECISION.REPLACED_BY_EXPLICIT_OVERRIDE;
+  }
+  const primary = applied.find((membership) => membership.isPrimary);
+  if (
+    primary?.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.RULE
+    && primary.confidence === "HIGH"
+  ) return CUSTOMER_TAXONOMY_DECISION.ASSIGNED_NEW_HIGH;
+  if (
+    primary?.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.EPC_FALLBACK
+  ) return CUSTOMER_TAXONOMY_DECISION.ASSIGNED_SAFE;
+  if (applied.some((membership) => (
+    membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW
+  ))) return CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW;
+  if (rejectedPreserved.length) return CUSTOMER_TAXONOMY_DECISION.PRESERVED_REJECTED;
+  return CUSTOMER_TAXONOMY_DECISION.NO_ACTION;
 }
 
 async function withTransaction(dbPool, work) {
@@ -63,13 +98,21 @@ export const CustomerTaxonomyAssignmentService = {
     productId,
     resolution,
     assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
+    allowApprovedPrimaryReplacement = false,
+    approvedPrimaryReplacementReason = null,
   }, { dbPool = pool, repository = CustomerTaxonomyRepository } = {}) {
     assertOrigin(assignmentOrigin);
+    assertReplacementOverride({
+      allowApprovedPrimaryReplacement,
+      approvedPrimaryReplacementReason,
+    });
     return withTransaction(dbPool, (db) => (
       CustomerTaxonomyAssignmentService.applyResolutionInTransaction({
         productId,
         resolution,
         assignmentOrigin,
+        allowApprovedPrimaryReplacement,
+        approvedPrimaryReplacementReason,
       }, { db, repository })
     ));
   },
@@ -78,8 +121,14 @@ export const CustomerTaxonomyAssignmentService = {
     productId,
     resolution,
     assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.SYSTEM,
+    allowApprovedPrimaryReplacement = false,
+    approvedPrimaryReplacementReason = null,
   }, { db, repository = CustomerTaxonomyRepository } = {}) {
     assertOrigin(assignmentOrigin);
+    assertReplacementOverride({
+      allowApprovedPrimaryReplacement,
+      approvedPrimaryReplacementReason,
+    });
     if (!db) throw new Error("Customer taxonomy transaction client is required");
     await repository.lockProductForAssignment?.(productId, db);
     const existing = await repository.listMembershipsForProduct(
@@ -87,13 +136,49 @@ export const CustomerTaxonomyAssignmentService = {
       db,
       { lock: true },
     );
-    const hasManualPrimary = existing.some((membership) => (
-      membership.isPrimary
-      && membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL
-      && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED
-    ));
+    const existingPrimaryDecision = evaluateExistingApprovedPrimary(existing);
+    const hasManualPrimary = existingPrimaryDecision.manual
+      && existingPrimaryDecision.approved;
     const applied = [];
     const rejectedPreserved = [];
+
+    if (existingPrimaryDecision.decision === CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY) {
+      return {
+        productId,
+        decision: CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY,
+        decisionIssues: existingPrimaryDecision.issues,
+        manualPrimaryPreserved: hasManualPrimary,
+        preservedApprovedPrimary: null,
+        rejectedPreserved,
+        applied,
+      };
+    }
+    if (existingPrimaryDecision.decision === CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL) {
+      return {
+        productId,
+        decision: CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL,
+        decisionIssues: [],
+        manualPrimaryPreserved: true,
+        preservedApprovedPrimary: existingPrimaryDecision.existingPrimary,
+        rejectedPreserved,
+        applied,
+      };
+    }
+    if (
+      existingPrimaryDecision.decision
+        === CUSTOMER_TAXONOMY_DECISION.PRESERVE_EXISTING_APPROVED_PRIMARY
+      && !allowApprovedPrimaryReplacement
+    ) {
+      return {
+        productId,
+        decision: CUSTOMER_TAXONOMY_DECISION.PRESERVE_EXISTING_APPROVED_PRIMARY,
+        decisionIssues: [],
+        manualPrimaryPreserved: false,
+        preservedApprovedPrimary: existingPrimaryDecision.existingPrimary,
+        rejectedPreserved,
+        applied,
+      };
+    }
 
     for (const proposal of resolution?.proposals || []) {
       const sameCategory = existing.find((membership) => (
@@ -122,9 +207,18 @@ export const CustomerTaxonomyAssignmentService = {
       }, db));
     }
 
+    const explicitReplacement = allowApprovedPrimaryReplacement
+      && existingPrimaryDecision.valid
+      && !existingPrimaryDecision.manual;
     return {
       productId,
+      decision: assignedDecision(applied, rejectedPreserved, explicitReplacement),
+      decisionIssues: [],
+      approvedPrimaryReplacementReason: explicitReplacement
+        ? String(approvedPrimaryReplacementReason).trim()
+        : null,
       manualPrimaryPreserved: hasManualPrimary,
+      preservedApprovedPrimary: null,
       rejectedPreserved,
       applied,
     };

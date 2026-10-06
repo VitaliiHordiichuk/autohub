@@ -35,6 +35,8 @@ import {
   CUSTOMER_APPROVAL_STATUS,
   CUSTOMER_ASSIGNMENT_ORIGIN,
   CUSTOMER_ASSIGNMENT_SOURCE,
+  CUSTOMER_TAXONOMY_DECISION,
+  evaluateExistingApprovedPrimary,
 } from "./CustomerTaxonomyResolver.js";
 import { CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION } from "./CustomerProductTypeDetector.js";
 
@@ -178,31 +180,39 @@ function classifyExisting(candidate, memberships) {
   const target = memberships.find((membership) => (
     membership.customerCategoryId === candidate.categoryId
   ));
-  const manual = memberships.find((membership) => (
-    membership.assignmentSource === CUSTOMER_ASSIGNMENT_SOURCE.MANUAL
-    && membership.approvalStatus === CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED
-  ));
   const rejected = target?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REJECTED
     ? target
     : null;
-  const approvedPrimary = memberships.find((membership) => (
-    membership.isPrimary
-    && [
-      CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED,
-      CUSTOMER_APPROVAL_STATUS.MANUAL_APPROVED,
-    ].includes(membership.approvalStatus)
-  ));
+  const primaryDecision = evaluateExistingApprovedPrimary(memberships);
 
-  if (manual) return { action: "MANUAL_PRESERVED", membership: manual };
+  if (primaryDecision.decision === CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY) {
+    return {
+      action: "INVALID_EXISTING_PRIMARY",
+      membership: primaryDecision.existingPrimary,
+      issues: primaryDecision.issues,
+    };
+  }
   if (rejected) return { action: "REJECTED_PRESERVED", membership: rejected };
+  if (primaryDecision.decision === CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL) {
+    return {
+      action: "MANUAL_PRESERVED",
+      membership: primaryDecision.existingPrimary,
+    };
+  }
   if (exactDesiredMembership(target, desired)) {
     return { action: "UNCHANGED", membership: target };
   }
   if (equivalentApprovedMembership(target, desired)) {
     return { action: "APPROVED_PRIMARY_PRESERVED", membership: target };
   }
-  if (approvedPrimary) {
-    return { action: "APPROVED_PRIMARY_PRESERVED", membership: approvedPrimary };
+  if (
+    primaryDecision.decision
+      === CUSTOMER_TAXONOMY_DECISION.PRESERVE_EXISTING_APPROVED_PRIMARY
+  ) {
+    return {
+      action: "APPROVED_PRIMARY_PRESERVED",
+      membership: primaryDecision.existingPrimary,
+    };
   }
   if (target?.approvalStatus === CUSTOMER_APPROVAL_STATUS.REVIEW) {
     return { action: "REVIEW_BLOCKED", membership: target };
@@ -612,6 +622,11 @@ function preflight({
     if (classification.action === "REVIEW_BLOCKED") {
       errors.push(`EXISTING_REVIEW_DECISION:${candidate.productId}:${candidate.categoryId}`);
     }
+    if (classification.action === "INVALID_EXISTING_PRIMARY") {
+      errors.push(
+        `INVALID_EXISTING_PRIMARY:${candidate.productId}:${classification.issues.join(",")}`,
+      );
+    }
     if (classification.action === "UNCHANGED") unchanged += 1;
     if (classification.action === "INSERT") {
       wouldInsert += 1;
@@ -800,6 +815,12 @@ export async function runCustomerTaxonomyBackfill({
       if (classification.action === "REVIEW_BLOCKED") {
         throw new CustomerTaxonomyBackfillError(
           `Customer taxonomy REVIEW decision appeared for product ${candidate.productId}`,
+          report,
+        );
+      }
+      if (classification.action === "INVALID_EXISTING_PRIMARY") {
+        throw new CustomerTaxonomyBackfillError(
+          `Invalid existing customer taxonomy primary for product ${candidate.productId}`,
           report,
         );
       }

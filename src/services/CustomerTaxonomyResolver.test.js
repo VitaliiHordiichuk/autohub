@@ -9,6 +9,7 @@ import {
 import {
   CUSTOMER_APPROVAL_STATUS,
   CUSTOMER_ASSIGNMENT_ORIGIN,
+  CUSTOMER_TAXONOMY_DECISION,
   resolveCustomerTaxonomy,
 } from "./CustomerTaxonomyResolver.js";
 
@@ -377,7 +378,74 @@ test("MANUAL primary is preserved ahead of RULE and EPC_FALLBACK", () => {
     }],
   });
   assert.equal(resolution.manualPrimaryPreserved, true);
+  assert.equal(resolution.decision, CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL);
   assert.equal(resolution.proposals.length, 0);
+});
+
+test("resolver exposes approved-primary preservation without hiding diagnostics", () => {
+  const resolution = resolveCustomerTaxonomy({
+    product: product(),
+    rules: [rule({ targetCategoryId: 202, targetCategorySlug: "other-leaf" })],
+    existingMemberships: [{
+      productId: 1,
+      customerCategoryId: 101,
+      categorySlug: "filters-oil",
+      categoryStatus: "ACTIVE",
+      categoryIsActive: true,
+      assignmentSource: "RULE",
+      approvalStatus: "AUTO_APPROVED",
+      isPrimary: true,
+      ruleCode: "HISTORICAL_FILTER",
+      ruleVersion: 1,
+      historicalRuleExists: true,
+      historicalRuleIsActive: false,
+      historicalRuleTargetCategoryId: 101,
+    }],
+  });
+  assert.equal(
+    resolution.decision,
+    CUSTOMER_TAXONOMY_DECISION.PRESERVE_EXISTING_APPROVED_PRIMARY,
+  );
+  assert.equal(resolution.existingPrimaryDecision.valid, true);
+  assert.equal(resolution.proposals[0].category.id, 202);
+});
+
+test("resolver flags inactive targets and missing historical versions explicitly", () => {
+  const inactive = resolveCustomerTaxonomy({
+    product: product(),
+    rules: [rule()],
+    existingMemberships: [{
+      customerCategoryId: 101,
+      categoryStatus: "ARCHIVED",
+      categoryIsActive: false,
+      assignmentSource: "EPC_FALLBACK",
+      approvalStatus: "AUTO_APPROVED",
+      isPrimary: true,
+    }],
+  });
+  assert.equal(inactive.decision, CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY);
+  assert.deepEqual(inactive.existingPrimaryDecision.issues, ["INACTIVE_TARGET_CATEGORY"]);
+
+  const missingRule = resolveCustomerTaxonomy({
+    product: product(),
+    rules: [rule()],
+    existingMemberships: [{
+      customerCategoryId: 101,
+      categoryStatus: "ACTIVE",
+      categoryIsActive: true,
+      assignmentSource: "RULE",
+      approvalStatus: "AUTO_APPROVED",
+      isPrimary: true,
+      ruleCode: "MISSING",
+      ruleVersion: 1,
+      historicalRuleExists: false,
+    }],
+  });
+  assert.equal(missingRule.decision, CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY);
+  assert.deepEqual(
+    missingRule.existingPrimaryDecision.issues,
+    ["MISSING_HISTORICAL_RULE_VERSION"],
+  );
 });
 
 test("RULE outranks EPC_FALLBACK", () => {
