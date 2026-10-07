@@ -17,6 +17,8 @@ const categories = [
   { id: 101, slug: "filters-oil", parentId: 100, status: "ACTIVE", isActive: true },
   { id: 200, slug: "steering", parentId: null, status: "ACTIVE", isActive: true },
   { id: 300, slug: "engine", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 400, slug: "brakes", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 401, slug: "brakes-pads", parentId: 400, status: "ACTIVE", isActive: true },
 ];
 
 function oilFilterRule() {
@@ -36,6 +38,32 @@ function oilFilterRule() {
     targetCategorySlug: "filters-oil",
     targetParentId: 100,
     targetParentSlug: "filters-maintenance",
+    targetStatus: "ACTIVE",
+    targetIsActive: true,
+    priority: 100,
+    confidence: "HIGH",
+    autoApprovalAllowed: true,
+    isActive: true,
+  };
+}
+
+function brakePadRule() {
+  return {
+    id: 2,
+    code: "TEST_BRAKE_PAD_A_EPC42",
+    version: 1,
+    detectorVersion: CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION,
+    sourceKind: "RULE",
+    assignmentRole: "PRIMARY",
+    numberFamily: "A",
+    epcGroup: "42",
+    matchType: "TYPE_CODE",
+    matchValue: "BRAKE_PAD",
+    excludeValues: [],
+    targetCategoryId: 401,
+    targetCategorySlug: "brakes-pads",
+    targetParentId: 400,
+    targetParentSlug: "brakes",
     targetStatus: "ACTIVE",
     targetIsActive: true,
     priority: 100,
@@ -238,6 +266,114 @@ test("SAFE, unclassified and unsupported are distinct normal import outcomes", a
   const unsupported = await classify(unsupportedFixture);
   assert.equal(unsupported.decision, CUSTOMER_TAXONOMY_DECISION.UNSUPPORTED);
   assert.equal(unsupportedFixture.state.memberships.length, 0);
+});
+
+test("reviewed EPC 42 and 43 assign only the SAFE brakes root", async () => {
+  for (const epc of ["42", "43"]) {
+    const fixture = repositoryFixture({
+      currentProduct: product({
+        article: `A998${epc}00001`,
+        articleNormalized: `A998${epc}00001`,
+        name: "Деталь",
+        technicalEpcGroups: [epc],
+      }),
+      rules: [],
+    });
+    const result = await classify(fixture);
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_SAFE);
+    assert.equal(result.finalCategory, "brakes");
+    assert.equal(fixture.state.memberships.length, 1);
+    assert.equal(fixture.state.memberships[0].assignmentSource, "EPC_FALLBACK");
+    assert.equal(fixture.state.memberships[0].assignmentOrigin, "IMPORT");
+    assert.equal(fixture.state.memberships[0].confidence, "MEDIUM");
+    assert.equal(fixture.state.memberships[0].approvalStatus, "AUTO_APPROVED");
+  }
+});
+
+test("a HIGH EPC 42 proposal wins before the SAFE brakes fallback", async () => {
+  const fixture = repositoryFixture({
+    currentProduct: product({
+      article: "A9984200002",
+      articleNormalized: "A9984200002",
+      name: "Колодки гальмівні",
+      technicalEpcGroups: ["42"],
+    }),
+    rules: [brakePadRule()],
+  });
+  const result = await classify(fixture);
+  assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_NEW_HIGH);
+  assert.equal(result.finalCategory, "brakes-pads");
+  assert.equal(fixture.state.memberships.length, 1);
+  assert.equal(fixture.state.memberships[0].assignmentSource, "RULE");
+  assert.equal(fixture.state.memberships[0].confidence, "HIGH");
+  assert.equal(fixture.state.memberships[0].ruleCode, "TEST_BRAKE_PAD_A_EPC42");
+});
+
+test("reviewed EPC 42 and 43 REAL_REVIEW products never receive SAFE fallback", async () => {
+  const cases = [
+    {
+      article: "A0004210887",
+      name: "Ущільнювач",
+      epc: "42",
+    },
+    {
+      article: "A0004312071",
+      name: "Гвинт",
+      epc: "43",
+    },
+  ];
+  for (const scenario of cases) {
+    const fixture = repositoryFixture({
+      currentProduct: product({
+        article: scenario.article,
+        articleNormalized: scenario.article,
+        name: scenario.name,
+        technicalEpcGroups: [scenario.epc],
+      }),
+      rules: [],
+    });
+    const result = await classify(fixture);
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+    assert.match(result.reason, /PHASE_2G3_REAL_REVIEW/);
+    assert.equal(fixture.state.memberships.length, 0);
+  }
+});
+
+test("EPC 42 SAFE fallback preserves approved and MANUAL primary memberships", async () => {
+  const existingCases = [
+    membership({
+      categoryId: 300,
+      categorySlug: "engine",
+      source: "MANUAL",
+      origin: "ADMIN",
+      confidence: "HIGH",
+      approvalStatus: "MANUAL_APPROVED",
+    }),
+    membership({
+      categoryId: 100,
+      categorySlug: "filters-maintenance",
+      source: "EPC_FALLBACK",
+      origin: "BACKFILL",
+      confidence: "MEDIUM",
+      approvalStatus: "AUTO_APPROVED",
+    }),
+  ];
+  for (const existing of existingCases) {
+    const fixture = repositoryFixture({
+      currentProduct: product({
+        article: "A9984200003",
+        articleNormalized: "A9984200003",
+        name: "Деталь",
+        technicalEpcGroups: ["42"],
+      }),
+      rules: [],
+      memberships: [existing],
+    });
+    const before = structuredClone(fixture.state.memberships);
+    const result = await classify(fixture);
+    assert.equal(result.preservedExisting, true);
+    assert.deepEqual(fixture.state.memberships, before);
+  }
 });
 
 test("MANUAL, approved HIGH, SAFE and inactive historical assignments are preserved", async () => {

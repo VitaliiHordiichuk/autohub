@@ -14,6 +14,11 @@ import {
   resolveCustomerTaxonomy,
 } from "./CustomerTaxonomyResolver.js";
 
+const REVIEWED_TECHNICAL_EPC_SAFE_ROOT = Object.freeze({
+  "42": "brakes",
+  "43": "brakes",
+});
+
 export class CustomerTaxonomyImportIntegrityError extends Error {
   constructor(productId, issues = []) {
     super(`Invalid existing customer taxonomy primary for product ${productId}: ${issues.join(",")}`);
@@ -69,6 +74,10 @@ function safeTopLevelDisposition({ product, resolution, existingMemberships }) {
     phase === "PHASE_2G3" && row.finalBucket === "REAL_REVIEW"
   ));
   const safeSections = new Set(batch2.safeTopLevel.map((item) => item.section));
+  for (const epc of product.technicalEpcGroups || []) {
+    const section = REVIEWED_TECHNICAL_EPC_SAFE_ROOT[String(epc)];
+    if (section) safeSections.add(section);
+  }
   if (!phase2g3Review) {
     for (const { row } of audited) {
       if (row.finalBucket !== "SAFE_TOPLEVEL") continue;
