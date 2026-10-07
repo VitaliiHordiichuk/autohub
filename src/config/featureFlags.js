@@ -8,11 +8,23 @@ const ENABLED_VALUES = new Set([
 export function isCustomerTaxonomyImportEnabled(
   env = process.env
 ) {
-  const value = String(
-    env.CUSTOMER_TAXONOMY_IMPORT_ENABLED ?? ""
-  )
-    .trim()
-    .toLowerCase();
+  return isExplicitlyEnabled(
+    env.CUSTOMER_TAXONOMY_IMPORT_ENABLED
+  );
+}
 
-  return ENABLED_VALUES.has(value);
+export function isCustomerTaxonomyPublicEnabled(
+  env = process.env
+) {
+  return isExplicitlyEnabled(
+    env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED
+  );
+}
+
+function isExplicitlyEnabled(value) {
+  return ENABLED_VALUES.has(
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+  );
 }

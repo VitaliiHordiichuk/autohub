@@ -10,8 +10,15 @@ import {
   publicBrandSlug,
 } from "../src/services/PublicSeoService.js";
 
+const originalPublicTaxonomyFlag = process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED;
+process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED = "true";
 
 after(async () => {
+  if (originalPublicTaxonomyFlag === undefined) {
+    delete process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED;
+  } else {
+    process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED = originalPublicTaxonomyFlag;
+  }
   await pool.end();
 });
 
@@ -21,7 +28,7 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
     `${Date.now()}${Math.random().toString(16).slice(2, 8)}`;
   const article = `A07${suffix}`.toUpperCase();
   const brandName = `A07 Brand ${suffix}`;
-  const categorySlug = `a07-${suffix}`.toLowerCase();
+  const categorySlug = "brakes-discs";
   const imageUrl =
     `https://images.example.test/merchant/a07-${suffix}-1500.webp`;
   const ids = {
@@ -42,13 +49,14 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
     ids.brand = Number(brand.rows[0].id);
 
     const category = await pool.query(`
-      INSERT INTO categories(
-        name, name_uk, name_ru, name_en,
-        slug, sort_order, is_active
-      )
-      VALUES($1, $1, $1, $1, $2, 1, TRUE)
-      RETURNING id
-    `, [`A07 category ${suffix}`, categorySlug]);
+      SELECT id
+      FROM customer_categories
+      WHERE slug = $1
+        AND status = 'ACTIVE'
+        AND is_active = TRUE
+      LIMIT 1
+    `, [categorySlug]);
+    assert.ok(category.rows[0]);
     ids.category = Number(category.rows[0].id);
 
     const supplier = await pool.query(`
@@ -90,11 +98,12 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
     ids.product = Number(product.rows[0].id);
 
     await pool.query(`
-      INSERT INTO product_categories(
-        product_id, category_id,
-        assignment_source, confidence
+      INSERT INTO product_customer_categories(
+        product_id, customer_category_id, is_primary,
+        assignment_source, assignment_origin, confidence,
+        approval_status, approved_at
       )
-      VALUES($1, $2, 'MANUAL', 100)
+      VALUES($1, $2, TRUE, 'MANUAL', 'ADMIN', 'HIGH', 'MANUAL_APPROVED', NOW())
     `, [ids.product, ids.category]);
 
     await pool.query(`
@@ -168,6 +177,7 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
         await PublicCatalogService.getCategoryProducts({
           slug: categorySlug,
           locale: "uk",
+          query: article,
         });
       const merchant =
         (await GoogleMerchantFeedService.getItems(
@@ -221,7 +231,7 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
   } finally {
     if (ids.product) {
       await pool.query(
-        "DELETE FROM product_categories WHERE product_id = $1",
+        "DELETE FROM product_customer_categories WHERE product_id = $1",
         [ids.product]
       );
       await pool.query(
@@ -247,12 +257,6 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
       await pool.query(
         "DELETE FROM suppliers WHERE id = $1",
         [ids.supplier]
-      );
-    }
-    if (ids.category) {
-      await pool.query(
-        "DELETE FROM categories WHERE id = $1",
-        [ids.category]
       );
     }
     if (ids.brand) {

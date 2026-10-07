@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { isCustomerTaxonomyPublicEnabled } from "../config/featureFlags.js";
 import { OfferService } from "./OfferService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { PublicProductImageService } from "./PublicProductImageService.js";
@@ -38,53 +39,138 @@ function catalogSort(value) {
     : "default";
 }
 
+const OTHER_CATEGORY = {
+  slug: "other",
+  labels: {
+    uk: "Інше",
+    ru: "Остальное",
+    en: "Other",
+  },
+};
+
+function otherCategoryName(locale) {
+  return OTHER_CATEGORY.labels[publicLocale(locale)];
+}
+
+async function getLegacyTree(locale, db) {
+  const result = await db.query(`
+    WITH RECURSIVE visible_assignments AS (
+      SELECT assignment.product_id, assignment.category_id
+      FROM product_categories assignment
+      WHERE assignment.assignment_source = 'MANUAL'
+        OR (
+          assignment.assignment_source = 'AUTO_RULE'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_assignment
+            WHERE manual_assignment.product_id = assignment.product_id
+              AND manual_assignment.assignment_source = 'MANUAL'
+              AND NOT category_is_within_tree(
+                manual_assignment.category_id,
+                'mb-accessories-b'
+              )
+          )
+        )
+        OR (
+          assignment.assignment_source = 'ACCESSORY_RULE'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM product_categories manual_assignment
+            WHERE manual_assignment.product_id = assignment.product_id
+              AND manual_assignment.assignment_source = 'MANUAL'
+              AND category_is_within_tree(
+                manual_assignment.category_id,
+                'mb-accessories-b'
+              )
+          )
+        )
+    ),
+    category_descendants(ancestor_id, descendant_id) AS (
+      SELECT id, id FROM categories WHERE is_active = TRUE
+      UNION ALL
+      SELECT tree.ancestor_id, child.id
+      FROM category_descendants tree
+      JOIN categories child
+        ON child.parent_id = tree.descendant_id
+        AND child.is_active = TRUE
+    ),
+    direct_counts AS (
+      SELECT assignment.category_id, COUNT(DISTINCT assignment.product_id)::integer AS product_count
+      FROM visible_assignments assignment
+      JOIN products product ON product.id = assignment.product_id AND product.is_active = TRUE
+      GROUP BY assignment.category_id
+    ),
+    descendant_counts AS (
+      SELECT tree.ancestor_id AS category_id,
+             COUNT(DISTINCT assignment.product_id)::integer AS product_count
+      FROM category_descendants tree
+      JOIN visible_assignments assignment ON assignment.category_id = tree.descendant_id
+      JOIN products product ON product.id = assignment.product_id AND product.is_active = TRUE
+      GROUP BY tree.ancestor_id
+    )
+    SELECT category.id, category.parent_id, category.slug, category.name,
+           category.name_uk, category.name_ru, category.name_en, category.sort_order,
+           COALESCE(direct_counts.product_count, 0)::integer AS direct_product_count,
+           COALESCE(descendant_counts.product_count, 0)::integer AS product_count
+    FROM categories category
+    LEFT JOIN direct_counts ON direct_counts.category_id = category.id
+    LEFT JOIN descendant_counts ON descendant_counts.category_id = category.id
+    WHERE category.is_active = TRUE
+    ORDER BY category.sort_order, category.id`);
+  const rows = result.rows.map((row) => ({
+    id: Number(row.id), parentId: row.parent_id === null ? null : Number(row.parent_id),
+    slug: row.slug, name: localizedName(row, locale),
+    directProductCount: Number(row.direct_product_count),
+    productCount: Number(row.product_count),
+    children: [],
+  }));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const roots = [];
+  for (const row of rows) {
+    if (row.parentId && byId.has(row.parentId)) byId.get(row.parentId).children.push(row);
+    else roots.push(row);
+  }
+  const removeEmptyChildren = (category) => {
+    category.children = category.children
+      .map(removeEmptyChildren)
+      .filter((child) => child.productCount > 0);
+    return category;
+  };
+  roots.forEach(removeEmptyChildren);
+  return roots.filter((root) => (
+    root.slug === "other"
+    || root.productCount > 0
+  ));
+}
+
 export const PublicCatalogService = {
   async getTree(locale = "uk", db = pool) {
     locale = publicLocale(locale);
+    if (!isCustomerTaxonomyPublicEnabled()) {
+      return getLegacyTree(locale, db);
+    }
     const result = await db.query(`
-      WITH RECURSIVE visible_assignments AS (
-        SELECT assignment.product_id, assignment.category_id
-        FROM product_categories assignment
-        WHERE assignment.assignment_source = 'MANUAL'
-          OR (
-            assignment.assignment_source = 'AUTO_RULE'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM product_categories manual_assignment
-              WHERE manual_assignment.product_id = assignment.product_id
-                AND manual_assignment.assignment_source = 'MANUAL'
-                AND NOT category_is_within_tree(
-                  manual_assignment.category_id,
-                  'mb-accessories-b'
-                )
-            )
-          )
-          OR (
-            assignment.assignment_source = 'ACCESSORY_RULE'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM product_categories manual_assignment
-              WHERE manual_assignment.product_id = assignment.product_id
-                AND manual_assignment.assignment_source = 'MANUAL'
-                AND category_is_within_tree(
-                  manual_assignment.category_id,
-                  'mb-accessories-b'
-                )
-            )
-          )
+      WITH RECURSIVE approved_primary AS (
+        SELECT membership.product_id, membership.customer_category_id AS category_id
+        FROM product_customer_categories membership
+        WHERE membership.is_primary = TRUE
+          AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
       ),
       category_descendants(ancestor_id, descendant_id) AS (
-        SELECT id, id FROM categories WHERE is_active = TRUE
+        SELECT id, id
+        FROM customer_categories
+        WHERE status = 'ACTIVE' AND is_active = TRUE
         UNION ALL
         SELECT tree.ancestor_id, child.id
         FROM category_descendants tree
-        JOIN categories child
+        JOIN customer_categories child
           ON child.parent_id = tree.descendant_id
+          AND child.status = 'ACTIVE'
           AND child.is_active = TRUE
       ),
       direct_counts AS (
         SELECT assignment.category_id, COUNT(DISTINCT assignment.product_id)::integer AS product_count
-        FROM visible_assignments assignment
+        FROM approved_primary assignment
         JOIN products product ON product.id = assignment.product_id AND product.is_active = TRUE
         GROUP BY assignment.category_id
       ),
@@ -92,24 +178,41 @@ export const PublicCatalogService = {
         SELECT tree.ancestor_id AS category_id,
                COUNT(DISTINCT assignment.product_id)::integer AS product_count
         FROM category_descendants tree
-        JOIN visible_assignments assignment ON assignment.category_id = tree.descendant_id
+        JOIN approved_primary assignment ON assignment.category_id = tree.descendant_id
         JOIN products product ON product.id = assignment.product_id AND product.is_active = TRUE
         GROUP BY tree.ancestor_id
       )
-      SELECT category.id, category.parent_id, category.slug, category.name,
-             category.name_uk, category.name_ru, category.name_en, category.sort_order,
+      SELECT category.id, category.parent_id, category.slug, category.sort_order,
+             COALESCE(translation.name, category.slug) AS name,
              COALESCE(direct_counts.product_count, 0)::integer AS direct_product_count,
-             COALESCE(descendant_counts.product_count, 0)::integer AS product_count
-      FROM categories category
+             COALESCE(descendant_counts.product_count, 0)::integer AS product_count,
+             (
+               SELECT COUNT(*)::integer
+               FROM products product
+               WHERE product.is_active = TRUE
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM product_customer_categories membership
+                   WHERE membership.product_id = product.id
+                     AND membership.is_primary = TRUE
+                     AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+                 )
+             ) AS unresolved_product_count
+      FROM customer_categories category
+      LEFT JOIN customer_category_translations translation
+        ON translation.category_id = category.id
+       AND translation.language_code = $1
       LEFT JOIN direct_counts ON direct_counts.category_id = category.id
       LEFT JOIN descendant_counts ON descendant_counts.category_id = category.id
-      WHERE category.is_active = TRUE
-      ORDER BY category.sort_order, category.id`);
+      WHERE category.status = 'ACTIVE'
+        AND category.is_active = TRUE
+      ORDER BY category.sort_order, category.id`, [locale]);
     const rows = result.rows.map((row) => ({
       id: Number(row.id), parentId: row.parent_id === null ? null : Number(row.parent_id),
-      slug: row.slug, name: localizedName(row, locale),
+      slug: row.slug, name: row.name,
       directProductCount: Number(row.direct_product_count),
       productCount: Number(row.product_count),
+      isVirtual: false,
       children: [],
     }));
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -125,10 +228,20 @@ export const PublicCatalogService = {
       return category;
     };
     roots.forEach(removeEmptyChildren);
-    return roots.filter((root) => (
-      root.slug === "other"
-      || root.productCount > 0
-    ));
+    const unresolvedProductCount = Number(result.rows[0]?.unresolved_product_count || 0);
+    return [
+      ...roots,
+      {
+        id: 0,
+        parentId: null,
+        slug: OTHER_CATEGORY.slug,
+        name: otherCategoryName(locale),
+        directProductCount: unresolvedProductCount,
+        productCount: unresolvedProductCount,
+        isVirtual: true,
+        children: [],
+      },
+    ];
   },
 
   async getCategoryProducts({
@@ -139,13 +252,57 @@ export const PublicCatalogService = {
     locale = publicLocale(locale);
     const normalizedPage = parsePublicPage(page);
     if (normalizedPage === null) return null;
-    const categoryResult = await db.query(`
-      SELECT c.*, p.slug AS parent_slug, p.name AS parent_name, p.name_uk AS parent_name_uk,
-             p.name_ru AS parent_name_ru, p.name_en AS parent_name_en
-      FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
-      WHERE c.slug = $1 AND c.is_active = TRUE LIMIT 1`, [slug]);
+    const useCustomerTaxonomy = isCustomerTaxonomyPublicEnabled();
+    const isVirtualOther = useCustomerTaxonomy && slug === OTHER_CATEGORY.slug;
+    const categoryResult = useCustomerTaxonomy
+      ? (isVirtualOther
+        ? { rows: [{
+          id: null,
+          parent_id: null,
+          slug: OTHER_CATEGORY.slug,
+          name: otherCategoryName(locale),
+        }] }
+        : await db.query(`
+        SELECT
+          category.id,
+          category.parent_id,
+          category.slug,
+          COALESCE(translation.name, category.slug) AS name,
+          parent.slug AS parent_slug,
+          COALESCE(parent_translation.name, parent.slug) AS parent_name
+        FROM customer_categories category
+        LEFT JOIN customer_category_translations translation
+          ON translation.category_id = category.id
+         AND translation.language_code = $2
+        LEFT JOIN customer_categories parent
+          ON parent.id = category.parent_id
+         AND parent.status = 'ACTIVE'
+         AND parent.is_active = TRUE
+        LEFT JOIN customer_category_translations parent_translation
+          ON parent_translation.category_id = parent.id
+         AND parent_translation.language_code = $2
+        WHERE category.slug = $1
+          AND category.status = 'ACTIVE'
+          AND category.is_active = TRUE
+        LIMIT 1`, [slug, locale]))
+      : await db.query(`
+        SELECT c.*, p.slug AS parent_slug, p.name AS parent_name, p.name_uk AS parent_name_uk,
+               p.name_ru AS parent_name_ru, p.name_en AS parent_name_en
+        FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
+        WHERE c.slug = $1 AND c.is_active = TRUE LIMIT 1`, [slug]);
     const row = categoryResult.rows[0];
     if (!row) return null;
+    const categoryName = useCustomerTaxonomy
+      ? row.name
+      : localizedName(row, locale);
+    const parentName = useCustomerTaxonomy
+      ? row.parent_name
+      : localizedName({
+        name: row.parent_name,
+        name_uk: row.parent_name_uk,
+        name_ru: row.parent_name_ru,
+        name_en: row.parent_name_en,
+      }, locale);
     const limit = 24;
     const normalizedQuery = catalogQuery(query);
     const normalizedArticleQuery = normalizedQuery.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -166,50 +323,87 @@ export const PublicCatalogService = {
       price_desc: "filtered.minimum_available_price DESC NULLS LAST, filtered.display_name, p.article",
       name_asc: "filtered.display_name, p.article",
     }[normalizedSort];
+    const categoryProductScopeSql = isVirtualOther
+      ? `category_product_ids AS MATERIALIZED (
+          SELECT product.id AS product_id
+          FROM products product
+          WHERE product.is_active = TRUE
+            AND $1::integer IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM product_customer_categories membership
+              WHERE membership.product_id = product.id
+                AND membership.is_primary = TRUE
+                AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+            )
+        )`
+      : useCustomerTaxonomy
+        ? `category_scope AS (
+          SELECT id
+          FROM customer_categories
+          WHERE id = $1
+            AND status = 'ACTIVE'
+            AND is_active = TRUE
+          UNION ALL
+          SELECT child.id
+          FROM customer_categories child
+          JOIN category_scope parent ON child.parent_id = parent.id
+          WHERE child.status = 'ACTIVE'
+            AND child.is_active = TRUE
+        ),
+        category_product_ids AS MATERIALIZED (
+          SELECT DISTINCT membership.product_id
+          FROM category_scope scope
+          JOIN product_customer_categories membership
+            ON membership.customer_category_id = scope.id
+          WHERE membership.is_primary = TRUE
+            AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        )`
+        : `category_scope AS (
+          SELECT id
+          FROM categories
+          WHERE id = $1 AND is_active = TRUE
+          UNION ALL
+          SELECT child.id
+          FROM categories child
+          JOIN category_scope parent ON child.parent_id = parent.id
+          WHERE child.is_active = TRUE
+        ),
+        category_product_ids AS MATERIALIZED (
+          SELECT DISTINCT assignment.product_id
+          FROM category_scope scope
+          JOIN product_categories assignment
+            ON assignment.category_id = scope.id
+          WHERE assignment.assignment_source = 'MANUAL'
+            OR (
+              assignment.assignment_source = 'AUTO_RULE'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM product_categories manual_assignment
+                WHERE manual_assignment.product_id = assignment.product_id
+                  AND manual_assignment.assignment_source = 'MANUAL'
+                  AND NOT category_is_within_tree(
+                    manual_assignment.category_id,
+                    'mb-accessories-b'
+                  )
+              )
+            )
+            OR (
+              assignment.assignment_source = 'ACCESSORY_RULE'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM product_categories manual_assignment
+                WHERE manual_assignment.product_id = assignment.product_id
+                  AND manual_assignment.assignment_source = 'MANUAL'
+                  AND category_is_within_tree(
+                    manual_assignment.category_id,
+                    'mb-accessories-b'
+                  )
+              )
+            )
+        )`;
     const filteredProductsSql = `
-      WITH RECURSIVE category_scope AS (
-        SELECT id
-        FROM categories
-        WHERE id = $1 AND is_active = TRUE
-        UNION ALL
-        SELECT child.id
-        FROM categories child
-        JOIN category_scope parent ON child.parent_id = parent.id
-        WHERE child.is_active = TRUE
-      ),
-      category_product_ids AS MATERIALIZED (
-        SELECT DISTINCT assignment.product_id
-        FROM category_scope scope
-        JOIN product_categories assignment
-          ON assignment.category_id = scope.id
-        WHERE assignment.assignment_source = 'MANUAL'
-          OR (
-            assignment.assignment_source = 'AUTO_RULE'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM product_categories manual_assignment
-              WHERE manual_assignment.product_id = assignment.product_id
-                AND manual_assignment.assignment_source = 'MANUAL'
-                AND NOT category_is_within_tree(
-                  manual_assignment.category_id,
-                  'mb-accessories-b'
-                )
-            )
-          )
-          OR (
-            assignment.assignment_source = 'ACCESSORY_RULE'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM product_categories manual_assignment
-              WHERE manual_assignment.product_id = assignment.product_id
-                AND manual_assignment.assignment_source = 'MANUAL'
-                AND category_is_within_tree(
-                  manual_assignment.category_id,
-                  'mb-accessories-b'
-                )
-            )
-          )
-      ),
+      WITH RECURSIVE ${categoryProductScopeSql},
       product_metrics AS (
         SELECT p.id,
           COALESCE(requested_translation.name, default_translation.name, p.name) AS display_name,
@@ -288,7 +482,7 @@ export const PublicCatalogService = {
           AND ($7::numeric IS NULL OR minimum_available_price <= $7::numeric)
       )
     `;
-    const filterParameters = [row.id, locale, normalizedQuery, normalizedArticleQuery,
+    const filterParameters = [isVirtualOther ? null : row.id, locale, normalizedQuery, normalizedArticleQuery,
       normalizedAvailability, normalizedMinPrice, normalizedMaxPrice, discountPercent, isVip];
     const [productResult, childrenResult] = await Promise.all([
       db.query(`${filteredProductsSql}
@@ -318,7 +512,59 @@ export const PublicCatalogService = {
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
       ORDER BY ${orderSql}
       LIMIT $10 OFFSET $11`, [...filterParameters, limit, (normalizedPage - 1) * limit]),
-      db.query(`
+      isVirtualOther
+        ? Promise.resolve({ rows: [] })
+        : useCustomerTaxonomy
+          ? db.query(`
+        WITH RECURSIVE direct_children AS (
+          SELECT id
+          FROM customer_categories
+          WHERE parent_id = $1
+            AND status = 'ACTIVE'
+            AND is_active = TRUE
+        ),
+        child_scope(root_child_id, category_id) AS (
+          SELECT id, id FROM direct_children
+          UNION ALL
+          SELECT scope.root_child_id, child.id
+          FROM child_scope scope
+          JOIN customer_categories child
+            ON child.parent_id = scope.category_id
+            AND child.status = 'ACTIVE'
+            AND child.is_active = TRUE
+        ),
+        scoped_assignments AS MATERIALIZED (
+          SELECT scope.root_child_id,
+                 membership.product_id
+          FROM child_scope scope
+          JOIN product_customer_categories membership
+            ON membership.customer_category_id = scope.category_id
+          WHERE membership.is_primary = TRUE
+            AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        ),
+        child_counts AS (
+          SELECT assignment.root_child_id,
+                 COUNT(DISTINCT assignment.product_id)::integer AS product_count
+          FROM scoped_assignments assignment
+          JOIN products product ON product.id = assignment.product_id AND product.is_active = TRUE
+          GROUP BY assignment.root_child_id
+        )
+        SELECT
+          child.id,
+          child.slug,
+          COALESCE(translation.name, child.slug) AS name,
+          COALESCE(child_counts.product_count, 0)::integer AS product_count
+        FROM customer_categories child
+        LEFT JOIN customer_category_translations translation
+          ON translation.category_id = child.id
+         AND translation.language_code = $2
+        LEFT JOIN child_counts ON child_counts.root_child_id = child.id
+        WHERE child.parent_id = $1
+          AND child.status = 'ACTIVE'
+          AND child.is_active = TRUE
+        ORDER BY child.sort_order, child.id
+      `, [row.id, locale])
+          : db.query(`
         WITH RECURSIVE direct_children AS (
           SELECT id
           FROM categories
@@ -440,7 +686,7 @@ export const PublicCatalogService = {
       const image = ProductPlaceholderService.getProductImage({
         ...product,
         name,
-        category: localizedName(row, locale),
+        category: categoryName,
         imageUrl: product.image_url,
         imageUrls: product.image_urls,
         imageVariants: product.image_variants,
@@ -462,18 +708,22 @@ export const PublicCatalogService = {
     });
     return {
       category: {
-        id: Number(row.id), slug: row.slug, name: localizedName(row, locale),
+        ...(row.id === null ? {} : { id: Number(row.id) }),
+        slug: row.slug,
+        name: categoryName,
+        ...(useCustomerTaxonomy ? { isVirtual: isVirtualOther } : {}),
         parent: row.parent_id ? {
           slug: row.parent_slug,
-          name: localizedName({ name: row.parent_name, name_uk: row.parent_name_uk,
-            name_ru: row.parent_name_ru, name_en: row.parent_name_en }, locale),
+          name: parentName,
         } : null,
         children: childrenResult.rows
           .filter((child) => Number(child.product_count) > 0)
           .map((child) => ({
             id: Number(child.id),
             slug: child.slug,
-            name: localizedName(child, locale),
+            name: useCustomerTaxonomy
+              ? child.name
+              : localizedName(child, locale),
             productCount: Number(child.product_count),
           })),
       },

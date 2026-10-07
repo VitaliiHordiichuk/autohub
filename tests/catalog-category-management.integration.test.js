@@ -7,6 +7,9 @@ import { EffectiveProductCategoryService } from "../src/services/EffectiveProduc
 import { PublicCatalogService } from "../src/services/PublicCatalogService.js";
 import { PublicSeoService } from "../src/services/PublicSeoService.js";
 
+const originalPublicTaxonomyFlag = process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED;
+process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED = "true";
+
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 let rootCategoryId;
 let rootCategorySlug;
@@ -18,6 +21,10 @@ let accessoryProductId;
 let inactiveAccessoryProductId;
 let fallbackProductId;
 let nonMercedesProductId;
+let customerRootCategoryId;
+let customerChildCategoryId;
+let customerRootCategorySlug;
+let customerChildCategorySlug;
 const mercedesGroupProductIds = [];
 const mercedesAccessoryProductIds = [];
 const sortingProductIds = [];
@@ -38,10 +45,25 @@ before(async () => {
   `);
   assert.ok(brand.rows[0], "Бренд Mercedes-Benz не найден");
   mercedesBrandId = Number(brand.rows[0].id);
+
+  const customerCategories = await pool.query(`
+    SELECT id, slug
+    FROM customer_categories
+    WHERE slug IN ('brakes', 'brakes-discs')
+  `);
+  const customerRoot = customerCategories.rows.find((category) => category.slug === "brakes");
+  const customerChild = customerCategories.rows.find((category) => category.slug === "brakes-discs");
+  assert.ok(customerRoot);
+  assert.ok(customerChild);
+  customerRootCategoryId = Number(customerRoot.id);
+  customerChildCategoryId = Number(customerChild.id);
+  customerRootCategorySlug = customerRoot.slug;
+  customerChildCategorySlug = customerChild.slug;
 });
 
 after(async () => {
   if (sortingProductIds.length) {
+    await pool.query("DELETE FROM product_customer_categories WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
     await pool.query("DELETE FROM product_offers WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
     await pool.query("DELETE FROM product_images WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
     await pool.query("DELETE FROM product_categories WHERE product_id = ANY($1::integer[])", [sortingProductIds]);
@@ -78,6 +100,11 @@ after(async () => {
   }
   if (childCategoryId) await pool.query("DELETE FROM categories WHERE id = $1", [childCategoryId]);
   if (rootCategoryId) await pool.query("DELETE FROM categories WHERE id = $1", [rootCategoryId]);
+  if (originalPublicTaxonomyFlag === undefined) {
+    delete process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED;
+  } else {
+    process.env.CUSTOMER_TAXONOMY_PUBLIC_ENABLED = originalPublicTaxonomyFlag;
+  }
   await pool.end();
 });
 
@@ -108,19 +135,23 @@ test("администратор создаёт основную группу и
   assert.equal(storedChild?.parent?.id, rootCategoryId);
 });
 
-test("аксессуары отображаются первой основной группой каталога", async () => {
+test("customer taxonomy roots follow their configured public order", async () => {
   const tree = await PublicCatalogService.getTree("ru");
 
-  assert.equal(tree[0]?.slug, "accessories");
+  assert.equal(tree[0]?.slug, "filters-maintenance");
+  assert.equal(tree.at(-2)?.slug, "accessories");
+  assert.equal(tree.at(-1)?.slug, "other");
 });
 
-test("резервная группа Остальное всегда доступна в публичном каталоге", async () => {
+test("virtual Other is always the final public catalog root", async () => {
   const tree = await PublicCatalogService.getTree("ru");
-  const other = tree.find((category) => category.slug === "other");
+  const other = tree.at(-1);
 
   assert.ok(other);
+  assert.equal(other.slug, "other");
   assert.equal(other.name, "Остальное");
   assert.equal(other.parentId, null);
+  assert.equal(other.isVirtual, true);
 });
 
 test("миграция сбрасывает прежние ручные назначения Mercedes", async () => {
@@ -676,6 +707,14 @@ test("каталог сначала показывает наличие, а фо
       INSERT INTO product_categories(product_id, category_id, assignment_source, confidence)
       VALUES($1, $2, 'MANUAL', 100)
     `, [productId, childCategoryId]);
+    await pool.query(`
+      INSERT INTO product_customer_categories(
+        product_id, customer_category_id, is_primary,
+        assignment_source, assignment_origin, confidence,
+        approval_status, approved_at
+      )
+      VALUES($1, $2, TRUE, 'MANUAL', 'ADMIN', 'HIGH', 'MANUAL_APPROVED', NOW())
+    `, [productId, customerChildCategoryId]);
   }
 
   await pool.query(`
@@ -703,8 +742,9 @@ test("каталог сначала показывает наличие, а фо
   `, [ids.unavailableWithPhoto, rootCategoryId]);
 
   const result = await PublicCatalogService.getCategoryProducts({
-    slug: childCategorySlug,
+    slug: customerChildCategorySlug,
     locale: "ru",
+    query: articleSuffix,
   });
 
   assert.deepEqual(
@@ -724,24 +764,26 @@ test("каталог сначала показывает наличие, а фо
   assert.equal(result.products[2].hasRealImage, false);
 
   const availableOnly = await PublicCatalogService.getCategoryProducts({
-    slug: childCategorySlug,
+    slug: customerChildCategorySlug,
     locale: "ru",
     availability: "available",
+    query: articleSuffix,
   });
   assert.deepEqual(availableOnly.products.map((product) => Number(product.id)), [
     ids.availableWithoutPhoto,
   ]);
 
   const unavailableOnly = await PublicCatalogService.getCategoryProducts({
-    slug: childCategorySlug,
+    slug: customerChildCategorySlug,
     locale: "ru",
     availability: "unavailable",
+    query: articleSuffix,
   });
   assert.deepEqual(new Set(unavailableOnly.products.map((product) => Number(product.id))),
     new Set([ids.unavailableWithPhoto, ids.unavailableWithoutPhoto]));
 
   const articleMatch = await PublicCatalogService.getCategoryProducts({
-    slug: childCategorySlug,
+    slug: customerChildCategorySlug,
     locale: "ru",
     query: fixtures[1].article.toLowerCase(),
   });
@@ -759,12 +801,13 @@ test("каталог сначала показывает наличие, а фо
   `, [ids.unavailableWithPhoto, ids.unavailableWithoutPhoto]);
 
   const priceSorted = await PublicCatalogService.getCategoryProducts({
-    slug: childCategorySlug,
+    slug: customerChildCategorySlug,
     locale: "ru",
     availability: "available",
     minPrice: 10,
     maxPrice: 30,
     sort: "price_asc",
+    query: articleSuffix,
   });
   assert.deepEqual(priceSorted.products.map((product) => Number(product.id)), [
     ids.unavailableWithPhoto,
@@ -772,7 +815,7 @@ test("каталог сначала показывает наличие, а фо
     ids.unavailableWithoutPhoto,
   ]);
   assert.deepEqual(priceSorted.filters, {
-    query: "",
+    query: articleSuffix,
     availability: "available",
     minPrice: 10,
     maxPrice: 30,
@@ -785,24 +828,25 @@ test("каталог сначала показывает наличие, а фо
   assert.equal(Number(effectiveCategory.id), childCategoryId);
 
   const parentResult = await PublicCatalogService.getCategoryProducts({
-    slug: rootCategorySlug,
+    slug: customerRootCategorySlug,
     locale: "ru",
+    query: articleSuffix,
   });
   assert.equal(parentResult.pagination.total, 3);
   assert.deepEqual(
     new Set(parentResult.products.map((product) => Number(product.id))),
     new Set(Object.values(ids)),
   );
-  assert.deepEqual(parentResult.category.children, [{
-    id: childCategoryId,
-    slug: childCategorySlug,
-    name: `Тестовая подгруппа ${suffix}`,
-    productCount: 3,
-  }]);
+  const brakeDiscs = parentResult.category.children.find(
+    (category) => category.slug === customerChildCategorySlug,
+  );
+  assert.ok(brakeDiscs);
+  assert.equal(brakeDiscs.id, customerChildCategoryId);
+  assert.ok(brakeDiscs.productCount >= 3);
 
   const beyondLastPage =
     await PublicCatalogService.getCategoryProducts({
-      slug: childCategorySlug,
+      slug: customerChildCategorySlug,
       locale: "ru",
       page: 999,
     });
@@ -811,75 +855,27 @@ test("каталог сначала показывает наличие, а фо
 
   for (const page of [0, -1, 1.5, "abc", "", ["2", "3"]]) {
     assert.equal(await PublicCatalogService.getCategoryProducts({
-      slug: childCategorySlug,
+      slug: customerChildCategorySlug,
       locale: "ru",
       page,
     }), null);
   }
 });
 
-test("sitemap використовує те саме опубліковане дерево, що й публічний каталог", async () => {
-  const fixtureSuffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  let parentId;
-  let populatedChildId;
-  let emptyChildId;
-  let productId;
-
-  try {
-    const parent = await AdminCatalogCategoryService.createCategory({
-      nameUk: `SEO контейнер ${fixtureSuffix}`,
-      nameRu: `SEO контейнер ${fixtureSuffix}`,
-      nameEn: `SEO container ${fixtureSuffix}`,
-    });
-    parentId = parent.id;
-    const populatedChild = await AdminCatalogCategoryService.createCategory({
-      parentId,
-      nameUk: `SEO категорія ${fixtureSuffix}`,
-      nameRu: `SEO категория ${fixtureSuffix}`,
-      nameEn: `SEO category ${fixtureSuffix}`,
-    });
-    populatedChildId = populatedChild.id;
-    const emptyChild = await AdminCatalogCategoryService.createCategory({
-      parentId,
-      nameUk: `Порожня SEO категорія ${fixtureSuffix}`,
-      nameRu: `Пустая SEO категория ${fixtureSuffix}`,
-      nameEn: `Empty SEO category ${fixtureSuffix}`,
-    });
-    emptyChildId = emptyChild.id;
-
-    const article = `SEOSITEMAP${Date.now()}`;
-    const product = await pool.query(`
-      INSERT INTO products(article, article_normalized, name, is_active)
-      VALUES($1, $1, 'SEO sitemap fixture', TRUE)
-      RETURNING id
-    `, [article]);
-    productId = Number(product.rows[0].id);
-    await pool.query(`
-      INSERT INTO product_categories(product_id, category_id, assignment_source, confidence)
-      VALUES($1, $2, 'MANUAL', 100)
-    `, [productId, populatedChildId]);
-
-    const tree = await PublicCatalogService.getTree("uk");
-    const sitemap = await PublicSeoService.getSitemap();
-    const flatten = (categories) => categories.flatMap((category) => [
+test("sitemap uses real customer categories but never publishes virtual Other", async () => {
+  const tree = await PublicCatalogService.getTree("uk");
+  const sitemap = await PublicSeoService.getSitemap();
+  const flattenReal = (categories) => (
+    categories.flatMap((category) => (
+      category.isVirtual || Number(category.productCount) <= 0
+    ) ? [] : [
       category.slug,
-      ...flatten(category.children || []),
-    ]);
-    const treeSlugs = flatten(tree);
-    const sitemapSlugs = sitemap.categories.map((category) => category.slug);
+      ...flattenReal(category.children || []),
+    ]));
+  const treeSlugs = flattenReal(tree);
+  const sitemapSlugs = sitemap.categories.map((category) => category.slug);
 
-    assert.ok(treeSlugs.includes(parent.slug), "контейнер із товарами в дочірній категорії має лишитися");
-    assert.ok(treeSlugs.includes(populatedChild.slug), "категорія з товаром має лишитися");
-    assert.equal(treeSlugs.includes(emptyChild.slug), false, "порожній leaf не публікується в дереві");
-    assert.equal(sitemapSlugs.includes(emptyChild.slug), false, "порожній leaf не публікується в sitemap");
-    assert.deepEqual(sitemapSlugs, treeSlugs, "sitemap і каталог мають використовувати одне правило");
-  } finally {
-    if (productId) {
-      await pool.query("DELETE FROM product_categories WHERE product_id = $1", [productId]);
-      await pool.query("DELETE FROM products WHERE id = $1", [productId]);
-    }
-    if (emptyChildId) await pool.query("DELETE FROM categories WHERE id = $1", [emptyChildId]);
-    if (populatedChildId) await pool.query("DELETE FROM categories WHERE id = $1", [populatedChildId]);
-    if (parentId) await pool.query("DELETE FROM categories WHERE id = $1", [parentId]);
-  }
+  assert.equal(tree.at(-1)?.slug, "other");
+  assert.equal(sitemapSlugs.includes("other"), false);
+  assert.deepEqual(sitemapSlugs, treeSlugs);
 });

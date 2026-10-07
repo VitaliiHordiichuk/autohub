@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { isCustomerTaxonomyPublicEnabled } from "../config/featureFlags.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import {
@@ -98,10 +99,13 @@ function mergeRelatedProducts(items, links) {
   return [...related.values()];
 }
 
-function publishedCategorySlugs(categories) {
-  return categories.flatMap((category) => [
+function publishedCategorySlugs(categories, customerTaxonomyEnabled) {
+  return categories.flatMap((category) => (
+    customerTaxonomyEnabled
+      && (category.isVirtual || Number(category.productCount) <= 0)
+  ) ? [] : [
     { slug: category.slug },
-    ...publishedCategorySlugs(category.children || []),
+    ...publishedCategorySlugs(category.children || [], customerTaxonomyEnabled),
   ]);
 }
 
@@ -379,7 +383,10 @@ export const PublicSeoService = {
           isAvailable: row.is_available === true,
         };
       }),
-      categories: publishedCategorySlugs(categoryTree),
+      categories: publishedCategorySlugs(
+        categoryTree,
+        isCustomerTaxonomyPublicEnabled()
+      ),
       brands: brandsResult.rows.map((row) => ({
         id: Number(row.id),
         name: row.name,
