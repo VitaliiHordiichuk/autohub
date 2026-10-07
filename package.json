@@ -18,7 +18,8 @@
     "customer-taxonomy:preview:phase2g2": "node scripts/preview-customer-taxonomy-phase2g2.mjs",
     "customer-taxonomy:backfill": "node scripts/backfill-customer-taxonomy.mjs",
     "customer-taxonomy:preview:phase2g3": "node scripts/preview-customer-taxonomy-phase2g3.mjs",
-    "customer-taxonomy:upgrade:phase3c-steering-pumps": "node scripts/upgrade-phase3c-steering-pumps.mjs"
+    "customer-taxonomy:upgrade:phase3c-steering-pumps": "node scripts/upgrade-phase3c-steering-pumps.mjs",
+    "customer-taxonomy:backfill:phase3f5-brakes": "node scripts/backfill-phase3f5-brakes.mjs"
   },
   "keywords": [],
   "author": "",

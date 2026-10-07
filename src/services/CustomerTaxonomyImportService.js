@@ -109,7 +109,7 @@ function safeTopLevelDisposition({ product, resolution, existingMemberships }) {
   };
 }
 
-function safeProposal(category) {
+function safeProposal(category, assignmentOrigin) {
   return {
     category: {
       id: category.id,
@@ -118,11 +118,77 @@ function safeProposal(category) {
     },
     isPrimary: true,
     assignmentSource: CUSTOMER_ASSIGNMENT_SOURCE.EPC_FALLBACK,
-    assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+    assignmentOrigin,
     ruleCode: null,
     ruleVersion: null,
     confidence: "MEDIUM",
     approvalStatus: CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED,
+  };
+}
+
+const supportedEvaluationOrigins = new Set([
+  CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+  CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL,
+]);
+
+function assertEvaluationOrigin(assignmentOrigin) {
+  if (!supportedEvaluationOrigins.has(assignmentOrigin)) {
+    throw new Error(
+      `Unsupported customer taxonomy evaluation origin: ${assignmentOrigin}`,
+    );
+  }
+}
+
+async function evaluateProduct({
+  product,
+  existingMemberships,
+  context,
+}, {
+  db,
+  repository,
+  resolver,
+  assignmentOrigin,
+}) {
+  assertEvaluationOrigin(assignmentOrigin);
+  const rules = context?.rules || await repository.listActiveRules(db);
+  const resolution = resolver({
+    product,
+    rules,
+    existingMemberships,
+    assignmentOrigin,
+  });
+  const disposition = safeTopLevelDisposition({
+    product,
+    resolution,
+    existingMemberships,
+  });
+  const proposals = (resolution.proposals || []).filter((proposal) => (
+    proposal.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+  ));
+  if (!primaryProposal(proposals) && disposition.section) {
+    let category = context?.categoryBySlug?.get(disposition.section) || null;
+    if (!category) {
+      [category] = await repository.listCategoriesBySlugs([disposition.section], db);
+      if (category && context?.categoryBySlug) {
+        context.categoryBySlug.set(disposition.section, category);
+      }
+    }
+    if (
+      !category
+      || category.status !== "ACTIVE"
+      || category.isActive !== true
+      || category.parentId !== null
+    ) {
+      throw new Error(`Invalid SAFE customer taxonomy category: ${disposition.section}`);
+    }
+    proposals.push(safeProposal(category, assignmentOrigin));
+  }
+  return {
+    product,
+    resolution,
+    disposition,
+    proposals,
+    candidate: primaryProposal(proposals),
   };
 }
 
@@ -180,11 +246,32 @@ export const CustomerTaxonomyImportService = {
     };
   },
 
+  async evaluateProduct({ product, existingMemberships = [], context }, {
+    db,
+    repository = CustomerTaxonomyRepository,
+    resolver = resolveCustomerTaxonomy,
+    assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+  } = {}) {
+    if (!db) throw new Error("Customer taxonomy import transaction client is required");
+    if (!product) throw new Error("Product is required for customer taxonomy evaluation");
+    return evaluateProduct({
+      product,
+      existingMemberships,
+      context,
+    }, {
+      db,
+      repository,
+      resolver,
+      assignmentOrigin,
+    });
+  },
+
   async classifyProduct({ productId, context }, {
     db,
     repository = CustomerTaxonomyRepository,
     resolver = resolveCustomerTaxonomy,
     assignmentService = CustomerTaxonomyAssignmentService,
+    assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
   } = {}) {
     if (!db) throw new Error("Customer taxonomy import transaction client is required");
     const normalizedProductId = Number(productId);
@@ -199,44 +286,26 @@ export const CustomerTaxonomyImportService = {
       db,
       { lock: true },
     );
-    const rules = context?.rules || await repository.listActiveRules(db);
-    const resolution = resolver({
+    const evaluation = await evaluateProduct({
       product,
-      rules,
       existingMemberships,
-      assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+      context,
+    }, {
+      db,
+      repository,
+      resolver,
+      assignmentOrigin,
     });
-    const disposition = safeTopLevelDisposition({
-      product,
+    const {
       resolution,
-      existingMemberships,
-    });
-    const proposals = (resolution.proposals || []).filter((proposal) => (
-      proposal.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
-    ));
-    if (!primaryProposal(proposals) && disposition.section) {
-      let category = context?.categoryBySlug?.get(disposition.section) || null;
-      if (!category) {
-        [category] = await repository.listCategoriesBySlugs([disposition.section], db);
-        if (category && context?.categoryBySlug) {
-          context.categoryBySlug.set(disposition.section, category);
-        }
-      }
-      if (
-        !category
-        || category.status !== "ACTIVE"
-        || category.isActive !== true
-        || category.parentId !== null
-      ) {
-        throw new Error(`Invalid SAFE customer taxonomy category: ${disposition.section}`);
-      }
-      proposals.push(safeProposal(category));
-    }
-    const candidate = primaryProposal(proposals);
+      disposition,
+      proposals,
+      candidate,
+    } = evaluation;
     const assignment = await assignmentService.applyResolutionInTransaction({
       productId: normalizedProductId,
       resolution: { ...resolution, proposals },
-      assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+      assignmentOrigin,
     }, { db, repository });
     if (assignment.decision === CUSTOMER_TAXONOMY_DECISION.INVALID_EXISTING_PRIMARY) {
       throw new CustomerTaxonomyImportIntegrityError(
