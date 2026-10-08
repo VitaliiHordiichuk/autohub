@@ -164,6 +164,8 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
           article,
           locale: "uk",
         }, pool);
+      assert.equal(productSeo.product.category.slug, categorySlug);
+      assert.equal(productSeo.product.category.parent.slug, "brakes");
       const brandPage =
         await PublicSeoService.getBrand({
           slug: publicBrandSlug(

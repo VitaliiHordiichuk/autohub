@@ -1,6 +1,18 @@
 import { PublicCatalogService } from "../services/PublicCatalogService.js";
 import { CustomerPricingService } from "../services/CustomerPricingService.js";
 import { PublicAvailabilityContextService } from "../services/PublicAvailabilityContextService.js";
+import { LegacyCatalogRedirectService } from "../services/LegacyCatalogRedirectService.js";
+
+export async function getLegacyCatalogRedirect(req, res) {
+  res.set("Cache-Control", "no-store");
+  try {
+    const redirect = await LegacyCatalogRedirectService.resolve(req.params.slug);
+    return res.json({ success: true, redirect });
+  } catch (error) {
+    console.error("Ошибка перенаправления каталога:", error);
+    return res.status(503).json({ success: false });
+  }
+}
 
 export async function getCatalogTree(req, res) {
   try {

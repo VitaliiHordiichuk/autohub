@@ -158,7 +158,7 @@ export const PublicSeoService = {
           AND language_code = ANY($2::varchar[])
         ORDER BY language_code
       `, [product.id, [...PUBLIC_LOCALES]]),
-      EffectiveProductCategoryService.getByProductId(product.id, db),
+      EffectiveProductCategoryService.getPublicByProductId(product.id, db),
       db.query(`
         SELECT
           links.link_type,
@@ -303,10 +303,28 @@ export const PublicSeoService = {
             FROM product_offers po
             LEFT JOIN warehouses w ON w.id = po.warehouse_id
             LEFT JOIN suppliers s ON s.id = COALESCE(po.supplier_id, w.supplier_id)
+            LEFT JOIN LATERAL (
+              SELECT COALESCE(SUM(sr.quantity), 0) AS reserved_quantity
+              FROM stock_reservations sr
+              WHERE sr.product_offer_id = po.id
+                AND (sr.status = 'ORDER_PENDING' OR (sr.status = 'ACTIVE'
+                  AND (sr.order_id IS NOT NULL OR sr.reserved_until IS NULL
+                    OR sr.reserved_until > CURRENT_TIMESTAMP)))
+            ) reservations ON TRUE
+            CROSS JOIN LATERAL (
+              SELECT CASE WHEN po.price_mode = 'MANUAL' AND po.manual_retail_price IS NOT NULL
+                THEN po.manual_retail_price ELSE po.retail_price END AS retail_price
+            ) effective_price
             WHERE po.product_id = p.id
               AND po.is_available = TRUE
               AND COALESCE(po.is_hidden, FALSE) = FALSE
-              AND po.quantity > 0
+              AND po.quantity - reservations.reserved_quantity > 0
+              AND effective_price.retail_price > 0
+              AND effective_price.retail_price::text NOT IN ('NaN', 'Infinity', '-Infinity')
+              AND (po.minimum_sale_price IS NULL OR (
+                po.minimum_sale_price >= 0
+                AND po.minimum_sale_price::text NOT IN ('NaN', 'Infinity', '-Infinity')
+              ))
               AND (w.id IS NULL OR w.is_active = TRUE)
               AND (s.id IS NULL OR s.is_active = TRUE)
           ) AS is_available

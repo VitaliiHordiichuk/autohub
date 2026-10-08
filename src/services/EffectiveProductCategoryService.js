@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { isCustomerTaxonomyPublicEnabled } from "../config/featureFlags.js";
 
 function safeAlias(value, fallback) {
   const alias = String(value || "");
@@ -66,6 +67,35 @@ export function effectiveProductCategoryQuery(productAlias = "product") {
 }
 
 export const EffectiveProductCategoryService = {
+  // Public links must use the same taxonomy as the catalog. Technical EPC
+  // callers (including placeholders) continue using the legacy query below.
+  async getPublicByProductId(productId, db = pool) {
+    if (!isCustomerTaxonomyPublicEnabled()) return this.getByProductId(productId, db);
+    const result = await db.query(`
+      SELECT category.id, category.parent_id, category.slug,
+        uk.name AS name, uk.name AS name_uk, ru.name AS name_ru, en.name AS name_en,
+        parent.slug AS parent_slug,
+        parent_uk.name AS parent_name, parent_uk.name AS parent_name_uk,
+        parent_ru.name AS parent_name_ru, parent_en.name AS parent_name_en
+      FROM product_customer_categories membership
+      JOIN customer_categories category ON category.id = membership.customer_category_id
+        AND category.status = 'ACTIVE' AND category.is_active = TRUE
+      LEFT JOIN customer_category_translations uk ON uk.category_id = category.id AND uk.language_code = 'uk'
+      LEFT JOIN customer_category_translations ru ON ru.category_id = category.id AND ru.language_code = 'ru'
+      LEFT JOIN customer_category_translations en ON en.category_id = category.id AND en.language_code = 'en'
+      LEFT JOIN customer_categories parent ON parent.id = category.parent_id
+        AND parent.status = 'ACTIVE' AND parent.is_active = TRUE
+      LEFT JOIN customer_category_translations parent_uk ON parent_uk.category_id = parent.id AND parent_uk.language_code = 'uk'
+      LEFT JOIN customer_category_translations parent_ru ON parent_ru.category_id = parent.id AND parent_ru.language_code = 'ru'
+      LEFT JOIN customer_category_translations parent_en ON parent_en.category_id = parent.id AND parent_en.language_code = 'en'
+      WHERE membership.product_id = $1 AND membership.is_primary = TRUE
+        AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        AND (category.parent_id IS NULL OR parent.id IS NOT NULL)
+      LIMIT 1
+    `, [productId]);
+    return result.rows[0] || null;
+  },
+
   async getByProductId(productId, db = pool) {
     const result = await db.query(`
       SELECT
