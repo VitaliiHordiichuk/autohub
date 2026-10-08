@@ -76,7 +76,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
   `);
   assert.deepEqual(leaves.rows, [
     { parent_slug: "accessories", count: 7 },
-    { parent_slug: "body-glass", count: 18 },
+    { parent_slug: "body-glass", count: 19 },
     { parent_slug: "brakes", count: 6 },
     { parent_slug: "climate", count: 7 },
     { parent_slug: "cooling", count: 7 },
@@ -110,7 +110,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
       (SELECT COUNT(*)::integer FROM product_customer_categories) AS membership_count
   `);
   assert.deepEqual(seededFoundation.rows[0], {
-    rule_count: 1906,
+    rule_count: 2280,
     membership_count: 0,
   });
 });

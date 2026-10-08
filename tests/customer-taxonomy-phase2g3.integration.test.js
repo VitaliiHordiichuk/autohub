@@ -19,6 +19,10 @@ const ruleMigrationUrl = new URL(
   "../migrations/102_seed_customer_taxonomy_phase2g3_fasteners_rules.sql",
   import.meta.url,
 );
+const currentMigrationUrl = new URL(
+  "../migrations/104_add_customer_taxonomy_windshields.sql",
+  import.meta.url,
+);
 const touchedProductIds = new Set();
 const createdProductIds = [];
 const historicalExhaustMountArticles = Object.freeze([
@@ -72,7 +76,7 @@ after(async () => {
   await pool.end();
 });
 
-test("migrations 101/102 create 12 hidden Fasteners leaves and version rules to v9", async () => {
+test("migrations 101/102 remain historical after windshield rules advance to v10", async () => {
   const categories = await pool.query(`
     SELECT COUNT(DISTINCT child.id)::integer AS leaves,
            COUNT(DISTINCT child.id) FILTER (WHERE child.status = 'ACTIVE'
@@ -96,16 +100,17 @@ test("migrations 101/102 create 12 hidden Fasteners leaves and version rules to 
     SELECT
       COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = FALSE)::integer
         AS historical_v8,
-      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = FALSE
         AND EXISTS (
           SELECT 1 FROM customer_classification_rules historical
           WHERE historical.code = customer_classification_rules.code
             AND historical.detector_version = 8
             AND historical.version + 1 = customer_classification_rules.version
         ))::integer AS v9_successors,
-      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = FALSE
         AND version = 1 AND code LIKE '%PHASE2G3_V1')::integer AS phase2g3,
-      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE)::integer AS active_v9,
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = FALSE)::integer AS historical_v9,
+      COUNT(*) FILTER (WHERE detector_version = 10 AND is_active = TRUE)::integer AS active_v10,
       COUNT(*)::integer AS total,
       (SELECT COUNT(*)::integer FROM (
         SELECT code FROM customer_classification_rules WHERE is_active = TRUE
@@ -117,8 +122,9 @@ test("migrations 101/102 create 12 hidden Fasteners leaves and version rules to 
     historical_v8: 361,
     v9_successors: 361,
     phase2g3: 12,
-    active_v9: 373,
-    total: 1906,
+    historical_v9: 373,
+    active_v10: 374,
+    total: 2280,
     duplicate_active: 0,
   });
 
@@ -129,7 +135,7 @@ test("migrations 101/102 create 12 hidden Fasteners leaves and version rules to 
       ON successor.code = historical.code
      AND successor.version = historical.version + 1
      AND successor.detector_version = 9
-     AND successor.is_active = TRUE
+     AND successor.is_active = FALSE
     WHERE historical.detector_version = 8
       AND (successor.source_kind IS DISTINCT FROM historical.source_kind
         OR successor.assignment_role IS DISTINCT FROM historical.assignment_role
@@ -146,7 +152,7 @@ test("migrations 101/102 create 12 hidden Fasteners leaves and version rules to 
   assert.equal(successorDrift.rowCount, 0);
 });
 
-test("migrations 101/102 are repeat-safe and never write memberships or EPC taxonomy", async () => {
+test("historical migrations stay immutable and current migration is repeat-safe", async () => {
   const categorySql = await readFile(categoryMigrationUrl, "utf8");
   const ruleSql = await readFile(ruleMigrationUrl, "utf8");
   for (const sql of [categorySql, ruleSql]) {
@@ -162,8 +168,7 @@ test("migrations 101/102 are repeat-safe and never write memberships or EPC taxo
       (SELECT COUNT(*)::integer FROM categories) AS epc_categories,
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
-  await pool.query(categorySql);
-  await pool.query(ruleSql);
+  await pool.query(await readFile(currentMigrationUrl, "utf8"));
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
@@ -174,7 +179,7 @@ test("migrations 101/102 are repeat-safe and never write memberships or EPC taxo
   assert.deepEqual(afterResult.rows[0], before.rows[0]);
 });
 
-test("an inactive v8 rule remains valid provenance for its historical membership", async () => {
+test("an inactive v8 rule remains valid when the current migration is replayed", async () => {
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Historical detector v8 membership', TRUE)
@@ -202,7 +207,7 @@ test("an inactive v8 rule remains valid provenance for its historical membership
     SELECT rule_code, rule_version, updated_at
     FROM product_customer_categories WHERE product_id = $1
   `, [id]);
-  await pool.query(await readFile(ruleMigrationUrl, "utf8"));
+  await pool.query(await readFile(currentMigrationUrl, "utf8"));
   const afterResult = await pool.query(`
     SELECT membership.rule_code, membership.rule_version, membership.updated_at,
            rule.detector_version, rule.is_active
@@ -248,7 +253,7 @@ test("PostgreSQL preview preserves all nine historical Exhaust memberships", asy
     FROM customer_classification_rules rule
     JOIN customer_categories category ON category.id = rule.target_category_id
     WHERE rule.is_active = TRUE
-      AND rule.detector_version = 9
+      AND rule.detector_version = 10
       AND rule.match_type = 'TYPE_CODE'
       AND rule.match_value = 'EXHAUST_MOUNT'
       AND category.slug = 'exhaust-mounts'

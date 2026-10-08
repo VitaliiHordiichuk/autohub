@@ -71,6 +71,10 @@ const phase2g3RuleMigrationUrl = new URL(
   "../migrations/102_seed_customer_taxonomy_phase2g3_fasteners_rules.sql",
   import.meta.url,
 );
+const windshieldMigrationUrl = new URL(
+  "../migrations/104_add_customer_taxonomy_windshields.sql",
+  import.meta.url,
+);
 let rules = [];
 
 const historicalExhaustMountArticles = Object.freeze([
@@ -131,7 +135,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
   `);
   assert.deepEqual(grouped.rows, [
     { section: "accessories", count: 103 },
-    { section: "body-glass", count: 42 },
+    { section: "body-glass", count: 43 },
     { section: "brakes", count: 9 },
     { section: "climate", count: 9 },
     { section: "cooling", count: 10 },
@@ -152,7 +156,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     SELECT id
     FROM customer_classification_rules
     WHERE is_active = TRUE
-      AND (detector_version <> 9
+      AND (detector_version <> 10
        OR source_kind <> 'RULE'
        OR assignment_role <> 'PRIMARY'
        OR confidence <> 'HIGH'
@@ -188,20 +192,27 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
         WHERE detector_version = 8 AND is_active = FALSE
       )::integer AS historical_d8,
       COUNT(*) FILTER (
-        WHERE detector_version = 9 AND is_active = TRUE
+        WHERE detector_version = 9 AND is_active = FALSE
+      )::integer AS historical_d9,
+      COUNT(*) FILTER (
+        WHERE detector_version = 10 AND is_active = TRUE
           AND EXISTS (
             SELECT 1
             FROM customer_classification_rules historical
             WHERE historical.code = customer_classification_rules.code
-              AND historical.detector_version = 8
+              AND historical.detector_version = 9
               AND historical.version + 1 = customer_classification_rules.version
           )
-      )::integer AS active_v9_successors,
+      )::integer AS active_v10_successors,
       COUNT(*) FILTER (
-        WHERE detector_version = 9 AND is_active = TRUE
+        WHERE detector_version = 9 AND is_active = FALSE
           AND version = 1
           AND code LIKE '%PHASE2G3_V1'
-      )::integer AS new_phase2g3_v1_d9,
+      )::integer AS historical_phase2g3_v1_d9,
+      COUNT(*) FILTER (
+        WHERE detector_version = 10 AND is_active = TRUE
+          AND code = 'GLASS_WINDSHIELD_A_EPC67_V1'
+      )::integer AS new_windshield_v1_d10,
       COUNT(*) FILTER (WHERE is_active = TRUE)::integer AS active_total,
       COUNT(*)::integer AS total
     FROM customer_classification_rules
@@ -215,10 +226,12 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     historical_d6: 258,
     historical_d7: 313,
     historical_d8: 361,
-    active_v9_successors: 361,
-    new_phase2g3_v1_d9: 12,
-    active_total: 373,
-    total: 1906,
+    historical_d9: 373,
+    active_v10_successors: 373,
+    historical_phase2g3_v1_d9: 12,
+    new_windshield_v1_d10: 1,
+    active_total: 374,
+    total: 2280,
   });
 
   const versionDrift = await pool.query(`
@@ -227,9 +240,9 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     JOIN customer_classification_rules active
       ON active.code = historical.code
      AND active.version = historical.version + 1
-     AND active.detector_version = 9
+     AND active.detector_version = 10
      AND active.is_active = TRUE
-    WHERE historical.detector_version = 8
+    WHERE historical.detector_version = 9
       AND (
         active.source_kind IS DISTINCT FROM historical.source_kind
         OR active.assignment_role IS DISTINCT FROM historical.assignment_role
@@ -276,6 +289,7 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
   const phase2g2RuleSql = await readFile(phase2g2RuleMigrationUrl, "utf8");
   const phase2g3CategorySql = await readFile(phase2g3CategoryMigrationUrl, "utf8");
   const phase2g3RuleSql = await readFile(phase2g3RuleMigrationUrl, "utf8");
+  const windshieldSql = await readFile(windshieldMigrationUrl, "utf8");
   for (const sql of [
     phase2Sql,
     categorySql,
@@ -291,6 +305,7 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
     phase2g2RuleSql,
     phase2g3CategorySql,
     phase2g3RuleSql,
+    windshieldSql,
   ]) {
     assert.doesNotMatch(
       sql,
@@ -305,10 +320,9 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
       (SELECT COUNT(*)::integer FROM categories) AS epc_categories,
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
-  // Historical migrations are never replayed after a later detector generation.
-  // Historical detector generations are immutable. Only current 101/102 replay.
-  await pool.query(phase2g3CategorySql);
-  await pool.query(phase2g3RuleSql);
+  // Historical detector migrations are immutable and never replayed after a
+  // newer generation. The current migration itself remains repeat-safe.
+  await pool.query(windshieldSql);
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
@@ -317,12 +331,12 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   assert.deepEqual(afterResult.rows[0], beforeResult.rows[0]);
-  assert.equal(afterResult.rows[0].rules, 1906);
+  assert.equal(afterResult.rows[0].rules, 2280);
   assert.equal(afterResult.rows[0].memberships, 0);
 });
 
-test("inactive historical v1 membership remains valid and PHASE 2G.3 migration replay does not rewrite it", async () => {
-  const phase2g3RuleSql = await readFile(phase2g3RuleMigrationUrl, "utf8");
+test("inactive historical v1 membership remains valid when migration 104 is replayed", async () => {
+  const currentSql = await readFile(windshieldMigrationUrl, "utf8");
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Historical taxonomy membership', TRUE)
@@ -364,7 +378,7 @@ test("inactive historical v1 membership remains valid and PHASE 2G.3 migration r
       ruleActive: false,
     });
 
-    await pool.query(phase2g3RuleSql);
+    await pool.query(currentSql);
 
     const afterResult = await pool.query(`
       SELECT membership.rule_code, membership.rule_version,
@@ -422,20 +436,20 @@ test("reviewed filter EPC and TYPE_CODE combinations resolve to READY leaves", (
   }, "filters-wipers");
 });
 
-test("resolver uses current detector-v9 successors", () => {
+test("resolver uses current detector-v10 successors", () => {
   const historicalSuccessor = expectAutoApproved({
     article: "A0001800109",
     name: "Масляний фільтр",
     epc: "18",
   }, "filters-oil");
-  assert.equal(historicalSuccessor.ruleVersion, 8);
+  assert.equal(historicalSuccessor.ruleVersion, 9);
 
   const newPhase2dRule = expectAutoApproved({
     article: "A0004600000",
     name: "Рейка рульова",
     epc: "46",
   }, "steering-racks");
-  assert.equal(newPhase2dRule.ruleVersion, 7);
+  assert.equal(newPhase2dRule.ruleVersion, 8);
 });
 
 test("unsafe filter contexts, belt tensioners and wiper mechanisms are not auto-approved", () => {
@@ -713,7 +727,7 @@ test("rubber muffler hangers resolve as mounts and never as complete mufflers", 
     name: "Глушитель",
     epc: "49",
   }, "exhaust-mufflers");
-  assert.equal(muffler.ruleVersion, 7);
+  assert.equal(muffler.ruleVersion, 8);
 });
 
 test("generic sensors, pipes and muffler components do not become complete exhaust parts", () => {
@@ -961,7 +975,7 @@ test("all 509 accepted PHASE 2G.3 SAFE and REVIEW rows receive no narrow proposa
   }
 });
 
-test("all nine historical Exhaust memberships remain compatible with detector v9", () => {
+test("all nine historical Exhaust memberships remain compatible with detector v10", () => {
   const exhaustRule = rules.find((rule) => (
     rule.targetCategorySlug === "exhaust-mounts"
     && rule.matchType === "TYPE_CODE"
@@ -1015,7 +1029,7 @@ test("an unknown EPC 49 clamp never resolves to a generic Fasteners leaf", () =>
   assert.notEqual(result.proposals[0].category.parentSlug, "fasteners-seals-standard-parts");
 });
 
-test("detector v9 preserves every detector-v8 classification target without writes", async () => {
+test("detector v10 preserves every detector-v8 classification target without writes", async () => {
   const products = await CustomerTaxonomyRepository.listProductsForPreview(pool);
   const historicalResult = await pool.query(`
     SELECT
@@ -1032,7 +1046,7 @@ test("detector v9 preserves every detector-v8 classification target without writ
   `);
   const historicalRulesUnderCurrentDetector = historicalResult.rows.map((rule) => ({
     ...rule,
-    detector_version: 9,
+    detector_version: 10,
     is_active: true,
   }));
   const baseline = new Map();

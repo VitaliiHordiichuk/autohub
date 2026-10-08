@@ -131,7 +131,7 @@ async function seedProductionRegressionMemberships(products) {
   const exhaustCategory = await category("exhaust-mounts");
   const steeringCategory = await category("steering-pumps");
   const exhaustRule = await rule("EXHAUST_MOUNT_A_EPC49_V1", 2);
-  const steeringRule = await rule("STEERING_PUMP_A_EPC46_V1", 7);
+  const steeringRule = await rule("STEERING_PUMP_A_EPC46_V1", 8);
   assert.equal(exhaustRule.is_active, false);
   assert.equal(steeringRule.is_active, true);
   for (const article of exhaustArticles) {

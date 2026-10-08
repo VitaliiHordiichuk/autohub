@@ -15,8 +15,8 @@ export const PHASE3C_STEERING_ARTICLES = Object.freeze([
 export const PHASE3C_STEERING_CONFIRMATION = "PHASE3C_STEERING_PUMPS";
 export const PHASE3C_STEERING_RULE = Object.freeze({
   code: "STEERING_PUMP_A_EPC46_V1",
-  version: 7,
-  detectorVersion: 9,
+  version: 8,
+  detectorVersion: 10,
   typeCode: "STEERING_PUMP",
   epc: "46",
   currentCategory: "steering",

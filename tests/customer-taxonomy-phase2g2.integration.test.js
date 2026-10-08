@@ -60,7 +60,7 @@ after(async () => {
   await pool.end();
 });
 
-test("migrations 099/100 Electrical leaves and v8 rules remain historical under v9", async () => {
+test("migrations 099/100 Electrical leaves and v8/v9 rules remain historical under v10", async () => {
   const categories = await pool.query(`
     SELECT COUNT(DISTINCT child.id)::integer AS leaves,
            COUNT(DISTINCT child.id) FILTER (WHERE child.status = 'ACTIVE'
@@ -93,7 +93,8 @@ test("migrations 099/100 Electrical leaves and v8 rules remain historical under 
         ))::integer AS v8_successors,
       COUNT(*) FILTER (WHERE detector_version = 8 AND is_active = FALSE
         AND version = 1 AND code LIKE '%PHASE2G2_V1')::integer AS phase2g2,
-      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = TRUE)::integer AS active_v9,
+      COUNT(*) FILTER (WHERE detector_version = 9 AND is_active = FALSE)::integer AS historical_v9,
+      COUNT(*) FILTER (WHERE detector_version = 10 AND is_active = TRUE)::integer AS active_v10,
       COUNT(*)::integer AS total,
       (SELECT COUNT(*)::integer FROM (
         SELECT code FROM customer_classification_rules WHERE is_active = TRUE
@@ -105,8 +106,9 @@ test("migrations 099/100 Electrical leaves and v8 rules remain historical under 
     historical_v7: 313,
     v8_successors: 313,
     phase2g2: 48,
-    active_v9: 373,
-    total: 1906,
+    historical_v9: 373,
+    active_v10: 374,
+    total: 2280,
     duplicate_active: 0,
   });
 

@@ -4,7 +4,7 @@ import { CUSTOMER_TAXONOMY_PHASE2G1_REVIEW } from "../data/CustomerTaxonomyPhase
 import { CUSTOMER_TAXONOMY_PHASE2G2_REVIEW } from "../data/CustomerTaxonomyPhase2G2Review.js";
 import { CUSTOMER_TAXONOMY_PHASE2G3_REVIEW } from "../data/CustomerTaxonomyPhase2G3Review.js";
 
-export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 9;
+export const CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION = 10;
 
 export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "FILTER_OIL",
@@ -137,6 +137,7 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "BODY_BUMPER_MOUNT",
   "BODY_MIRROR_PART",
   "GLASS_SIDE_WINDOW",
+  "GLASS_WINDSHIELD",
   "BODY_EMBLEM",
   "BODY_TAILGATE_TRUNK_LID",
   "BODY_WHEEL_ARCH_LINER",
@@ -368,6 +369,14 @@ function isBrakeDiscComponent(text) {
 
 function isBrakeCaliperComponent(text) {
   return /(?:клапан|корпус|направля|пильовик|рем.?комплект|скоба|г[іи]льз|втул|valve|housing|guide|boot|repair\s+kit|bracket|sleeve)/iu.test(text);
+}
+
+function detectWindshieldTypes(text, epcGroups) {
+  if (!epcGroups.has("67")) return [];
+  const windshield = /(?:(?:лобов[а-яіїєґё]*|в[іе]тров[а-яіїєґё]*)\s+(?:скл[а-яіїєґё]*|стекл[а-яіїєґё]*)|(?:скл[а-яіїєґё]*|стекл[а-яіїєґё]*)\s+(?:лобов[а-яіїєґё]*|в[іе]тров[а-яіїєґё]*)|\b(?:windshield|windscreen|windschutzscheibe|windscheibe)\b|\bwindsch\.?\s*scheibe\b|\bfront\s+(?:windshield|windscreen|glass)\b)/iu.test(text);
+  if (!windshield) return [];
+  const relatedPart = /(?:боков|задн|панорам|side|rear|panoramic|ущ[іи]льн|уплотн|seal|gasket|молдинг|mould|molding|trim|датчик|сенсор|sensor|креп|кр[іи]п|кронштейн|bracket|mount|support|опор|рамк|frame|накладк|cover|protector|щ[іе]тк|дв[іи]рник|дворник|wiper|омивач|омывател|washer)/iu.test(text);
+  return relatedPart ? [] : ["GLASS_WINDSHIELD"];
 }
 
 function detectSteeringTypes(text, epcGroups) {
@@ -632,6 +641,7 @@ export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
   const epcGroups = technicalEpcGroups(product);
+  const windshieldTypes = detectWindshieldTypes(text, epcGroups);
   const phase2g3Disposition = reviewedPhase2G3Disposition(product, epcGroups);
   if (phase2g3Disposition?.finalBucket === "HIGH") {
     return phase2g3Disposition.typeCode ? [phase2g3Disposition.typeCode] : [];
@@ -650,6 +660,10 @@ export function detectCustomerProductTypes(product = {}) {
     return phase2g1Disposition.typeCode ? [phase2g1Disposition.typeCode] : [];
   }
   if (["SAFE_TOPLEVEL", "REAL_REVIEW"].includes(phase2g1Disposition?.finalBucket)) {
+    if (
+      phase2g1Disposition.finalBucket === "SAFE_TOPLEVEL"
+      && windshieldTypes.length
+    ) return windshieldTypes;
     return [];
   }
   const phase2fDisposition = reviewedPhase2FDisposition(product, epcGroups);
@@ -662,6 +676,7 @@ export function detectCustomerProductTypes(product = {}) {
   const detected = detectors
     .filter(([, pattern]) => pattern.test(text))
     .map(([typeCode]) => typeCode);
+  detected.push(...windshieldTypes);
   if (isBrakeDiscComponent(text)) {
     const index = detected.indexOf("BRAKE_DISC");
     if (index >= 0) detected.splice(index, 1);

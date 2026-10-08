@@ -88,6 +88,7 @@ function mapProductForResolution(row) {
       ? null
       : Number(row.brand_id),
     brandName: row.brand_name || null,
+    translations: row.translations || [],
     technicalEpcGroups: technicalEpcGroups(row),
     technicalCategories: row.technical_categories || [],
   };
@@ -149,6 +150,17 @@ export const CustomerTaxonomyRepository = {
         product.article,
         product.article_normalized,
         product.name,
+        COALESCE((
+          SELECT JSONB_AGG(
+            JSONB_BUILD_OBJECT(
+              'languageCode', translation.language_code,
+              'name', translation.name
+            )
+            ORDER BY translation.language_code
+          )
+          FROM product_translations translation
+          WHERE translation.product_id = product.id
+        ), '[]'::JSONB) AS translations,
         CASE
           WHEN COALESCE(product.article_normalized, product.article, '')
             ~ '^A[0-9]{10}'
@@ -190,6 +202,17 @@ export const CustomerTaxonomyRepository = {
         product.article_normalized,
         product.name,
         brand.name AS brand_name,
+        COALESCE((
+          SELECT JSONB_AGG(
+            JSONB_BUILD_OBJECT(
+              'languageCode', translation.language_code,
+              'name', translation.name
+            )
+            ORDER BY translation.language_code
+          )
+          FROM product_translations translation
+          WHERE translation.product_id = product.id
+        ), '[]'::JSONB) AS translations,
         CASE
           WHEN COALESCE(product.article_normalized, product.article, '')
             ~ '^A[0-9]{10}'

@@ -57,8 +57,8 @@ function reviewedType(typeCode) {
   return row;
 }
 
-test("detector v9 exposes exactly the 12 reviewed Fasteners semantic types", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 9);
+test("detector v10 exposes exactly the 12 reviewed Fasteners semantic types", () => {
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 10);
   for (const typeCode of phase2G3TypeCodes) {
     assert.deepEqual(
       detectCustomerProductTypes(productFor(reviewedType(typeCode))),

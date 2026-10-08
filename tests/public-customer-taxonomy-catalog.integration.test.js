@@ -12,6 +12,7 @@ const suffix = `${Date.now()}${Math.random().toString(16).slice(2, 8)}`.toUpperC
 const fixtures = {};
 let brakesId;
 let brakesDiscsId;
+let windshieldsId;
 
 async function insertProduct(key, { active = true } = {}) {
   const article = `CT${key.toUpperCase()}${suffix}`;
@@ -44,16 +45,19 @@ before(async () => {
   const categories = await pool.query(`
     SELECT id, slug
     FROM customer_categories
-    WHERE slug IN ('brakes', 'brakes-discs')
+    WHERE slug IN ('brakes', 'brakes-discs', 'body-windshields')
   `);
   brakesId = Number(categories.rows.find((row) => row.slug === "brakes")?.id);
   brakesDiscsId = Number(categories.rows.find((row) => row.slug === "brakes-discs")?.id);
+  windshieldsId = Number(categories.rows.find((row) => row.slug === "body-windshields")?.id);
   assert.ok(brakesId);
   assert.ok(brakesDiscsId);
+  assert.ok(windshieldsId);
 
   const unresolved = await insertProduct("unresolved");
   const reviewed = await insertProduct("reviewed");
   const approved = await insertProduct("approved");
+  const windshield = await insertProduct("windshield");
   await insertProduct("inactive", { active: false });
   for (let index = 0; index < 25; index += 1) {
     await insertProduct(`page${index}`);
@@ -72,6 +76,7 @@ before(async () => {
     VALUES($1, $2, FALSE, 'MANUAL', 'MIGRATION', 'LOW', 'REVIEW')
   `, [reviewed.id, brakesId]);
   await insertApprovedPrimary(approved.id, brakesDiscsId);
+  await insertApprovedPrimary(windshield.id, windshieldsId);
 
   assert.ok(unresolved.id);
 });
@@ -172,6 +177,39 @@ test("Other count is dynamic and uses only active products without an approved p
   assert.deepEqual(reviewed.products.map((product) => Number(product.id)), [fixtures.reviewed.id]);
   assert.equal(approved.pagination.total, 0);
   assert.equal(inactive.pagination.total, 0);
+});
+
+test("windshield leaf is public in three locales, lists only its products and enters sitemap", async () => {
+  const expected = {
+    uk: "Лобове скло",
+    ru: "Лобовые стёкла",
+    en: "Windshields",
+  };
+  for (const [locale, label] of Object.entries(expected)) {
+    const tree = await PublicCatalogService.getTree(locale);
+    const body = tree.find((category) => category.slug === "body-glass");
+    const leaf = body?.children.find((category) => category.slug === "body-windshields");
+    assert.equal(leaf?.name, label, locale);
+    assert.equal(leaf?.productCount, 1, locale);
+
+    const listing = await PublicCatalogService.getCategoryProducts({
+      slug: "body-windshields",
+      locale,
+      query: fixtures.windshield.article,
+    });
+    assert.equal(listing.category.name, label, locale);
+    assert.equal(listing.category.parent.slug, "body-glass", locale);
+    assert.deepEqual(
+      listing.products.map((product) => Number(product.id)),
+      [fixtures.windshield.id],
+      locale,
+    );
+  }
+  const sitemap = await PublicSeoService.getSitemap();
+  assert.equal(
+    sitemap.categories.some((category) => category.slug === "body-windshields"),
+    true,
+  );
 });
 
 test("Other supports normal pagination and automatically loses newly approved products", async () => {

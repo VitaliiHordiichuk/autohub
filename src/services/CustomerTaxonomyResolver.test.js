@@ -51,7 +51,7 @@ function product(overrides = {}) {
 }
 
 test("TYPE_CODE contract is closed and detector version is fixed", () => {
-  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 9);
+  assert.equal(CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION, 10);
   assert.equal(isKnownCustomerProductTypeCode("FILTER_OIL"), true);
   assert.equal(isKnownCustomerProductTypeCode("arbitrary words"), false);
   assert.deepEqual(detectCustomerProductTypes(product()), ["FILTER_OIL"]);
