@@ -14,16 +14,28 @@ import {
   pool,
 } from "../../src/config/db.js";
 
+import {
+  SEARCH_FIXTURE,
+} from "../helpers/search-fixture.js";
+
 
 let server;
 let baseUrl;
 let userId;
+let clientUserId;
 let eventId;
 let funnelEventIds = [];
 let token;
+let clientToken;
 
 const testQuery =
   `AUTOHUB_ANALYTICS_${Date.now()}`;
+
+const regressionSessionId =
+  `analytics-consent-independent-${Date.now()}`;
+
+const authenticatedSessionId =
+  `analytics-authenticated-${Date.now()}`;
 
 
 before(async () => {
@@ -64,7 +76,7 @@ before(async () => {
           $2,
           TRUE
         )
-        RETURNING id;
+        RETURNING id, auth_version;
       `,
       [
         `analytics.${Date.now()}@example.invalid`,
@@ -158,6 +170,73 @@ before(async () => {
     {
       sub: String(userId),
       role: "ADMIN",
+      authVersion: Number(
+        userResult.rows[0]
+          .auth_version || 0
+      ),
+    },
+    process.env.AUTH_JWT_SECRET,
+    {
+      expiresIn: "10m",
+      issuer: "autohub-backend",
+      audience: "autohub-client",
+    }
+  );
+
+  const clientRoleResult =
+    await pool.query(
+      `
+        SELECT id
+        FROM roles
+        WHERE name = 'CLIENT'
+        LIMIT 1;
+      `
+    );
+
+  assert.ok(
+    clientRoleResult.rows[0]?.id,
+    "В тестовой базе отсутствует роль CLIENT"
+  );
+
+  const clientUserResult =
+    await pool.query(
+      `
+        INSERT INTO users (
+          first_name,
+          last_name,
+          email,
+          password_hash,
+          role_id,
+          is_active
+        )
+        VALUES (
+          'Analytics client',
+          'Test',
+          $1,
+          'test-password-hash',
+          $2,
+          TRUE
+        )
+        RETURNING id, auth_version;
+      `,
+      [
+        `analytics.client.${Date.now()}@example.invalid`,
+        clientRoleResult.rows[0].id,
+      ]
+    );
+
+  clientUserId = Number(
+    clientUserResult.rows[0].id
+  );
+
+  clientToken = jwt.sign(
+    {
+      sub: String(clientUserId),
+      role: "CLIENT",
+      authVersion: Number(
+        clientUserResult.rows[0]
+          .auth_version || 0
+      ),
     },
     process.env.AUTH_JWT_SECRET,
     {
@@ -214,6 +293,28 @@ after(async () => {
     );
   }
 
+  await pool.query(
+    `
+      DELETE FROM funnel_events
+      WHERE visitor_session_id = ANY($1::text[]);
+    `,
+    [[
+      regressionSessionId,
+      authenticatedSessionId,
+    ]]
+  );
+
+  await pool.query(
+    `
+      DELETE FROM search_events
+      WHERE visitor_session_id = ANY($1::text[]);
+    `,
+    [[
+      regressionSessionId,
+      authenticatedSessionId,
+    ]]
+  );
+
   if (funnelEventIds.length) {
     await pool.query(
       `
@@ -231,6 +332,16 @@ after(async () => {
         WHERE id = $1;
       `,
       [userId]
+    );
+  }
+
+  if (clientUserId) {
+    await pool.query(
+      `
+        DELETE FROM users
+        WHERE id = $1;
+      `,
+      [clientUserId]
     );
   }
 
@@ -327,6 +438,305 @@ test(
     assert.equal(
       response.status,
       401
+    );
+  }
+);
+
+
+function stage(body, key) {
+  return body.funnel.stages.find(
+    (item) => item.key === key
+  );
+}
+
+
+async function adminAnalytics() {
+  const response = await fetch(
+    `${baseUrl}/api/admin/search-analytics?days=30&limit=100`,
+    {
+      headers: {
+        Cookie:
+          `autohub_token=${token}`,
+      },
+    }
+  );
+
+  assert.equal(response.status, 200);
+  return response.json();
+}
+
+
+async function searchAndView({
+  sessionId,
+  authToken,
+}) {
+  const headers = {
+    "X-Analytics-Session":
+      sessionId,
+  };
+
+  if (authToken) {
+    headers.Cookie =
+      `autohub_token=${authToken}`;
+  }
+
+  const searchResponse = await fetch(
+    `${baseUrl}/api/search?article=${SEARCH_FIXTURE.originalArticle}&locale=uk`,
+    { headers }
+  );
+
+  assert.equal(searchResponse.status, 200);
+  const searchBody =
+    await searchResponse.json();
+  const productId = Number(
+    searchBody.productCard.product.id
+  );
+
+  for (let index = 0; index < 2; index += 1) {
+    const viewResponse = await fetch(
+      `${baseUrl}/api/analytics/funnel`,
+      {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          eventType: "PRODUCT_VIEW",
+          productId,
+          source: "PRODUCT_PAGE",
+          locale: "uk",
+        }),
+      }
+    );
+
+    assert.equal(viewResponse.status, 202);
+  }
+
+  return productId;
+}
+
+
+test(
+  "анонимные события реально сохраняются, дедуплируются и видны в админской аналитике",
+  async () => {
+    const beforeDashboard =
+      await adminAnalytics();
+
+    const productId =
+      await searchAndView({
+        sessionId:
+          regressionSessionId,
+      });
+
+    const searchResult =
+      await pool.query(
+        `
+          SELECT *
+          FROM search_events
+          WHERE visitor_session_id = $1;
+        `,
+        [regressionSessionId]
+      );
+
+    assert.equal(searchResult.rowCount, 1);
+    const searchEvent =
+      searchResult.rows[0];
+    assert.equal(searchEvent.user_id, null);
+    assert.equal(
+      searchEvent.raw_query,
+      SEARCH_FIXTURE.originalArticle
+    );
+    assert.equal(searchEvent.found, true);
+    assert.equal(
+      Number(searchEvent.exact_product_id),
+      productId
+    );
+    assert.ok(
+      Number(
+        searchEvent.result_products_count
+      ) >= 2
+    );
+    assert.ok(
+      Number(
+        searchEvent.result_offers_count
+      ) >= 1
+    );
+
+    const shownOfferResult =
+      await pool.query(
+        `
+          SELECT
+            article,
+            retail_price,
+            quantity,
+            source_type
+          FROM search_event_results
+          WHERE search_event_id = $1
+            AND article = $2
+          LIMIT 1;
+        `,
+        [
+          searchEvent.id,
+          SEARCH_FIXTURE.analogArticle,
+        ]
+      );
+
+    assert.equal(
+      shownOfferResult.rowCount,
+      1
+    );
+    assert.equal(
+      Number(
+        shownOfferResult.rows[0]
+          .retail_price
+      ),
+      SEARCH_FIXTURE.manualRetailPrice
+    );
+    assert.equal(
+      Number(
+        shownOfferResult.rows[0]
+          .quantity
+      ),
+      SEARCH_FIXTURE.quantity
+    );
+    assert.equal(
+      shownOfferResult.rows[0]
+        .source_type,
+      "OWN_STOCK"
+    );
+
+    const funnelResult =
+      await pool.query(
+        `
+          SELECT *
+          FROM funnel_events
+          WHERE visitor_session_id = $1;
+        `,
+        [regressionSessionId]
+      );
+
+    assert.equal(funnelResult.rowCount, 1);
+    assert.equal(
+      funnelResult.rows[0].event_type,
+      "PRODUCT_VIEW"
+    );
+    assert.equal(
+      Number(
+        funnelResult.rows[0].product_id
+      ),
+      productId
+    );
+
+    const afterDashboard =
+      await adminAnalytics();
+    const recent =
+      afterDashboard.recent.rows.find(
+        (item) =>
+          item.visitorSessionId ===
+          regressionSessionId
+      );
+
+    assert.ok(recent);
+    assert.equal(recent.user, null);
+    assert.equal(recent.found, true);
+    assert.equal(
+      recent.exactProductId,
+      productId
+    );
+    assert.ok(
+      recent.results.some(
+        (item) =>
+          item.article ===
+            SEARCH_FIXTURE.analogArticle &&
+          item.retailPrice ===
+            SEARCH_FIXTURE.manualRetailPrice &&
+          item.quantity ===
+            SEARCH_FIXTURE.quantity
+      )
+    );
+    assert.equal(
+      afterDashboard.summary.searches,
+      beforeDashboard.summary.searches + 1
+    );
+    assert.equal(
+      stage(afterDashboard, "SEARCH")
+        .events,
+      stage(beforeDashboard, "SEARCH")
+        .events + 1
+    );
+    assert.equal(
+      stage(
+        afterDashboard,
+        "PRODUCT_VIEW"
+      ).events,
+      stage(
+        beforeDashboard,
+        "PRODUCT_VIEW"
+      ).events + 1
+    );
+  }
+);
+
+
+test(
+  "поиск и просмотр авторизованного покупателя связываются только с проверенным user_id",
+  async () => {
+    const productId =
+      await searchAndView({
+        sessionId:
+          authenticatedSessionId,
+        authToken: clientToken,
+      });
+
+    const searchResult =
+      await pool.query(
+        `
+          SELECT user_id
+          FROM search_events
+          WHERE visitor_session_id = $1;
+        `,
+        [authenticatedSessionId]
+      );
+    const funnelResult =
+      await pool.query(
+        `
+          SELECT user_id, product_id
+          FROM funnel_events
+          WHERE visitor_session_id = $1;
+        `,
+        [authenticatedSessionId]
+      );
+
+    assert.equal(searchResult.rowCount, 1);
+    assert.equal(funnelResult.rowCount, 1);
+    assert.equal(
+      Number(searchResult.rows[0].user_id),
+      clientUserId
+    );
+    assert.equal(
+      Number(funnelResult.rows[0].user_id),
+      clientUserId
+    );
+    assert.equal(
+      Number(funnelResult.rows[0].product_id),
+      productId
+    );
+
+    const dashboard =
+      await adminAnalytics();
+    const recent =
+      dashboard.recent.rows.find(
+        (item) =>
+          item.visitorSessionId ===
+          authenticatedSessionId
+      );
+
+    assert.ok(recent);
+    assert.equal(
+      recent.user?.id,
+      clientUserId
     );
   }
 );
