@@ -62,16 +62,15 @@ export const OrderConfirmationService = {
         );
       }
 
-      const activatedReservations =
-        await ReservationRepository.activateByOrder(
-          numericOrderId,
-          db
-        );
+      const activatedReservations = order.inventory_model === "COMMIT_ON_SUBMIT"
+        ? []
+        : await ReservationRepository.activateByOrder(numericOrderId, db);
 
-      if (activatedReservations.length !== items.length) {
-        throw new Error(
-          "Не удалось активировать резервы всех позиций"
-        );
+      if (
+        order.inventory_model !== "COMMIT_ON_SUBMIT" &&
+        activatedReservations.length !== items.length
+      ) {
+        throw new Error("Не удалось активировать резервы всех позиций");
       }
 
       const updatedOrder =

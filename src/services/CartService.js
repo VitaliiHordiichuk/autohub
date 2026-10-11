@@ -13,6 +13,9 @@ import {
   OFFER_AVAILABILITY,
   resolveOfferAvailability,
 } from "./OfferService.js";
+import {
+  canonicalOfferClassification,
+} from "./InventoryClassificationService.js";
 
 function createError(
   message,
@@ -68,6 +71,8 @@ function publicCart(cart) {
 
 export function presentCartItems(items, pricingContext) {
   return items.map((item) => {
+    const { sourceType, fulfillmentType } =
+      canonicalOfferClassification(item);
     const quantity =
       Number(item.quantity);
 
@@ -81,7 +86,7 @@ export function presentCartItems(items, pricingContext) {
       stock_quantity: item.stock_quantity,
       reserved_quantity: item.reserved_quantity,
       own_reserved_quantity: item.own_reserved_quantity,
-    });
+    }, sourceType);
     const availableQuantity = Number(item.available_quantity);
 
     return {
@@ -102,8 +107,8 @@ export function presentCartItems(items, pricingContext) {
             quantity * retailPrice
           ).toFixed(2)
         ),
-      sourceType:
-        item.source_type,
+      sourceType,
+      fulfillmentType,
       isAvailable:
         item.is_available === true &&
         item.is_hidden !== true &&

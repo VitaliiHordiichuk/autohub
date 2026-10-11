@@ -180,10 +180,16 @@ export const ImportNewProductRepository = {
   ) {
     const result = await db.query(
       `
-        SELECT *
-        FROM import_new_products
-        WHERE id = $1
-        FOR UPDATE;
+        SELECT
+          inp.*,
+          w.type AS warehouse_type,
+          s.type AS supplier_type
+        FROM import_new_products inp
+        JOIN warehouses w ON w.id = inp.warehouse_id
+        LEFT JOIN suppliers s
+          ON s.id = COALESCE(inp.supplier_id, w.supplier_id)
+        WHERE inp.id = $1
+        FOR UPDATE OF inp;
       `,
       [id]
     );
@@ -197,12 +203,18 @@ export const ImportNewProductRepository = {
   ) {
     const result = await db.query(
       `
-        SELECT *
-        FROM import_new_products
-        WHERE warehouse_id = $1
-          AND status = 'PENDING'
-        ORDER BY id
-        FOR UPDATE;
+        SELECT
+          inp.*,
+          w.type AS warehouse_type,
+          s.type AS supplier_type
+        FROM import_new_products inp
+        JOIN warehouses w ON w.id = inp.warehouse_id
+        LEFT JOIN suppliers s
+          ON s.id = COALESCE(inp.supplier_id, w.supplier_id)
+        WHERE inp.warehouse_id = $1
+          AND inp.status = 'PENDING'
+        ORDER BY inp.id
+        FOR UPDATE OF inp;
       `,
       [warehouseId]
     );

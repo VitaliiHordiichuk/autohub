@@ -138,4 +138,28 @@ export const CartAccessService = {
     await CartAccessRepository.touchGuestActivity(cart.id, db);
     return cart;
   },
+
+  async assertAnyStatusAccess({
+    cartId,
+    userId = null,
+    guestToken = null,
+    db,
+  }) {
+    const normalizedCartId = normalizeCartId(cartId);
+    if (userId) {
+      const cart = await CartAccessRepository.findByIdAndUserId(
+        normalizedCartId, userId, db
+      );
+      if (!cart) throw createError("Кошик не знайдено або немає доступу", 404);
+      return cart;
+    }
+    if (!guestToken) {
+      throw createError("Для гостьового кошика потрібен X-Cart-Token", 401);
+    }
+    const cart = await CartAccessRepository.findGuestByIdAndTokenHash(
+      normalizedCartId, hashGuestToken(guestToken), db
+    );
+    if (!cart) throw createError("Кошик не знайдено або немає доступу", 404);
+    return cart;
+  },
 };

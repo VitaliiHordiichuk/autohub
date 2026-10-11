@@ -103,6 +103,20 @@ export const CartAccessRepository = {
 
     return result.rows[0] ?? null;
   },
+  async findByIdAndUserId(cartId, userId, db = pool) {
+    const result = await db.query(`
+      SELECT * FROM carts WHERE id = $1 AND user_id = $2 LIMIT 1;
+    `, [cartId, userId]);
+    return result.rows[0] ?? null;
+  },
+  async findGuestByIdAndTokenHash(cartId, guestTokenHash, db = pool) {
+    const result = await db.query(`
+      SELECT * FROM carts
+      WHERE id = $1 AND user_id IS NULL AND guest_token_hash = $2
+      LIMIT 1;
+    `, [cartId, guestTokenHash]);
+    return result.rows[0] ?? null;
+  },
   async lockActiveByIdForUpdate(
     cartId,
     db = pool

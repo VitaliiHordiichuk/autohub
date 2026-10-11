@@ -60,7 +60,7 @@ export const OrderCompletionService = {
 
       const movements = [];
 
-      for (const item of items) {
+      for (const item of order.inventory_model === "COMMIT_ON_SUBMIT" ? [] : items) {
         const soldQuantity = Number(item.quantity);
 
         const updatedOffer =
@@ -101,13 +101,11 @@ export const OrderCompletionService = {
         movements.push(movement);
       }
 
-      const consumedReservations =
-        await ReservationRepository.consumeByOrder(
-          numericOrderId,
-          db
-        );
+      const consumedReservations = order.inventory_model === "COMMIT_ON_SUBMIT"
+        ? []
+        : await ReservationRepository.consumeByOrder(numericOrderId, db);
 
-      if (consumedReservations.length !== items.length) {
+      if (order.inventory_model !== "COMMIT_ON_SUBMIT" && consumedReservations.length !== items.length) {
         throw new Error(
           "Не удалось закрыть резервы всех позиций заказа"
         );

@@ -7,6 +7,10 @@ import { ImportNewProductRepository }
 from "../repositories/ImportNewProductRepository.js";
 import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
 import { isCustomerTaxonomyImportEnabled } from "../config/featureFlags.js";
+import {
+  resolveFulfillmentType,
+  sourceTypeForFulfillment,
+} from "./InventoryClassificationService.js";
 
 function positiveInteger(
   value,
@@ -158,6 +162,14 @@ async function approveLockedRow(
   db,
   taxonomyContext
 ) {
+  const sourceType = sourceTypeForFulfillment(
+    resolveFulfillmentType({
+      supplier_type: row.supplier_type,
+      warehouse_type: row.warehouse_type,
+      source_type: row.supplier_id === null ? "OWN_STOCK" : "SUPPLIER",
+    })
+  );
+
   let product =
     await ProductRepository
       .findByBrandAndArticle(
@@ -193,13 +205,16 @@ async function approveLockedRow(
   if (offer) {
     offer =
       await ProductRepository
-        .updateOfferStock(
+        .updateOfferStockFromImport(
           Number(offer.id),
           {
-            quantity:
+            importedQuantity:
               Number(row.quantity),
             purchasePrice:
               Number(row.price),
+            preserveCommittedSales:
+              sourceType === "OWN_STOCK",
+            sourceType,
           },
           db
         );
@@ -222,7 +237,9 @@ async function approveLockedRow(
               Number(row.quantity),
             purchasePrice:
               Number(row.price),
-            sourceType: "SUPPLIER",
+            sourceType,
+            lastImportQuantity:
+              Number(row.quantity),
           },
           db
         );

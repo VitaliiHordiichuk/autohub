@@ -37,6 +37,10 @@ import {
   databaseNumberOrNull,
   OFFER_NUMBER_MAX_EXCLUSIVE,
 } from "./ImportNumericService.js";
+import {
+  resolveFulfillmentType,
+  sourceTypeForFulfillment,
+} from "./InventoryClassificationService.js";
 
 function normalizeImportContext(
   importContext
@@ -306,6 +310,14 @@ export const ImportService = {
 
       const settings =
         warehouseSupplierImport;
+
+      const importedSourceType = sourceTypeForFulfillment(
+        resolveFulfillmentType({
+          supplier_type: warehouseSupplierImport.supplier_type,
+          warehouse_type: warehouseSupplierImport.warehouse_type,
+          source_type: "SUPPLIER",
+        })
+      );
 
       const fileType = String(
         context.fileType ||
@@ -793,17 +805,21 @@ export const ImportService = {
           if (existingOffer) {
             const updatedOffer =
               await ProductRepository
-                .updateOfferStock(
+                .updateOfferStockFromImport(
                   Number(
                     existingOffer.id
                   ),
                   {
-                    quantity:
+                    importedQuantity:
                       newQuantity,
                     purchasePrice:
                       newPrice,
                     retailPrice: calculatedPrices.retailPrice,
                     minimumSalePrice: calculatedPrices.minimumSalePrice,
+                    preserveCommittedSales:
+                      importedSourceType === "OWN_STOCK",
+                    sourceType:
+                      importedSourceType,
                   },
                   db
                 );
@@ -836,7 +852,9 @@ export const ImportService = {
                     retailPrice: calculatedPrices.retailPrice,
                     minimumSalePrice: calculatedPrices.minimumSalePrice,
                     sourceType:
-                      "SUPPLIER",
+                      importedSourceType,
+                    lastImportQuantity:
+                      newQuantity,
                   },
                   db
                 );

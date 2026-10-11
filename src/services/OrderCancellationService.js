@@ -2,6 +2,8 @@ import { transaction } from "../db/transaction.js";
 
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
+import { ProductRepository } from "../repositories/ProductRepository.js";
+import { StockMovementRepository } from "../repositories/StockMovementRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
 import { TelegramNotificationService } from "./TelegramNotificationService.js";
 
@@ -47,11 +49,39 @@ export const OrderCancellationService = {
 
       const oldStatus = order.status;
 
-      const cancelledReservations =
-        await ReservationRepository.cancelByOrder(
-          numericOrderId,
-          db
+      let cancelledReservations = [];
+      const movements = [];
+      if (order.inventory_model === "COMMIT_ON_SUBMIT") {
+        const items = await OrderRepository.findItemsByOrderId(numericOrderId, db);
+        for (const item of items) {
+          const committed = Number(item.inventory_committed_quantity || 0);
+          if (item.fulfillment_type !== "STOCK" || committed <= 0) continue;
+          const updatedOffer = await ProductRepository.increaseQuantityForReturn(
+            item.product_offer_id, committed, db
+          );
+          if (!updatedOffer) throw new Error(`Не удалось вернуть остаток ${item.article}`);
+          const movement = await StockMovementRepository.createInventoryMovement({
+            productId: item.product_id,
+            productOfferId: item.product_offer_id,
+            orderId: numericOrderId,
+            orderItemId: item.id,
+            quantity: committed,
+            type: "ORDER_CANCEL_RESTORE",
+            oldQuantity: Number(updatedOffer.old_quantity),
+            newQuantity: Number(updatedOffer.new_quantity),
+            operationKey: `order-item:${item.id}:cancel-restore`,
+            changedBy,
+            comment: comment ?? `Возврат остатка при отмене заказа №${numericOrderId}`,
+          }, db);
+          if (!movement) throw new Error("Остаток позиции уже был возвращён");
+          await OrderRepository.updateCommittedQuantity(item.id, 0, db);
+          movements.push(movement);
+        }
+      } else {
+        cancelledReservations = await ReservationRepository.cancelByOrder(
+          numericOrderId, db
         );
+      }
 
       const updatedOrder =
         await OrderRepository.updateStatus(
@@ -88,6 +118,7 @@ export const OrderCancellationService = {
       return {
         order: updatedOrder,
         reservations: cancelledReservations,
+        movements,
         history,
       };
     });

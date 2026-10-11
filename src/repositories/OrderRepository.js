@@ -7,6 +7,9 @@ export const OrderRepository = {
       createdBy = null,
       comment = null,
       totalAmount = 0,
+      inventoryModel = "LEGACY_RESERVATION",
+      fulfillmentType = "STOCK",
+      checkoutSessionId = null,
     },
     db = pool
   ) {
@@ -16,9 +19,12 @@ export const OrderRepository = {
         status,
         total_amount,
         comment,
-        created_by
+        created_by,
+        inventory_model,
+        fulfillment_type,
+        checkout_session_id
       )
-      VALUES ($1, 'NEW', $2, $3, $4)
+      VALUES ($1, 'NEW', $2, $3, $4, $5, $6, $7)
       RETURNING *;
     `;
 
@@ -27,6 +33,9 @@ export const OrderRepository = {
       totalAmount,
       comment,
       createdBy,
+      inventoryModel,
+      fulfillmentType,
+      checkoutSessionId,
     ]);
 
     return result.rows[0];
@@ -40,6 +49,8 @@ export const OrderRepository = {
       quantity,
       priceAtPurchase,
       isReturnable = true,
+      fulfillmentType = "STOCK",
+      inventoryCommittedQuantity = 0,
     },
     db = pool
   ) {
@@ -50,9 +61,11 @@ export const OrderRepository = {
         product_offer_id,
         quantity,
         price_at_purchase,
-        is_returnable
+        is_returnable,
+        fulfillment_type,
+        inventory_committed_quantity
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *;
     `;
 
@@ -63,6 +76,8 @@ export const OrderRepository = {
       quantity,
       priceAtPurchase,
       isReturnable,
+      fulfillmentType,
+      inventoryCommittedQuantity,
     ]);
 
     return result.rows[0];
@@ -122,6 +137,8 @@ export const OrderRepository = {
       o.tracking_updated_at,
       o.edit_revision,
       o.notified_edit_revision,
+      o.inventory_model,
+      o.fulfillment_type,
 
       c.company_name,
       c.customer_type,
@@ -192,6 +209,8 @@ async findByIdForManager(orderId, db = pool) {
       o.tracking_updated_at,
       o.edit_revision,
       o.notified_edit_revision,
+      o.inventory_model,
+      o.fulfillment_type,
 
       c.company_name,
       c.customer_type,
@@ -222,6 +241,8 @@ async findAllForCustomerUser(userId, db = pool) {
       o.comment,
       o.created_at,
       o.updated_at,
+      o.inventory_model,
+      o.fulfillment_type,
       COUNT(oi.id)::integer AS items_count,
       COALESCE(SUM(oi.quantity), 0)::integer AS total_quantity
     FROM orders o
@@ -246,6 +267,8 @@ async findByIdForCustomerUser(orderId, userId, db = pool) {
       o.comment,
       o.created_at,
       o.updated_at
+      ,o.inventory_model
+      ,o.fulfillment_type
       ,o.tracking_number
       ,o.tracking_updated_at
     FROM orders o
@@ -280,6 +303,8 @@ async findItemsByOrderId(orderId, db = pool) {
       po.source_type,
       po.is_available,
       oi.is_returnable,
+      oi.fulfillment_type,
+      oi.inventory_committed_quantity,
 
       w.id AS warehouse_id,
       w.name AS warehouse_name,
@@ -456,6 +481,15 @@ async updateItemQuantity(
 
   return result.rows[0] ?? null;
 },
+async updateCommittedQuantity(orderItemId, quantity, db = pool) {
+  const result = await db.query(`
+    UPDATE order_items
+    SET inventory_committed_quantity = $2
+    WHERE id = $1
+    RETURNING *;
+  `, [orderItemId, quantity]);
+  return result.rows[0] ?? null;
+},
 
 async recalculateTotal(orderId, db = pool) {
   const sql = `
@@ -590,6 +624,8 @@ async addManagerOrderItem(
     productOfferId,
     quantity,
     priceAtPurchase,
+    fulfillmentType = "STOCK",
+    inventoryCommittedQuantity = 0,
   },
   db = pool
 ) {
@@ -600,9 +636,11 @@ async addManagerOrderItem(
       product_offer_id,
       quantity,
       price_at_purchase,
-      status
+      status,
+      fulfillment_type,
+      inventory_committed_quantity
     )
-    VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
+    VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7)
     RETURNING *;
   `;
 
@@ -612,6 +650,8 @@ async addManagerOrderItem(
     productOfferId,
     quantity,
     priceAtPurchase,
+    fulfillmentType,
+    inventoryCommittedQuantity,
   ]);
 
   return result.rows[0];

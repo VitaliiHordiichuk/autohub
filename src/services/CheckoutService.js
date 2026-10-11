@@ -8,6 +8,13 @@ import { ReservationRepository } from "../repositories/ReservationRepository.js"
 import {
   CartAccessService,
 } from "./CartAccessService.js";
+import { CustomerPricingService } from "./CustomerPricingService.js";
+import {
+  resolveFulfillmentType,
+} from "./InventoryClassificationService.js";
+import {
+  isCommitOnSubmitCheckoutEnabled,
+} from "../config/featureFlags.js";
 
 const CHECKOUT_RESERVATION_MINUTES = 5;
 
@@ -164,6 +171,54 @@ export const CheckoutService = {
       const items = selectCheckoutItems(allItems, itemIds);
 
       validateCart(cart, items);
+
+      if (isCommitOnSubmitCheckoutEnabled()) {
+        await CheckoutRepository.expireActiveSessionsForCart(cart.id, db);
+        await ReservationRepository.releaseActiveByCartId(cart.id, db);
+        await CheckoutRepository.cancelActiveForCart(cart.id, db);
+
+        const pricingContext = await CustomerPricingService.getContext(userId, db);
+        const checkoutItems = items.map((item) => {
+          const pricing = CustomerPricingService.price({
+            retailPrice: item.retail_price,
+            minimumSalePrice: item.minimum_sale_price,
+          }, pricingContext);
+          const priceSnapshot = Number(pricing?.customerPrice);
+          if (!Number.isFinite(priceSnapshot) || priceSnapshot < 0) {
+            const error = new Error(`Не вдалося визначити ціну товару ${item.article}`);
+            error.statusCode = 409;
+            throw error;
+          }
+          return {
+            cartItemId: Number(item.id),
+            productOfferId: Number(item.product_offer_id),
+            quantity: Number(item.quantity),
+            priceSnapshot,
+            fulfillmentType: resolveFulfillmentType(item),
+            productName: String(item.name || item.article),
+            article: String(item.article),
+          };
+        });
+
+        const checkoutSession = await CheckoutRepository.createSession({
+          cartId: cart.id,
+          userId,
+          expiresAt: null,
+          inventoryModel: "COMMIT_ON_SUBMIT",
+        }, db);
+        const sessionItems = await CheckoutRepository.replaceSessionItems(
+          checkoutSession.id,
+          checkoutItems,
+          db
+        );
+
+        return {
+          checkoutSession,
+          reservations: [],
+          items: sessionItems,
+          reused: false,
+        };
+      }
 
       await CheckoutRepository
         .expireActiveSessionsForCart(

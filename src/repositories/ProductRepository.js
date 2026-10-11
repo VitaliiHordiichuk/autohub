@@ -116,6 +116,7 @@ export const ProductRepository = {
 
         w.name AS warehouse_name,
         w.city AS warehouse_city,
+        w.type AS warehouse_type,
         w.priority AS warehouse_priority,
         w.is_active AS warehouse_active,
 
@@ -609,6 +610,29 @@ async decreaseQuantityForSale(
 
   return result.rows[0] ?? null;
 },
+async findOfferForCheckoutForUpdate(productOfferId, db = pool) {
+  const result = await db.query(`
+    SELECT
+      po.*,
+      CASE WHEN po.price_mode = 'MANUAL' AND po.manual_retail_price IS NOT NULL
+        THEN po.manual_retail_price ELSE po.retail_price END AS effective_retail_price,
+      p.article,
+      p.name,
+      p.return_policy_override AS product_return_policy_override,
+      w.type AS warehouse_type,
+      w.is_active AS warehouse_active,
+      w.return_policy_override AS warehouse_return_policy_override,
+      s.type AS supplier_type,
+      s.is_active AS supplier_active
+    FROM product_offers po
+    JOIN products p ON p.id = po.product_id
+    LEFT JOIN warehouses w ON w.id = po.warehouse_id
+    LEFT JOIN suppliers s ON s.id = COALESCE(po.supplier_id, w.supplier_id)
+    WHERE po.id = $1
+    FOR UPDATE OF po;
+  `, [productOfferId]);
+  return result.rows[0] ?? null;
+},
 async increaseQuantityForReturn(productOfferId, quantity, db = pool) {
   const result = await db.query(`WITH locked AS (
       SELECT id,quantity AS old_quantity FROM product_offers WHERE id=$1 FOR UPDATE
@@ -699,6 +723,7 @@ async createOffer(
     retailPrice = null,
     minimumSalePrice = null,
     sourceType = "OWN_STOCK",
+    lastImportQuantity = null,
   },
   db = pool
 ) {
@@ -715,6 +740,8 @@ async createOffer(
       minimum_sale_price,
       source_type,
       is_available,
+      last_import_quantity,
+      last_import_at,
       updated_at
     )
 
@@ -729,6 +756,8 @@ async createOffer(
       $7::numeric,
       $8,
       ($4::numeric > 0),
+      $9::numeric,
+      CASE WHEN $9::numeric IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
       CURRENT_TIMESTAMP
     )
 
@@ -746,7 +775,8 @@ async createOffer(
       purchasePrice,
       retailPrice,
       minimumSalePrice,
-      sourceType
+      sourceType,
+      lastImportQuantity,
     ]
   );
 
@@ -874,6 +904,80 @@ async updateOfferStock(
 
   return updatedOffer;
 },
+async updateOfferStockFromImport(
+  offerId,
+  {
+    importedQuantity,
+    purchasePrice,
+    retailPrice = null,
+    minimumSalePrice = null,
+    preserveCommittedSales = false,
+    sourceType = null,
+  },
+  db = pool
+) {
+  const result = await db.query(`
+    WITH locked AS (
+      SELECT id, product_id, quantity, last_import_quantity, purchase_price
+      FROM product_offers
+      WHERE id = $1
+      FOR UPDATE
+    ), calculated AS (
+      SELECT
+        locked.*,
+        CASE
+            WHEN $6::boolean THEN GREATEST(
+              0,
+              locked.quantity + (
+                $2::numeric - COALESCE(locked.last_import_quantity, locked.quantity)
+              )
+            )
+            ELSE $2::numeric
+        END AS new_quantity
+      FROM locked
+    )
+    UPDATE product_offers po
+    SET quantity = c.new_quantity,
+        purchase_price = $3::numeric,
+        retail_price = $4::numeric,
+        minimum_sale_price = $5::numeric,
+        source_type = COALESCE($7, po.source_type),
+        last_import_quantity = $2::numeric,
+        last_import_at = CURRENT_TIMESTAMP,
+        is_available = (c.new_quantity > 0),
+        updated_at = CURRENT_TIMESTAMP
+    FROM calculated c
+    WHERE po.id = c.id
+    RETURNING po.*, c.purchase_price AS old_purchase_price;
+  `, [
+    offerId,
+    importedQuantity,
+    purchasePrice,
+    retailPrice,
+    minimumSalePrice,
+    preserveCommittedSales,
+    sourceType,
+  ]);
+  const updated = result.rows[0] ?? null;
+  if (
+    updated &&
+    updated.old_purchase_price !== null &&
+    Number(updated.old_purchase_price) !== Number(purchasePrice)
+  ) {
+    await db.query(`
+      INSERT INTO price_history (
+        product_id, product_offer_id, old_price, new_price, change_percent
+      ) VALUES ($1,$2,$3,$4,$5);
+    `, [
+      updated.product_id,
+      offerId,
+      updated.old_purchase_price,
+      purchasePrice,
+      calculatePriceChangePercent(updated.old_purchase_price, purchasePrice),
+    ]);
+  }
+  return updated;
+},
 
 async findOfferByProductAndWarehouse(
   productId,
@@ -934,6 +1038,8 @@ async findOfferByProductAndWarehouse(
           SET
             quantity = 0,
             is_available = FALSE,
+            last_import_quantity = 0,
+            last_import_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
 
           WHERE warehouse_id = $1

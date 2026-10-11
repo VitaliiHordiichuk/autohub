@@ -4,6 +4,8 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
+import { StockMovementRepository } from "../repositories/StockMovementRepository.js";
+import { resolveFulfillmentType } from "./InventoryClassificationService.js";
 
 
 const EDITABLE_ORDER_STATUSES = new Set(["NEW", "CONFIRMED"]);
@@ -21,6 +23,66 @@ function validateQuantity(quantity) {
   }
 
   return numericQuantity;
+}
+
+async function adjustCommittedStock({
+  order,
+  item,
+  delta,
+  changedBy,
+  reason,
+  db,
+}) {
+  if (
+    order.inventory_model !== "COMMIT_ON_SUBMIT" ||
+    item.fulfillment_type !== "STOCK" ||
+    delta === 0
+  ) return item;
+
+  let updatedOffer;
+  let type;
+  if (delta > 0) {
+    const reserved = await ReservationRepository.getReservedQuantity(
+      item.product_offer_id, null, db
+    );
+    const offer = await ProductRepository.findOfferByIdForUpdate(
+      item.product_offer_id, db
+    );
+    const available = Math.max(0, Number(offer?.quantity || 0) - reserved);
+    if (!offer?.isAvailable || delta > available) {
+      throw new Error(`Недостаточно товара. Доступно: ${available}`);
+    }
+    updatedOffer = await ProductRepository.decreaseQuantityForSale(
+      item.product_offer_id, delta, db
+    );
+    type = "ORDER_EDIT_COMMIT";
+  } else {
+    updatedOffer = await ProductRepository.increaseQuantityForReturn(
+      item.product_offer_id, Math.abs(delta), db
+    );
+    type = "ORDER_EDIT_RESTORE";
+  }
+  if (!updatedOffer) throw new Error("Не удалось изменить складской остаток");
+
+  const revision = Number(order.edit_revision || 0) + 1;
+  const movement = await StockMovementRepository.createInventoryMovement({
+    productId: item.product_id,
+    productOfferId: item.product_offer_id,
+    orderId: order.id,
+    orderItemId: item.id,
+    quantity: Math.abs(delta),
+    type,
+    oldQuantity: Number(updatedOffer.old_quantity),
+    newQuantity: Number(updatedOffer.new_quantity),
+    operationKey: `order-item:${item.id}:edit:${revision}:${type}`,
+    changedBy,
+    comment: reason ?? `Изменение позиции заказа №${order.id}`,
+  }, db);
+  if (!movement) throw new Error("Изменение остатка уже применено");
+
+  const committed = Number(item.inventory_committed_quantity || 0) + delta;
+  if (committed < 0) throw new Error("Некорректный учтённый остаток позиции");
+  return OrderRepository.updateCommittedQuantity(item.id, committed, db);
 }
 
 export const OrderEditingService = {
@@ -85,10 +147,40 @@ export const OrderEditingService = {
           db
         );
 
-      if (!offer || !offer.isAvailable) {
+      if (
+        !offer ||
+        (order.inventory_model !== "COMMIT_ON_SUBMIT" && !offer.isAvailable)
+      ) {
         throw new Error(
           "Предложение товара недоступно"
         );
+      }
+
+      const oldQuantity = Number(orderItem.quantity);
+
+      if (order.inventory_model === "COMMIT_ON_SUBMIT") {
+        await adjustCommittedStock({
+          order,
+          item: orderItem,
+          delta: newQuantity - oldQuantity,
+          changedBy,
+          reason,
+          db,
+        });
+        const updatedItem = await OrderRepository.updateItemQuantity(
+          numericOrderItemId, newQuantity, db
+        );
+        await OrderRepository.recalculateTotal(numericOrderId, db);
+        const updatedOrder = await OrderRepository.markEditPending(numericOrderId, db);
+        const history = await OrderRepository.addItemHistory({
+          orderItemId: numericOrderItemId,
+          action: "QUANTITY_CHANGED",
+          oldQuantity,
+          newQuantity,
+          changedBy,
+          reason,
+        }, db);
+        return { order: updatedOrder, item: updatedItem, history };
       }
 
       const reservation =
@@ -123,8 +215,6 @@ export const OrderEditingService = {
           `Недостаточно товара. Доступно: ${freeQuantity}`
         );
       }
-
-      const oldQuantity = Number(orderItem.quantity);
 
       const updatedItem =
         await OrderRepository.updateItemQuantity(
@@ -308,6 +398,17 @@ async removeItem({
       );
     }
 
+    if (order.inventory_model === "COMMIT_ON_SUBMIT") {
+      await adjustCommittedStock({
+        order,
+        item,
+        delta: -Number(item.inventory_committed_quantity || 0),
+        changedBy,
+        reason,
+        db,
+      });
+    }
+
 
     const updatedItem =
       await OrderRepository.removeItem(
@@ -316,10 +417,9 @@ async removeItem({
       );
 
 
-    await ReservationRepository.cancelByOrderItem(
-      orderItemId,
-      db
-    );
+    if (order.inventory_model !== "COMMIT_ON_SUBMIT") {
+      await ReservationRepository.cancelByOrderItem(orderItemId, db);
+    }
 
 
     await OrderRepository.recalculateTotal(
@@ -398,6 +498,17 @@ async restoreItem({
     }
 
 
+    if (order.inventory_model === "COMMIT_ON_SUBMIT") {
+      await adjustCommittedStock({
+        order,
+        item,
+        delta: Number(item.quantity),
+        changedBy,
+        reason,
+        db,
+      });
+    }
+
     const updatedItem =
       await OrderRepository.restoreItem(
         orderItemId,
@@ -405,10 +516,9 @@ async restoreItem({
       );
 
 
-    await ReservationRepository.restoreByOrderItem(
-      orderItemId,
-      db
-    );
+    if (order.inventory_model !== "COMMIT_ON_SUBMIT") {
+      await ReservationRepository.restoreByOrderItem(orderItemId, db);
+    }
 
 
     await OrderRepository.recalculateTotal(
@@ -516,6 +626,71 @@ async addItem({
       throw new Error("Не удалось рассчитать цену клиента");
     }
 
+    if (order.inventory_model === "COMMIT_ON_SUBMIT") {
+      const detailedOffer = await ProductRepository.findOfferForCheckoutForUpdate(
+        numericOfferId, db
+      );
+      const fulfillmentType = resolveFulfillmentType(detailedOffer || {});
+      if (fulfillmentType !== order.fulfillment_type) {
+        throw new Error("Предложение относится к другому типу исполнения заказа");
+      }
+      const existingItem = await OrderRepository.findActiveItemByOffer(
+        numericOrderId, numericOfferId, db
+      );
+      let item;
+      let history;
+      if (existingItem) {
+        const oldQuantity = Number(existingItem.quantity);
+        await adjustCommittedStock({
+          order,
+          item: existingItem,
+          delta: newQuantity,
+          changedBy,
+          reason,
+          db,
+        });
+        item = await OrderRepository.updateItemQuantity(
+          existingItem.id, oldQuantity + newQuantity, db
+        );
+        history = await OrderRepository.addItemHistory({
+          orderItemId: existingItem.id,
+          action: "QUANTITY_CHANGED",
+          oldQuantity,
+          newQuantity: oldQuantity + newQuantity,
+          changedBy,
+          reason,
+        }, db);
+      } else {
+        item = await OrderRepository.addManagerOrderItem({
+          orderId: numericOrderId,
+          productId: numericProductId,
+          productOfferId: numericOfferId,
+          quantity: newQuantity,
+          priceAtPurchase: newPrice,
+          fulfillmentType,
+          inventoryCommittedQuantity: 0,
+        }, db);
+        item = await adjustCommittedStock({
+          order,
+          item,
+          delta: fulfillmentType === "STOCK" ? newQuantity : 0,
+          changedBy,
+          reason,
+          db,
+        });
+        history = await OrderRepository.addItemHistory({
+          orderItemId: item.id,
+          action: "ADDED",
+          newQuantity,
+          newPrice,
+          changedBy,
+          reason,
+        }, db);
+      }
+      await OrderRepository.recalculateTotal(numericOrderId, db);
+      const updatedOrder = await OrderRepository.markEditPending(numericOrderId, db);
+      return { order: updatedOrder, item, history };
+    }
 
     const reservedByOthers =
       await ReservationRepository.getReservedQuantity(

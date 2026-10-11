@@ -21,6 +21,7 @@ import { CustomerPricingService } from "../../services/CustomerPricingService.js
 import { ReturnPolicyService } from "../../services/ReturnPolicyService.js";
 import { NotificationRepository } from "../../repositories/NotificationRepository.js";
 import { TelegramNotificationService } from "../../services/TelegramNotificationService.js";
+import { CommitOnSubmitOrder } from "./CommitOnSubmitOrder.js";
 
 function calculateTotal(items) {
   return items.reduce(
@@ -167,6 +168,8 @@ async function resolveDelivery({
 export const SubmitOrder = {
   async execute({
     checkoutId,
+    idempotencyKey = null,
+    acceptedPrices = [],
     userId = null,
     guestToken = null,
     comment = null,
@@ -179,6 +182,22 @@ export const SubmitOrder = {
       throw new Error(
         "checkoutId є обов’язковим"
       );
+    }
+
+    const checkoutModel = await CheckoutRepository.findById(checkoutId);
+    if (checkoutModel?.inventory_model === "COMMIT_ON_SUBMIT") {
+      return CommitOnSubmitOrder.execute({
+        checkoutId,
+        idempotencyKey,
+        acceptedPrices,
+        userId,
+        guestToken,
+        comment,
+        vinCheckRequested,
+        vin,
+        delivery,
+        saveDeliveryProfile,
+      });
     }
 
     const orderComment = buildOrderComment({ comment, vinCheckRequested, vin });

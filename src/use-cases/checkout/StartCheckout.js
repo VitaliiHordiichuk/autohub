@@ -19,17 +19,17 @@ export const StartCheckout = {
         guestToken,
       });
 
-    const expiresAt = new Date(
-      result.checkoutSession.expires_at
-    );
+    const expiresAt = result.checkoutSession.expires_at
+      ? new Date(result.checkoutSession.expires_at)
+      : null;
 
-    const secondsLeft = Math.max(
+    const secondsLeft = expiresAt ? Math.max(
       0,
       Math.floor(
         (expiresAt.getTime() - Date.now()) /
           1000
       )
-    );
+    ) : null;
 
     return {
       checkoutId:
@@ -41,9 +41,13 @@ export const StartCheckout = {
       expiresAt:
         result.checkoutSession.expires_at,
       secondsLeft,
+      inventoryModel:
+        result.checkoutSession.inventory_model,
       reused: result.reused,
       reservations:
         result.reservations ?? [],
+      items:
+        result.items ?? [],
     };
   },
 };

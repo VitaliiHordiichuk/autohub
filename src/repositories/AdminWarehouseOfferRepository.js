@@ -87,17 +87,19 @@ export const AdminWarehouseOfferRepository = {
     const result = await db.query(
       `
         SELECT
-          id,
-          name,
-          city,
-          type,
-          supplier_id,
-          delivery_days,
-          return_policy_override,
-          return_policy_note,
-          is_active
-        FROM warehouses
-        WHERE id = $1
+          w.id,
+          w.name,
+          w.city,
+          w.type,
+          w.supplier_id,
+          w.delivery_days,
+          w.return_policy_override,
+          w.return_policy_note,
+          w.is_active,
+          s.type AS supplier_type
+        FROM warehouses w
+        LEFT JOIN suppliers s ON s.id = w.supplier_id
+        WHERE w.id = $1
         LIMIT 1;
       `,
       [warehouseId]
@@ -246,6 +248,7 @@ export const AdminWarehouseOfferRepository = {
             source_type,
             is_available,
             is_hidden,
+            last_import_quantity,
             updated_at
           )
           VALUES (
@@ -258,6 +261,7 @@ export const AdminWarehouseOfferRepository = {
             $7,
             ($4::numeric > 0),
             FALSE,
+            $4,
             CURRENT_TIMESTAMP
           )
           RETURNING *;

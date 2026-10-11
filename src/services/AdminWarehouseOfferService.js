@@ -24,6 +24,10 @@ import {
   normalizeReturnPolicyOverride,
   ReturnPolicyService,
 } from "./ReturnPolicyService.js";
+import {
+  resolveFulfillmentType,
+  sourceTypeForFulfillment,
+} from "./InventoryClassificationService.js";
 
 const ALLOWED_STATUSES =
   new Set([
@@ -739,10 +743,13 @@ export const AdminWarehouseOfferService = {
               warehouse.supplier_id
             );
 
-      const sourceType =
-        supplierId !== null
-          ? "SUPPLIER"
-          : "OWN_STOCK";
+      const sourceType = sourceTypeForFulfillment(
+        resolveFulfillmentType({
+          supplier_type: warehouse.supplier_type,
+          warehouse_type: warehouse.type,
+          source_type: supplierId !== null ? "SUPPLIER" : "OWN_STOCK",
+        })
+      );
 
       const deliveryDays =
         Number(

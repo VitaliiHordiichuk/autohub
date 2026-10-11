@@ -1,6 +1,9 @@
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { ReturnPolicyService } from "./ReturnPolicyService.js";
+import {
+  canonicalOfferClassification,
+} from "./InventoryClassificationService.js";
 
 
 function formatQuantity(quantity) {
@@ -214,12 +217,8 @@ function mapOffer(offer, pricingContext, locale) {
       .trim()
       .toUpperCase();
 
-  const sourceType =
-    supplierType === "OWN"
-      ? "OWN_STOCK"
-      : supplierType === "PARTNER"
-        ? "SUPPLIER"
-        : offer.source_type;
+  const { sourceType, fulfillmentType } =
+    canonicalOfferClassification(offer);
 
   const availabilityStatus = resolveOfferAvailability(offer, sourceType);
 
@@ -242,6 +241,8 @@ function mapOffer(offer, pricingContext, locale) {
       Number(offer.product_id),
 
     sourceType,
+
+    fulfillmentType,
 
     quantity,
 

@@ -232,6 +232,8 @@ export const CartRepository = {
         po.source_type,
         po.is_available,
         po.is_hidden,
+        w.type AS warehouse_type,
+        s.type AS supplier_type,
         po.return_policy_override AS offer_return_policy_override,
         p.return_policy_override AS product_return_policy_override,
         w.return_policy_override AS warehouse_return_policy_override
@@ -247,6 +249,9 @@ export const CartRepository = {
 
       LEFT JOIN warehouses w
         ON w.id = po.warehouse_id
+
+      LEFT JOIN suppliers s
+        ON s.id = COALESCE(po.supplier_id, w.supplier_id)
 
       LEFT JOIN LATERAL (
         SELECT

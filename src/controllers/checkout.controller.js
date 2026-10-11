@@ -16,6 +16,8 @@ function sendError(res, error, label) {
     .json({
       success: false,
       error: error.message,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.details ? { details: error.details } : {}),
     });
 }
 
@@ -75,6 +77,8 @@ export async function submitOrder(
   try {
     const {
       checkoutId,
+      idempotencyKey = null,
+      acceptedPrices = [],
       comment = null,
       vinCheckRequested = false,
       vin = null,
@@ -85,6 +89,8 @@ export async function submitOrder(
     const result =
       await SubmitOrder.execute({
         checkoutId,
+        idempotencyKey,
+        acceptedPrices,
         userId:
           req.auth?.userId ?? null,
         guestToken:
@@ -98,13 +104,15 @@ export async function submitOrder(
           Boolean(saveDeliveryProfile),
       });
 
-    await FunnelAnalyticsService
+    const createdOrders = result.orders || [result.order].filter(Boolean);
+    for (const createdOrder of createdOrders) {
+      await FunnelAnalyticsService
       .recordEvent({
         req,
         eventType: "ORDER_CREATED",
         checkoutId,
         orderId:
-          result.order.id,
+          createdOrder.id,
         source: "CHECKOUT",
       })
       .catch((error) => {
@@ -113,12 +121,14 @@ export async function submitOrder(
           error
         );
       });
+    }
 
     return res.status(201).json({
       success: true,
       message:
         "Замовлення надіслано менеджеру",
       order: result.order,
+      orders: result.orders || [result.order],
       items: result.orderItems,
       delivery: result.delivery,
       remainingItemsCount: result.remainingItemsCount,
