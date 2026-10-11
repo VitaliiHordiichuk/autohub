@@ -1,11 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { pool } from "../config/db.js";
 import {
+  IMAGE_BRANDING_MODE,
+  IMAGE_PROCESSING_MODE,
   PROCESSED_IMAGE_SIZE,
   PRODUCT_IMAGE_PROCESSING_VERSION,
   ProductImageProcessor,
+  isSmartProductImageProcessingEnabled,
   resolveImageBrandingMode,
+  resolveImageProcessingMode,
 } from "./ProductImageProcessor.js";
 import { ProductPublicUpdateService } from "./ProductPublicUpdateService.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
@@ -14,6 +18,7 @@ const mimeExtensions = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
 ]);
 const activeJobs = new Set();
+const PREVIEW_CONFIRMATION_TTL_MS = 30 * 60 * 1000;
 
 function storageConfig() {
   const config = {
@@ -40,11 +45,126 @@ function positiveId(value, label) {
   return result;
 }
 
-function resolveModeAndDatabase(brandingMode, database) {
-  if (brandingMode && typeof brandingMode.query === "function") {
-    return { brandingMode: undefined, db: brandingMode };
+function resolveSettingsAndDatabase(settings, database) {
+  if (settings && typeof settings.query === "function") {
+    return { settings: {}, db: settings };
   }
-  return { brandingMode, db: database };
+  if (typeof settings === "string") {
+    return { settings: { brandingMode: settings }, db: database };
+  }
+  return { settings: settings && typeof settings === "object" ? settings : {}, db: database };
+}
+
+function parseCrop(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return parseCrop(JSON.parse(value));
+    } catch {
+      throw new Error("Некорректная область кадра");
+    }
+  }
+  if (typeof value !== "object") throw new Error("Некорректная область кадра");
+  const crop = {
+    left: Number(value.left),
+    top: Number(value.top),
+    width: Number(value.width),
+    height: Number(value.height),
+  };
+  if (Object.values(crop).some((coordinate) => !Number.isFinite(coordinate))
+    || crop.left < 0 || crop.top < 0
+    || crop.width < 0.02 || crop.height < 0.02
+    || crop.left + crop.width > 1.000001
+    || crop.top + crop.height > 1.000001) {
+    throw new Error("Некорректная область кадра");
+  }
+  return crop;
+}
+
+function previewConfirmationSecret() {
+  const secret = String(process.env.AUTH_JWT_SECRET || "");
+  if (secret.length < 32) throw new Error("AUTH_JWT_SECRET отсутствует или короче 32 символов");
+  return secret;
+}
+
+function encodePreviewToken(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = createHmac("sha256", previewConfirmationSecret()).update(body).digest("base64url");
+  return `${body}.${signature}`;
+}
+
+function processingFingerprint(processing) {
+  const sourceConfig = processing.processingConfig || {};
+  const crop = sourceConfig.crop ?? processing.crop;
+  const cropPaddingRatio = sourceConfig.cropPaddingRatio ?? processing.cropPaddingRatio;
+  return createHash("sha256").update(JSON.stringify({
+    processingMode: processing.processingMode,
+    processingConfig: {
+      ...(crop ? { crop } : {}),
+      ...(cropPaddingRatio !== undefined && cropPaddingRatio !== null ? { cropPaddingRatio } : {}),
+    },
+  })).digest("base64url");
+}
+
+function issuePreviewToken(payload) {
+  return encodePreviewToken({ ...payload, expiresAt: Date.now() + PREVIEW_CONFIRMATION_TTL_MS });
+}
+
+function verifyPreviewToken(token, expected) {
+  try {
+    const [body, signature, extra] = String(token || "").split(".");
+    if (!body || !signature || extra) throw new Error("invalid token");
+    const expectedSignature = createHmac("sha256", previewConfirmationSecret())
+      .update(body).digest("base64url");
+    const supplied = Buffer.from(signature);
+    const calculated = Buffer.from(expectedSignature);
+    if (supplied.length !== calculated.length || !timingSafeEqual(supplied, calculated)) {
+      throw new Error("invalid signature");
+    }
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (!Number.isFinite(payload.expiresAt) || payload.expiresAt < Date.now()) {
+      throw new Error("expired token");
+    }
+    for (const [key, value] of Object.entries(expected)) {
+      if (payload[key] !== value) throw new Error("mismatched token");
+    }
+  } catch {
+    throw new Error("Сначала проверь и подтверди предварительный просмотр");
+  }
+}
+
+function resolveProcessingSettings(settings, { requireSmartEnabled = true } = {}) {
+  const processingMode = resolveImageProcessingMode(settings.processingMode);
+  if (processingMode !== IMAGE_PROCESSING_MODE.LEGACY
+    && requireSmartEnabled
+    && !isSmartProductImageProcessingEnabled()) {
+    throw new Error("Smart-обработка фотографий временно отключена");
+  }
+  const cropPaddingRatio = settings.cropPaddingRatio === undefined
+    || settings.cropPaddingRatio === null || settings.cropPaddingRatio === ""
+    ? undefined
+    : Number(settings.cropPaddingRatio);
+  const minimumCropPaddingRatio = processingMode === IMAGE_PROCESSING_MODE.PRODUCT_MAX ? 0.04 : 0.06;
+  if (cropPaddingRatio !== undefined
+    && (!Number.isFinite(cropPaddingRatio)
+      || cropPaddingRatio < minimumCropPaddingRatio || cropPaddingRatio > 0.1)) {
+    throw new Error(`Безопасное поле должно быть от ${minimumCropPaddingRatio * 100}% до 10%`);
+  }
+  const crop = parseCrop(settings.crop);
+  if (processingMode === IMAGE_PROCESSING_MODE.PRODUCT_FOCUS && !crop) {
+    throw new Error("Для PRODUCT_FOCUS выбери область кадра");
+  }
+  const brandingMode = processingMode === IMAGE_PROCESSING_MODE.LEGACY
+    ? resolveImageBrandingMode(settings.brandingMode)
+    : IMAGE_BRANDING_MODE.CLEAN;
+  return {
+    processingMode,
+    brandingMode,
+    processingConfig: {
+      ...(crop ? { crop } : {}),
+      ...(cropPaddingRatio !== undefined ? { cropPaddingRatio } : {}),
+    },
+  };
 }
 
 async function bodyToBuffer(body) {
@@ -107,6 +227,32 @@ export function buildMerchantImageStorageKey({
   return `products/${product}/merchant/${articleSlug}-photo-${image}-${revision}-clean-${PROCESSED_IMAGE_SIZE}.webp`;
 }
 
+async function buildSmartPreview(source, settings) {
+  const requestedSettings = {
+    ...settings,
+    processingMode: settings?.processingMode || IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+  };
+  const processing = resolveProcessingSettings(requestedSettings);
+  if (processing.processingMode === IMAGE_PROCESSING_MODE.LEGACY) {
+    throw new Error("Предпросмотр доступен только для PRODUCT MAX, SMART SAFE и PRODUCT FOCUS");
+  }
+  const processed = await ProductImageProcessor.process(source, {
+    processingMode: processing.processingMode,
+    brandingMode: IMAGE_BRANDING_MODE.CLEAN,
+    crop: processing.processingConfig.crop,
+    cropPaddingRatio: processing.processingConfig.cropPaddingRatio,
+  });
+  return {
+    preview: `data:image/webp;base64,${processed.variants[PROCESSED_IMAGE_SIZE].toString("base64")}`,
+    metadata: processed.metadata,
+    processing: {
+      processingMode: processing.processingMode,
+      crop: processing.processingConfig.crop || null,
+      cropPaddingRatio: processing.processingConfig.cropPaddingRatio ?? null,
+    },
+  };
+}
+
 async function removeKeys(keys) {
   const unique = [...new Set(keys.filter(Boolean))];
   if (!unique.length) return;
@@ -121,7 +267,7 @@ export async function processProductImageRecord(imageId, db = pool) {
       pi.processed_storage_key_1600,pi.processed_storage_key_1200,
       pi.processed_storage_key_800,pi.processed_storage_key_400,
       pi.merchant_storage_key_1500,
-      pi.image_branding_mode,p.article
+      pi.image_branding_mode,pi.image_processing_mode,pi.image_processing_config,p.article
     FROM product_images pi
     JOIN products p ON p.id=pi.product_id
     WHERE pi.id=$1`, [id]);
@@ -133,8 +279,19 @@ export async function processProductImageRecord(imageId, db = pool) {
   const uploadedKeys = [];
   try {
     const source = await r2.send(new GetObjectCommand({ Bucket: config.bucket, Key: row.original_storage_key }));
+    const configuredMode = resolveImageProcessingMode(row.image_processing_mode);
+    const effectiveMode = configuredMode !== IMAGE_PROCESSING_MODE.LEGACY
+      && !isSmartProductImageProcessingEnabled()
+      ? IMAGE_PROCESSING_MODE.LEGACY
+      : configuredMode;
+    const processingConfig = row.image_processing_config && typeof row.image_processing_config === "object"
+      ? row.image_processing_config
+      : {};
     const processed = await ProductImageProcessor.process(await bodyToBuffer(source.Body), {
       brandingMode: row.image_branding_mode,
+      processingMode: effectiveMode,
+      crop: processingConfig.crop,
+      cropPaddingRatio: processingConfig.cropPaddingRatio,
     });
     const revision = randomUUID();
     const articleSlug = imageArticleSlug(row.article, row.product_id);
@@ -175,7 +332,7 @@ export async function processProductImageRecord(imageId, db = pool) {
       processed_storage_key_800=$8,processed_storage_key_400=$9,
       original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
       image_quality_status=$14,merchant_url_1500=$15,merchant_storage_key_1500=$16,
-      processing_version=${PRODUCT_IMAGE_PROCESSING_VERSION},
+      processing_version=$17,image_review_status=$18,image_review_reason=$19,
       processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
       processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
       WHERE id=$1`, [id, publicUrl(config, keys[1600]), publicUrl(config, keys[1200]),
@@ -183,7 +340,9 @@ export async function processProductImageRecord(imageId, db = pool) {
       keys[1600], keys[1200], keys[800], keys[400],
       processed.metadata.originalWidth, processed.metadata.originalHeight,
       processed.metadata.processedWidth, processed.metadata.processedHeight,
-      processed.metadata.qualityStatus, publicUrl(config, merchantKey), merchantKey]);
+      processed.metadata.qualityStatus, publicUrl(config, merchantKey), merchantKey,
+      processed.metadata.processingVersion || PRODUCT_IMAGE_PROCESSING_VERSION,
+      processed.metadata.reviewStatus || "APPROVED", processed.metadata.reviewReason || null]);
     await ProductPublicUpdateService.touch(row.product_id, db);
     await removeKeys(oldKeys);
   } catch (error) {
@@ -208,6 +367,19 @@ function enqueue(imageId) {
 }
 
 export const ProductImageService = {
+  capabilities() {
+    const smartProcessing = isSmartProductImageProcessingEnabled();
+    return {
+      smartProcessing,
+      preferredMode: smartProcessing ? IMAGE_PROCESSING_MODE.PRODUCT_MAX : IMAGE_PROCESSING_MODE.LEGACY,
+      modes: [
+        IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+        IMAGE_PROCESSING_MODE.SMART_SAFE,
+        IMAGE_PROCESSING_MODE.PRODUCT_FOCUS,
+      ],
+    };
+  },
+
   async searchProducts({search="",filter="ALL",productId=null,page=1,limit=50} = {}, db = pool) {
     const query = String(search).trim();
     const safeFilter=["ALL","WITH","WITHOUT"].includes(String(filter).toUpperCase())?String(filter).toUpperCase():"ALL";
@@ -237,17 +409,27 @@ export const ProductImageService = {
       merchant_url_1500,
       processing_status,display_mode,processing_error,processed_at,
       original_width,original_height,processed_width,processed_height,image_quality_status,
-      image_branding_mode
+      image_branding_mode,image_processing_mode,image_processing_config,
+      image_review_status,image_review_reason
       FROM product_images WHERE product_id=$1 ORDER BY priority,id`, [positiveId(productId, "productId")]);
     return result.rows;
   },
 
-  async upload(productId, files, brandingMode, database = pool) {
-    const request = resolveModeAndDatabase(brandingMode, database);
+  async upload(productId, files, settings, database = pool) {
+    const request = resolveSettingsAndDatabase(settings, database);
     const db = request.db;
     const id = positiveId(productId, "productId");
-    const resolvedBrandingMode = resolveImageBrandingMode(request.brandingMode);
+    const processing = resolveProcessingSettings(request.settings);
     if (!files?.length) throw new Error("Выбери хотя бы одно изображение");
+    if (processing.processingMode !== IMAGE_PROCESSING_MODE.LEGACY) {
+      if (files.length !== 1) throw new Error("Подтверди каждое Smart-фото отдельно");
+      verifyPreviewToken(request.settings.previewToken, {
+        scope: "upload",
+        productId: id,
+        sourceFingerprint: createHash("sha256").update(files[0].buffer).digest("base64url"),
+        processingFingerprint: processingFingerprint(processing),
+      });
+    }
     const exists = await db.query("SELECT article FROM products WHERE id=$1", [id]);
     if (!exists.rows[0]) throw new Error("Товар не найден");
     const articleSlug = imageArticleSlug(exists.rows[0].article, id);
@@ -267,9 +449,12 @@ export const ProductImageService = {
       try {
         result = await db.query(`INSERT INTO product_images(
           product_id,url,source,priority,storage_key,original_url,original_storage_key,
-          processing_status,display_mode,image_branding_mode)
-          VALUES($1,$2,'R2',$3,$4,$2,$4,'PROCESSING','ORIGINAL',$5) RETURNING *`,
-        [id, url, ++priority, storageKey, resolvedBrandingMode]);
+          processing_status,display_mode,image_branding_mode,image_processing_mode,
+          image_processing_config,image_review_status,image_review_reason)
+          VALUES($1,$2,'R2',$3,$4,$2,$4,'PROCESSING','ORIGINAL',$5,$6,$7,'APPROVED',NULL)
+          RETURNING *`,
+        [id, url, ++priority, storageKey, processing.brandingMode,
+          processing.processingMode, JSON.stringify(processing.processingConfig)]);
       } catch (error) {
         await r2.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: storageKey })).catch(() => {});
         throw error;
@@ -279,6 +464,45 @@ export const ProductImageService = {
     }
     if (added.length) await ProductPublicUpdateService.touch(id, db);
     return added;
+  },
+
+  async previewUpload(productId, file, settings, db = pool) {
+    const id = positiveId(productId, "productId");
+    if (!file?.buffer || !mimeExtensions.has(file.mimetype)) {
+      throw new Error("Поддерживаются фотографии JPG, PNG и WEBP");
+    }
+    const exists = await db.query("SELECT 1 FROM products WHERE id=$1", [id]);
+    if (!exists.rows[0]) throw new Error("Товар не найден");
+    const preview = await buildSmartPreview(file.buffer, settings);
+    return {
+      ...preview,
+      previewToken: issuePreviewToken({
+        scope: "upload",
+        productId: id,
+        sourceFingerprint: createHash("sha256").update(file.buffer).digest("base64url"),
+        processingFingerprint: processingFingerprint(preview.processing),
+      }),
+    };
+  },
+
+  async previewExisting(productId, imageId, settings, db = pool) {
+    const product = positiveId(productId, "productId");
+    const image = positiveId(imageId, "imageId");
+    const result = await db.query(`SELECT original_storage_key FROM product_images
+      WHERE id=$1 AND product_id=$2`, [image, product]);
+    const row = result.rows[0];
+    if (!row?.original_storage_key) throw new Error("Оригинал изображения не найден");
+    const source = await createProductImageStorage().read(row.original_storage_key);
+    const preview = await buildSmartPreview(source, settings);
+    return {
+      ...preview,
+      previewToken: issuePreviewToken({
+        scope: "reprocess",
+        productId: product,
+        imageId: image,
+        processingFingerprint: processingFingerprint(preview.processing),
+      }),
+    };
   },
 
   async makePrimary(productId, imageId, db = pool) {
@@ -305,14 +529,25 @@ export const ProductImageService = {
     return this.list(product, db);
   },
 
-  async reprocess(productId, imageId, brandingMode, database = pool) {
-    const request = resolveModeAndDatabase(brandingMode, database);
+  async reprocess(productId, imageId, settings, database = pool) {
+    const request = resolveSettingsAndDatabase(settings, database);
     const db = request.db;
     const product = positiveId(productId, "productId"); const image = positiveId(imageId, "imageId");
-    const resolvedBrandingMode = resolveImageBrandingMode(request.brandingMode);
+    const processing = resolveProcessingSettings(request.settings);
+    if (processing.processingMode !== IMAGE_PROCESSING_MODE.LEGACY) {
+      verifyPreviewToken(request.settings.previewToken, {
+        scope: "reprocess",
+        productId: product,
+        imageId: image,
+        processingFingerprint: processingFingerprint(processing),
+      });
+    }
     const result = await db.query(`UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL,
-      image_branding_mode=$3 WHERE id=$1 AND product_id=$2 RETURNING id`,
-    [image, product, resolvedBrandingMode]);
+      image_branding_mode=$3,image_processing_mode=$4,image_processing_config=$5,
+      image_review_status='APPROVED',image_review_reason=NULL
+      WHERE id=$1 AND product_id=$2 RETURNING id`,
+    [image, product, processing.brandingMode, processing.processingMode,
+      JSON.stringify(processing.processingConfig)]);
     if (!result.rows[0]) throw new Error("Изображение не найдено");
     enqueue(image);
     return this.list(product, db);

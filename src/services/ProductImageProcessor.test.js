@@ -8,16 +8,29 @@ import {
   DEFAULT_IMAGE_BRANDING_MODE,
   FULL_BRANDED_PATTERN,
   IMAGE_BRANDING_MODE,
+  IMAGE_PROCESSING_MODE,
+  IMAGE_REVIEW_STATUS,
   MAX_UPSCALE,
   PROCESSED_IMAGE_SIZE,
   PRODUCT_IMAGE_PROCESSING_VERSION,
   TARGET_FILL_RATIO,
   WEBP_QUALITY,
+  SMART_CROP_PADDING_RATIO,
+  SMART_FRAME_FILL_RATIO,
+  SMART_PRODUCT_IMAGE_PROCESSING_VERSION,
+  SMART_WEBP_QUALITY,
+  PRODUCT_MAX_CROP_PADDING_RATIO,
+  PRODUCT_MAX_IMAGE_PROCESSING_VERSION,
+  PRODUCT_MAX_TARGET_FILL_RATIO,
+  analyzeProductMaxContent,
   classifyImageQuality,
+  detectSmartProductBounds,
   detectProductBounds,
+  isSmartProductImageProcessingEnabled,
   processProductImage,
   processMerchantProductImage,
   resolveImageBrandingMode,
+  resolveImageProcessingMode,
 } from "./ProductImageProcessor.js";
 
 const cases = [
@@ -334,4 +347,314 @@ test("uses FULL_BRANDED by default and accepts an env or explicit override", () 
     () => resolveImageBrandingMode("UNKNOWN", {}),
     /Некорректный режим брендирования/,
   );
+});
+
+test("SMART SAFE uses one predictable scale and preserves multiple separated objects", async () => {
+  const part = await sharp({
+    create: { width: 760, height: 420, channels: 3, background: "#151515" },
+  }).png().toBuffer();
+  const box = await sharp({
+    create: { width: 500, height: 300, channels: 3, background: "#d7d2c8" },
+  }).png().toBuffer();
+  const screw = await sharp({
+    create: { width: 55, height: 160, channels: 3, background: "#60656b" },
+  }).png().toBuffer();
+  const input = await sharp({
+    create: { width: 2000, height: 1600, channels: 3, background: "#ffffff" },
+  }).composite([
+    { input: box, left: 460, top: 260 },
+    { input: part, left: 380, top: 760 },
+    { input: screw, left: 1320, top: 1050 },
+    { input: screw, left: 1450, top: 980 },
+  ]).png().toBuffer();
+  const originalCopy = Buffer.from(input);
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.SMART_SAFE,
+    brandingMode: IMAGE_BRANDING_MODE.FULL_BRANDED,
+  });
+
+  assert.equal(input.equals(originalCopy), true);
+  assert.equal(result.metadata.processingVersion, SMART_PRODUCT_IMAGE_PROCESSING_VERSION);
+  assert.equal(result.metadata.processingMode, IMAGE_PROCESSING_MODE.SMART_SAFE);
+  assert.equal(result.metadata.detectionMethod, "UNIFORM_BORDER");
+  assert.equal(result.metadata.detectionConfidence, "HIGH");
+  assert.equal(result.metadata.reviewStatus, IMAGE_REVIEW_STATUS.APPROVED);
+  assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+  assert.deepEqual(result.metadata.brandingLayers, []);
+  assert.ok(result.metadata.detectedBounds.left <= 380);
+  assert.ok(result.metadata.detectedBounds.top <= 260);
+  assert.ok(result.metadata.detectedBounds.left + result.metadata.detectedBounds.width >= 1505);
+  assert.ok(result.metadata.detectedBounds.top + result.metadata.detectedBounds.height >= 1210);
+  assert.ok(Math.abs(result.metadata.fillRatio - SMART_FRAME_FILL_RATIO) < 0.002);
+  assert.ok(result.metadata.scale <= MAX_UPSCALE);
+  assert.equal(result.merchant.variant.equals(result.variants[PROCESSED_IMAGE_SIZE]), true);
+});
+
+test("SMART SAFE falls back without cropping on a non-uniform border and requests review", async () => {
+  const top = await sharp({
+    create: { width: 1200, height: 420, channels: 3, background: "#b7b4ae" },
+  }).png().toBuffer();
+  const part = await sharp({
+    create: { width: 720, height: 380, channels: 3, background: "#171717" },
+  }).png().toBuffer();
+  const input = await sharp({
+    create: { width: 1200, height: 1600, channels: 3, background: "#f7f7f5" },
+  }).composite([
+    { input: top, left: 0, top: 0 },
+    { input: part, left: 180, top: 850 },
+  ]).png().toBuffer();
+  const bounds = await detectSmartProductBounds(input);
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.SMART_SAFE,
+  });
+
+  assert.deepEqual(
+    { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
+    { left: 0, top: 0, width: 1200, height: 1600 },
+  );
+  assert.equal(bounds.detected, false);
+  assert.equal(bounds.method, "SAFE_FULL_IMAGE");
+  assert.equal(bounds.reviewStatus, IMAGE_REVIEW_STATUS.NEEDS_REVIEW);
+  assert.equal(bounds.reviewReason, "NON_UNIFORM_OR_TEXTURED_BACKGROUND");
+  assert.equal(result.metadata.contentWidth, 1080);
+  assert.equal(result.metadata.contentHeight, 1440);
+  assert.ok(Math.abs(result.metadata.fillRatio - SMART_FRAME_FILL_RATIO) < 0.002);
+});
+
+test("SMART SAFE keeps light-on-white and black-on-dark parts inside conservative bounds", async () => {
+  const scenarios = [
+    { background: "#ffffff", object: "#ededed" },
+    { background: "#303030", object: "#080808" },
+  ];
+  for (const scenario of scenarios) {
+    const part = await sharp({
+      create: { width: 1000, height: 620, channels: 3, background: scenario.object },
+    }).png().toBuffer();
+    const fastener = await sharp({
+      create: { width: 75, height: 180, channels: 3, background: scenario.object },
+    }).png().toBuffer();
+    const input = await sharp({
+      create: { width: 2200, height: 1600, channels: 3, background: scenario.background },
+    }).composite([
+      { input: part, left: 520, top: 430 },
+      { input: fastener, left: 1660, top: 980 },
+    ]).png().toBuffer();
+    const result = await processProductImage(input, {
+      processingMode: IMAGE_PROCESSING_MODE.SMART_SAFE,
+    });
+    const bounds = result.metadata.detectedBounds;
+
+    assert.equal(result.metadata.detectionMethod, "UNIFORM_BORDER");
+    assert.ok(bounds.left <= 520);
+    assert.ok(bounds.top <= 430);
+    assert.ok(bounds.left + bounds.width >= 1735);
+    assert.ok(bounds.top + bounds.height >= 1160);
+    assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+  }
+});
+
+test("PRODUCT FOCUS only crops the explicit manual frame", async () => {
+  const input = await objectFixture({
+    width: 2000,
+    height: 1500,
+    objectLeft: 500,
+    objectTop: 500,
+    objectWidth: 900,
+    objectHeight: 500,
+  });
+  const crop = { left: 0.2, top: 0.25, width: 0.6, height: 0.5 };
+  const bounds = await detectSmartProductBounds(input, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_FOCUS,
+    crop,
+  });
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_FOCUS,
+    crop,
+  });
+
+  assert.deepEqual(
+    { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
+    { left: 400, top: 375, width: 1200, height: 750 },
+  );
+  assert.equal(bounds.method, "MANUAL");
+  assert.equal(result.metadata.reviewStatus, IMAGE_REVIEW_STATUS.APPROVED);
+  assert.equal(result.metadata.autoCropApplied, true);
+  assert.throws(
+    () => resolveImageProcessingMode("AUTOMATIC_PRODUCT_FOCUS"),
+    /Некорректный режим обработки/,
+  );
+  await assert.rejects(
+    processProductImage(input, { processingMode: IMAGE_PROCESSING_MODE.PRODUCT_FOCUS }),
+    /выбери область кадра/,
+  );
+});
+
+test("SMART SAFE protects edge-adjacent content and strips metadata from public derivatives", async () => {
+  const object = await sharp({
+    create: { width: 700, height: 500, channels: 3, background: "#242424" },
+  }).png().toBuffer();
+  const input = await sharp({
+    create: { width: 1400, height: 1000, channels: 3, background: "#ffffff" },
+  }).composite([{ input: object, left: 0, top: 250 }]).jpeg({ quality: 96 }).withMetadata({
+    exif: { IFD0: { Copyright: "test-only" } },
+  }).toBuffer();
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.SMART_SAFE,
+  });
+  const output = await sharp(result.variants[PROCESSED_IMAGE_SIZE]).metadata();
+
+  assert.equal(result.metadata.detectedBounds.left, 0);
+  assert.equal(result.metadata.reviewStatus, IMAGE_REVIEW_STATUS.NEEDS_REVIEW);
+  assert.ok([
+    "NON_UNIFORM_OR_TEXTURED_BACKGROUND",
+    "SIGNIFICANT_CONTENT_NEAR_SOURCE_EDGE",
+  ].includes(result.metadata.reviewReason));
+  assert.equal(output.format, "webp");
+  assert.equal(output.exif, undefined);
+  assert.equal(output.width, PROCESSED_IMAGE_SIZE);
+  assert.equal(output.height, PROCESSED_IMAGE_SIZE);
+});
+
+test("SMART SAFE caps small-image enlargement and exposes an explicit rollback flag", async () => {
+  assert.equal(SMART_PRODUCT_IMAGE_PROCESSING_VERSION, 5);
+  assert.equal(SMART_CROP_PADDING_RATIO, 0.06);
+  assert.equal(SMART_FRAME_FILL_RATIO, 0.96);
+  assert.equal(SMART_WEBP_QUALITY, 90);
+  assert.equal(isSmartProductImageProcessingEnabled({}), false);
+  assert.equal(isSmartProductImageProcessingEnabled({ SMART_PRODUCT_IMAGES_ENABLED: "true" }), true);
+
+  const input = await objectFixture({
+    width: 360,
+    height: 300,
+    objectLeft: 80,
+    objectTop: 80,
+    objectWidth: 200,
+    objectHeight: 140,
+  });
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.SMART_SAFE,
+  });
+  assert.equal(result.metadata.scale, MAX_UPSCALE);
+  assert.equal(result.metadata.qualityStatus, "LOW_RESOLUTION");
+  assert.ok(result.metadata.fillRatio < SMART_FRAME_FILL_RATIO);
+});
+
+test("PRODUCT MAX enlarges low-resolution content to the visual target without hiding source quality", async () => {
+  const input = await objectFixture({
+    width: 352,
+    height: 316,
+    objectLeft: 76,
+    objectTop: 88,
+    objectWidth: 200,
+    objectHeight: 140,
+  });
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+  });
+
+  assert.equal(PRODUCT_MAX_IMAGE_PROCESSING_VERSION, 6);
+  assert.equal(PRODUCT_MAX_TARGET_FILL_RATIO, 0.88);
+  assert.equal(PRODUCT_MAX_CROP_PADDING_RATIO, 0.045);
+  assert.equal(result.metadata.processingMode, IMAGE_PROCESSING_MODE.PRODUCT_MAX);
+  assert.equal(result.metadata.processingVersion, PRODUCT_MAX_IMAGE_PROCESSING_VERSION);
+  assert.equal(result.metadata.qualityStatus, "LOW_RESOLUTION");
+  assert.ok(result.metadata.scale > MAX_UPSCALE);
+  assert.ok(Math.abs(result.metadata.contentFillRatio - PRODUCT_MAX_TARGET_FILL_RATIO) < 0.015);
+  assert.equal(result.metadata.retainedContentRatio, 1);
+  assert.equal(result.metadata.detectionMethod, "AUTO_CONTENT_BOUNDS");
+  assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+});
+
+test("PRODUCT MAX keeps separated fasteners inside the automatic content bounds", async () => {
+  const part = await sharp({
+    create: { width: 760, height: 340, channels: 3, background: "#171717" },
+  }).png().toBuffer();
+  const screw = await sharp({
+    create: { width: 34, height: 80, channels: 3, background: "#666666" },
+  }).png().toBuffer();
+  const input = await sharp({
+    create: { width: 1800, height: 1300, channels: 3, background: "#ffffff" },
+  }).composite([
+    { input: part, left: 430, top: 410 },
+    { input: screw, left: 1370, top: 920 },
+    { input: screw, left: 1460, top: 850 },
+  ]).png().toBuffer();
+  const analysis = await analyzeProductMaxContent(input);
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+  });
+
+  assert.equal(analysis.uniformBorder, true);
+  assert.ok(analysis.bounds.left <= 430);
+  assert.ok(analysis.bounds.top <= 410);
+  assert.ok(analysis.bounds.left + analysis.bounds.width >= 1494);
+  assert.ok(analysis.bounds.top + analysis.bounds.height >= 1000);
+  assert.equal(result.metadata.retainedContentRatio, 1);
+  assert.ok(result.metadata.contentFillRatio >= 0.86);
+});
+
+test("PRODUCT MAX preserves a non-uniform full frame and requests manual bounds only when useful", async () => {
+  const texture = await sharp({
+    create: { width: 300, height: 240, channels: 3, background: "#806f59" },
+  }).png().toBuffer();
+  const background = await sharp({
+    create: { width: 1200, height: 900, channels: 3, background: "#b9aa95" },
+  }).composite([
+    { input: texture, left: 0, top: 0 },
+    { input: texture, left: 900, top: 660 },
+    {
+      input: await sharp({
+      create: { width: 320, height: 170, channels: 3, background: "#171717" },
+      }).png().toBuffer(),
+      left: 450,
+      top: 360,
+    },
+  ]).png().toBuffer();
+  const result = await processProductImage(background, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+  });
+
+  assert.equal(result.metadata.detectionMethod, "SAFE_FULL_FRAME");
+  assert.equal(result.metadata.autoCropApplied, false);
+  assert.deepEqual(result.metadata.detectedBounds, { left: 0, top: 0, width: 1200, height: 900 });
+  assert.equal(result.metadata.reviewStatus, IMAGE_REVIEW_STATUS.NEEDS_REVIEW);
+  assert.equal(result.metadata.manualCropSuggested, true);
+});
+
+test("PRODUCT MAX does not make an already strong composition smaller", async () => {
+  const input = await objectFixture({
+    width: 1400,
+    height: 1000,
+    objectLeft: 56,
+    objectTop: 80,
+    objectWidth: 1288,
+    objectHeight: 840,
+  });
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+  });
+
+  assert.ok(result.metadata.contentFillRatio >= result.metadata.originalContentFillRatio - 0.01);
+  assert.ok(result.metadata.contentFillRatio >= 0.9);
+});
+
+test("PRODUCT MAX accepts reviewed manual bounds while retaining the immutable input", async () => {
+  const input = await objectFixture({
+    width: 1600,
+    height: 1200,
+    objectLeft: 380,
+    objectTop: 320,
+    objectWidth: 840,
+    objectHeight: 520,
+  });
+  const originalCopy = Buffer.from(input);
+  const result = await processProductImage(input, {
+    processingMode: IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+    crop: { left: 0.2, top: 0.2, width: 0.6, height: 0.6 },
+  });
+
+  assert.equal(input.equals(originalCopy), true);
+  assert.equal(result.metadata.detectionMethod, "MANUAL_CONTENT_BOUNDS");
+  assert.equal(result.metadata.detectionConfidence, "MANUAL");
+  assert.equal(result.metadata.autoCropApplied, true);
 });
