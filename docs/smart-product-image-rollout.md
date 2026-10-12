@@ -21,11 +21,11 @@ Do not enable the flag until migration `106_add_smart_product_image_processing.s
 - `PRODUCT_FOCUS`: requires a normalized manual crop. It begins with the complete frame; packaging and fasteners are not excluded automatically.
 - `LEGACY`: keeps the previous version 4 processor and branding configuration.
 
-PRODUCT MAX and SMART modes always create clean WebP derivatives without a watermark. The 1500, 1200, 800 and 400 pixel site variants and the 1500 pixel Merchant variant retain the existing immutable, versioned R2 key scheme.
+PRODUCT MAX and SMART modes use the existing MAKA branding for the 1500, 1200, 800 and 400 pixel site variants. A separate 1500 pixel Merchant variant remains clean. Both branches retain the existing immutable, versioned R2 key scheme.
 
 ## Publication and rollback
 
-Preview requests are read-only and do not write to PostgreSQL or R2. A short-lived signed confirmation is bound to the exact source and processing settings, so a SMART upload/reprocess cannot start until the administrator has previewed and confirmed that result. Each SMART upload is confirmed separately.
+Preview requests are read-only and do not write to PostgreSQL or R2. The primary admin action performs PRODUCT MAX automatically in one click; internally it validates each selected source separately before upload. The optional editor keeps the visible before/after preview and manual confirmation flow. A short-lived signed confirmation is bound to the exact source, branding and processing settings in both paths.
 
 Processing always reads `original_storage_key`; it never chains compression from an already processed WebP. On success, database URLs switch atomically to a new version. The existing “Use original” action restores `original_url` without deleting the original or processed files.
 

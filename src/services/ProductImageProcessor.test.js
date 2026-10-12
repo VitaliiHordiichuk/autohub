@@ -379,15 +379,16 @@ test("SMART SAFE uses one predictable scale and preserves multiple separated obj
   assert.equal(result.metadata.detectionMethod, "UNIFORM_BORDER");
   assert.equal(result.metadata.detectionConfidence, "HIGH");
   assert.equal(result.metadata.reviewStatus, IMAGE_REVIEW_STATUS.APPROVED);
-  assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
-  assert.deepEqual(result.metadata.brandingLayers, []);
+  assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.FULL_BRANDED);
+  assert.deepEqual(result.metadata.brandingLayers, ["REPEATING_WATERMARK", "STAMP"]);
   assert.ok(result.metadata.detectedBounds.left <= 380);
   assert.ok(result.metadata.detectedBounds.top <= 260);
   assert.ok(result.metadata.detectedBounds.left + result.metadata.detectedBounds.width >= 1505);
   assert.ok(result.metadata.detectedBounds.top + result.metadata.detectedBounds.height >= 1210);
   assert.ok(Math.abs(result.metadata.fillRatio - SMART_FRAME_FILL_RATIO) < 0.002);
   assert.ok(result.metadata.scale <= MAX_UPSCALE);
-  assert.equal(result.merchant.variant.equals(result.variants[PROCESSED_IMAGE_SIZE]), true);
+  assert.equal(result.merchant.variant.equals(result.variants[PROCESSED_IMAGE_SIZE]), false);
+  assert.equal(result.merchant.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
 });
 
 test("SMART SAFE falls back without cropping on a non-uniform border and requests review", async () => {
@@ -441,6 +442,7 @@ test("SMART SAFE keeps light-on-white and black-on-dark parts inside conservativ
     ]).png().toBuffer();
     const result = await processProductImage(input, {
       processingMode: IMAGE_PROCESSING_MODE.SMART_SAFE,
+      brandingMode: IMAGE_BRANDING_MODE.FULL_BRANDED,
     });
     const bounds = result.metadata.detectedBounds;
 
@@ -449,7 +451,7 @@ test("SMART SAFE keeps light-on-white and black-on-dark parts inside conservativ
     assert.ok(bounds.top <= 430);
     assert.ok(bounds.left + bounds.width >= 1735);
     assert.ok(bounds.top + bounds.height >= 1160);
-    assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+    assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.FULL_BRANDED);
   }
 });
 
@@ -550,6 +552,7 @@ test("PRODUCT MAX enlarges low-resolution content to the visual target without h
   });
   const result = await processProductImage(input, {
     processingMode: IMAGE_PROCESSING_MODE.PRODUCT_MAX,
+    brandingMode: IMAGE_BRANDING_MODE.FULL_BRANDED,
   });
 
   assert.equal(PRODUCT_MAX_IMAGE_PROCESSING_VERSION, 6);
@@ -562,7 +565,9 @@ test("PRODUCT MAX enlarges low-resolution content to the visual target without h
   assert.ok(Math.abs(result.metadata.contentFillRatio - PRODUCT_MAX_TARGET_FILL_RATIO) < 0.015);
   assert.equal(result.metadata.retainedContentRatio, 1);
   assert.equal(result.metadata.detectionMethod, "AUTO_CONTENT_BOUNDS");
-  assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+  assert.equal(result.metadata.brandingMode, IMAGE_BRANDING_MODE.FULL_BRANDED);
+  assert.equal(result.merchant.metadata.brandingMode, IMAGE_BRANDING_MODE.CLEAN);
+  assert.equal(result.merchant.variant.equals(result.variants[PROCESSED_IMAGE_SIZE]), false);
 });
 
 test("PRODUCT MAX keeps separated fasteners inside the automatic content bounds", async () => {

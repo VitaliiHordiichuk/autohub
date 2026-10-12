@@ -982,9 +982,7 @@ export async function processProductImage(input, {
 } = {}) {
   const source = Buffer.isBuffer(input) ? input : Buffer.from(input);
   const mode = resolveImageProcessingMode(processingMode);
-  const resolvedBrandingMode = mode === IMAGE_PROCESSING_MODE.LEGACY
-    ? resolveImageBrandingMode(brandingMode)
-    : IMAGE_BRANDING_MODE.CLEAN;
+  const resolvedBrandingMode = resolveImageBrandingMode(brandingMode);
   const { baseCanvas, metadata } = await prepareBaseCanvas(source, {
     processingMode: mode,
     crop,

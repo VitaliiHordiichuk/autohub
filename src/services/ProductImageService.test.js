@@ -202,7 +202,7 @@ test("SMART SAFE reprocesses from the immutable original and stores review metad
   const merchant = puts.find(({ key }) => /\/merchant\/.*-clean-1500\.webp$/.test(key));
   assert.ok(site);
   assert.ok(merchant);
-  assert.equal(site.body.equals(merchant.body), true, "smart output must not add a watermark");
+  assert.equal(site.body.equals(merchant.body), false, "site output must retain MAKA branding");
   assert.equal(completedUpdates[0].parameters[16], 5);
   assert.equal(completedUpdates[0].parameters[17], "APPROVED");
   assert.equal(completedUpdates[0].parameters[18], null);
@@ -246,7 +246,7 @@ test("smart upload preview is read-only and requires the feature flag", async (t
   assert.match(preview.preview, /^data:image\/webp;base64,/);
   assert.match(preview.previewToken, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   assert.equal(preview.metadata.processingMode, "SMART_SAFE");
-  assert.equal(preview.metadata.brandingMode, "CLEAN");
+  assert.equal(preview.metadata.brandingMode, "FULL_BRANDED");
   assert.equal(queries.length, 2);
   assert.match(queries[0].sql, /^SELECT 1 FROM products/);
   assert.match(queries[1].sql, /^SELECT 1 FROM products/);
@@ -329,6 +329,14 @@ test("smart publication requires the exact confirmed preview and one file", asyn
   await assert.rejects(
     ProductImageService.upload(22, [file, file], { ...settings, previewToken: preview.previewToken }, previewDb),
     /Подтверди каждое Smart-фото отдельно/,
+  );
+  await assert.rejects(
+    ProductImageService.upload(22, [file], {
+      ...settings,
+      brandingMode: "CLEAN",
+      previewToken: preview.previewToken,
+    }, previewDb),
+    /Сначала проверь и подтверди предварительный просмотр/,
   );
   await assert.rejects(
     ProductImageService.upload(22, [{ ...file, buffer: Buffer.from(source).fill(0, 0, 1) }], {

@@ -99,6 +99,7 @@ function processingFingerprint(processing) {
   const cropPaddingRatio = sourceConfig.cropPaddingRatio ?? processing.cropPaddingRatio;
   return createHash("sha256").update(JSON.stringify({
     processingMode: processing.processingMode,
+    brandingMode: processing.brandingMode,
     processingConfig: {
       ...(crop ? { crop } : {}),
       ...(cropPaddingRatio !== undefined && cropPaddingRatio !== null ? { cropPaddingRatio } : {}),
@@ -154,9 +155,11 @@ function resolveProcessingSettings(settings, { requireSmartEnabled = true } = {}
   if (processingMode === IMAGE_PROCESSING_MODE.PRODUCT_FOCUS && !crop) {
     throw new Error("Для PRODUCT_FOCUS выбери область кадра");
   }
-  const brandingMode = processingMode === IMAGE_PROCESSING_MODE.LEGACY
-    ? resolveImageBrandingMode(settings.brandingMode)
-    : IMAGE_BRANDING_MODE.CLEAN;
+  const brandingMode = resolveImageBrandingMode(
+    processingMode === IMAGE_PROCESSING_MODE.LEGACY
+      ? settings.brandingMode
+      : settings.brandingMode ?? IMAGE_BRANDING_MODE.FULL_BRANDED,
+  );
   return {
     processingMode,
     brandingMode,
@@ -238,7 +241,7 @@ async function buildSmartPreview(source, settings) {
   }
   const processed = await ProductImageProcessor.process(source, {
     processingMode: processing.processingMode,
-    brandingMode: IMAGE_BRANDING_MODE.CLEAN,
+    brandingMode: processing.brandingMode,
     crop: processing.processingConfig.crop,
     cropPaddingRatio: processing.processingConfig.cropPaddingRatio,
   });
@@ -247,6 +250,7 @@ async function buildSmartPreview(source, settings) {
     metadata: processed.metadata,
     processing: {
       processingMode: processing.processingMode,
+      brandingMode: processing.brandingMode,
       crop: processing.processingConfig.crop || null,
       cropPaddingRatio: processing.processingConfig.cropPaddingRatio ?? null,
     },
