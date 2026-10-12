@@ -17,7 +17,7 @@ after(async () => {
   await pool.end();
 });
 
-test("ручное название переживает последующее обновление названия из прайса", async () => {
+test("ручные название и описание сохраняются, а название переживает обновление из прайса", async () => {
   const token = String(Date.now());
   const article = `MANUALNAME${token}`;
 
@@ -55,6 +55,8 @@ test("ручное название переживает последующее 
     productId,
     languageCode,
     name: "Ручное название товара",
+    description:
+      "Подходит для подтверждённых моделей и агрегатов.",
   });
 
   await pool.query(
@@ -71,6 +73,7 @@ test("ручное название переживает последующее 
       SELECT
         product.name,
         translation.name AS translation_name,
+        translation.description AS translation_description,
         translation.provider
       FROM products product
       JOIN product_translations translation
@@ -88,6 +91,10 @@ test("ручное название переживает последующее 
   assert.equal(
     stored.rows[0].translation_name,
     "Ручное название товара"
+  );
+  assert.equal(
+    stored.rows[0].translation_description,
+    "Подходит для подтверждённых моделей и агрегатов."
   );
   assert.equal(
     stored.rows[0].provider,
