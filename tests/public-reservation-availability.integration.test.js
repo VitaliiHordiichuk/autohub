@@ -6,11 +6,13 @@ import { CartRepository } from "../src/repositories/CartRepository.js";
 import { CartAccessService } from "../src/services/CartAccessService.js";
 import { CheckoutService } from "../src/services/CheckoutService.js";
 import { OfferService, OFFER_AVAILABILITY } from "../src/services/OfferService.js";
+import { RecentlyViewedProductService } from "../src/services/RecentlyViewedProductService.js";
 
 const tracked = { carts: [], offers: [], products: [], warehouses: [] };
 
 async function createFixture() {
   const suffix = `${Date.now()}${Math.random().toString(16).slice(2)}`;
+  const article = `RESERVE${suffix}`.toUpperCase();
   const warehouseResult = await pool.query(`
     INSERT INTO warehouses(name, city, type)
     VALUES($1, 'Availability test city', 'OWN')
@@ -23,7 +25,7 @@ async function createFixture() {
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Reservation availability fixture', TRUE)
     RETURNING id
-  `, [`RESERVE${suffix}`]);
+  `, [article]);
   const productId = Number(productResult.rows[0].id);
   tracked.products.push(productId);
 
@@ -39,7 +41,7 @@ async function createFixture() {
   const offerId = Number(offerResult.rows[0].id);
   tracked.offers.push(offerId);
 
-  return { productId, offerId };
+  return { productId, offerId, article };
 }
 
 async function createGuestCart(offerId = null) {
@@ -75,7 +77,7 @@ after(async () => {
 });
 
 test("PostgreSQL distinguishes foreign, own and expired checkout reservations", async () => {
-  const { productId, offerId } = await createFixture();
+  const { productId, offerId, article } = await createFixture();
   const owner = await createGuestCart(offerId);
   const viewer = await createGuestCart();
 
@@ -109,6 +111,24 @@ test("PostgreSQL distinguishes foreign, own and expired checkout reservations", 
   assert.equal(ownOffer.availabilityStatus, OFFER_AVAILABILITY.RESERVED_FOR_YOU);
   assert.equal(ownOffer.availabilityText, "Reserved for you");
   assert.ok(Date.parse(ownOffer.reservationExpiresAt) > Date.now());
+
+  const [anonymousHistory] = await RecentlyViewedProductService.listPublicCards({
+    items: [{ article, viewedAt: Date.now() }],
+    locale: "uk",
+    availabilityContext: { userId: null, cartId: null },
+  });
+  assert.equal(anonymousHistory.price, anonymousOffer.retailPrice);
+  assert.equal(anonymousHistory.isAvailable, anonymousOffer.isAvailable);
+  assert.equal(anonymousHistory.availabilityStatus, OFFER_AVAILABILITY.RESERVED);
+
+  const [ownerHistory] = await RecentlyViewedProductService.listPublicCards({
+    items: [{ article, viewedAt: Date.now() }],
+    locale: "en",
+    availabilityContext: { userId: null, cartId: owner.cartId },
+  });
+  assert.equal(ownerHistory.price, ownOffer.retailPrice);
+  assert.equal(ownerHistory.isAvailable, ownOffer.isAvailable);
+  assert.equal(ownerHistory.availabilityStatus, OFFER_AVAILABILITY.RESERVED_FOR_YOU);
 
   await pool.query(`
     UPDATE stock_reservations

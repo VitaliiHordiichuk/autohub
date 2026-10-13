@@ -82,6 +82,10 @@ import {
   novaPoshtaRouter,
 } from "./routes/nova-poshta.routes.js";
 import { googleMerchantRouter } from "./routes/google-merchant.routes.js";
+import {
+  accountRecentlyViewedRouter,
+  publicRecentlyViewedRouter,
+} from "./routes/recently-viewed.routes.js";
 
 export const app = express();
 
@@ -125,6 +129,7 @@ app.use(enforceApiErrorLanguage);
 app.use("/api/auth", authRouter);
 app.use("/api/account", deliveryProfileRouter);
 app.use("/api/account/search-history", clientSearchHistoryRouter);
+app.use("/api/account/recently-viewed", accountRecentlyViewedRouter);
 app.use("/api/account/cart", clientCartRouter);
 app.use("/api/account/orders", clientOrderRouter);
 app.use("/api/notifications", notificationRouter);
@@ -135,6 +140,7 @@ app.use("/api/vin-requests",publicVinRequestRouter);
 app.use("/api/homepage", optionalAuthSilent, publicHomepageRouter);
 app.use("/api/seo", seoRouter);
 app.use("/api/google", googleMerchantRouter);
+app.use("/api/products/recently-viewed", publicRecentlyViewedRouter);
 app.use("/api/products", productPlaceholderRouter);
 app.use("/api/site/contact", siteContactRouter);
 app.use("/api/shipping/nova-poshta", novaPoshtaRouter);

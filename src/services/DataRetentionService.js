@@ -4,6 +4,7 @@ export const RETENTION_POLICY = Object.freeze({
   importsPerProfile: 5, searchDays: 30, funnelDays: 30, priceDays: 90,
   readNotificationDays: 30, unreadNotificationDays: 90,
   loginDays: 30, securityDays: 90, expiredTokenDays: 7, abandonedCartDays: 30,
+  recentlyViewedDays: 30,
 });
 
 const JOB = 'data-retention-v1';
@@ -55,8 +56,10 @@ const abandonedCart = `t.user_id IS NULL
 
 // Static allowlist: business tables (orders, products, manual overrides, VIN,
 // stock movements and review decisions) are deliberately absent.
+const searchHistoryPredicate = age('t.created_at', RETENTION_POLICY.searchDays);
 const rules = [
-  ['search_events', age('t.created_at', RETENTION_POLICY.searchDays)],
+  ['client_recently_viewed_products', age('t.viewed_at', RETENTION_POLICY.recentlyViewedDays)],
+  ['search_events', searchHistoryPredicate],
   ['funnel_events', age('t.created_at', RETENTION_POLICY.funnelDays)],
   ['price_history', age('t.created_at', RETENTION_POLICY.priceDays)],
   ['user_notifications', `(t.read_at IS NOT NULL AND ${age('t.read_at', RETENTION_POLICY.readNotificationDays)})
@@ -104,7 +107,7 @@ async function report(db, now) {
       counts[table] = Number((await db.query(`SELECT count(*) FROM ${table} t WHERE ${predicate}`, [now])).rows[0].count);
     }
     counts.search_event_results = Number((await db.query(`SELECT count(*) FROM search_event_results r
-      JOIN search_events t ON t.id=r.search_event_id WHERE ${rules[0][1]}`, [now])).rows[0].count);
+      JOIN search_events t ON t.id=r.search_event_id WHERE ${searchHistoryPredicate}`, [now])).rows[0].count);
     counts.email_metadata_to_compact = Number((await db.query(`SELECT count(*) FROM email_import_files t WHERE ${compactEmail}`, [now])).rows[0].count);
     const state = (await db.query('SELECT * FROM data_retention_state WHERE job_name=$1', [JOB])).rows[0] || null;
     const autovacuumEnabled = (await db.query("SELECT setting='on' AS enabled FROM pg_settings WHERE name='autovacuum'")).rows[0]?.enabled;

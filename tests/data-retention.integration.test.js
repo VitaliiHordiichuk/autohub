@@ -140,6 +140,11 @@ test('retention removes only expired histories and tokens, never current prices 
   const user = await one('SELECT id FROM users ORDER BY id LIMIT 1');
   const customer = await one('SELECT id FROM customers ORDER BY id LIMIT 1');
   const offer = await one('SELECT * FROM product_offers ORDER BY id LIMIT 1');
+  const historyProducts = (await pool.query('SELECT id FROM products ORDER BY id LIMIT 2')).rows;
+  const recentView = async (productId, days) => one(`INSERT INTO client_recently_viewed_products(user_id,product_id,viewed_at)
+    VALUES($1,$2,NOW()-($3 * INTERVAL '1 day')) RETURNING id`, [user.id, productId, days]);
+  const oldRecentView = await recentView(historyProducts[0].id, 31);
+  const freshRecentView = await recentView(historyProducts[1].id, 29);
   const search = async days => one(`INSERT INTO search_events(raw_query,found,created_at) VALUES('retention',false,NOW()-($1 * INTERVAL '1 day')) RETURNING id`, [days]);
   const oldSearch = await search(31), freshSearch = await search(29);
   const child = await one(`INSERT INTO search_event_results(search_event_id,relation_type,article) VALUES($1,'EXACT','retention') RETURNING id`, [oldSearch.id]);
@@ -163,10 +168,10 @@ test('retention removes only expired histories and tokens, never current prices 
   [user.id, randomUUID().replaceAll('-', '').padEnd(64, '0'), expiry, used]);
   const expired = await token(8, null), valid = await token(-1, null), used = await token(-1, 8), justExpired = await token(1, null);
   await execute();
-  for (const [table, row] of [['search_events', oldSearch], ['search_event_results', child], ['funnel_events', oldFunnel], ['price_history', oldPrice],
+  for (const [table, row] of [['client_recently_viewed_products', oldRecentView], ['search_events', oldSearch], ['search_event_results', child], ['funnel_events', oldFunnel], ['price_history', oldPrice],
     ['user_notifications', oldRead], ['user_notifications', oldUnread], ['customer_history', login], ['customer_history', security],
     ['password_reset_tokens', expired], ['password_reset_tokens', used]]) assert.equal(await exists(table, row.id), false, table);
-  for (const [table, row] of [['search_events', freshSearch], ['funnel_events', freshFunnel], ['price_history', freshPrice], ['user_notifications', newlyRead],
+  for (const [table, row] of [['client_recently_viewed_products', freshRecentView], ['search_events', freshSearch], ['funnel_events', freshFunnel], ['price_history', freshPrice], ['user_notifications', newlyRead],
     ['user_notifications', freshUnread], ['customer_history', freshLogin], ['customer_history', decision],
     ['password_reset_tokens', valid], ['password_reset_tokens', justExpired]]) assert.ok(await exists(table, row.id), table);
   assert.deepEqual(await one('SELECT * FROM product_offers WHERE id=$1', [offer.id]), offer);
