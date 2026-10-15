@@ -501,20 +501,50 @@ export const PublicCatalogService = {
           AND default_translation.language_code=default_language.code
         LEFT JOIN LATERAL (
           SELECT TRUE AS has_available_offer,
-            MIN(CASE
-              WHEN $9::boolean THEN ROUND(COALESCE(available.minimum_sale_price,available.retail_price)::numeric,2)
-              ELSE GREATEST(
-                ROUND((available.retail_price*(1-$8::numeric/100))::numeric,2),
-                ROUND(COALESCE(available.minimum_sale_price,available.retail_price)::numeric,2)
-              )
-            END) AS minimum_available_price
+            MIN(ranked.customer_price) FILTER (
+              WHERE ranked.is_commercial
+                AND (NOT ranked.priority_applies OR ranked.priority_rank=1)
+            ) AS minimum_available_price
           FROM (
-            SELECT po.minimum_sale_price,
-              CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL
-                THEN po.manual_retail_price ELSE po.retail_price END AS retail_price
+            SELECT priced.*,
+              (BOOL_OR(priced.warehouse_priority_enabled) OVER source_group
+                AND BOOL_AND(priced.warehouse_priority IS NOT NULL) OVER source_group
+                AND COUNT(*) OVER source_group > 1) AS priority_applies,
+              ROW_NUMBER() OVER (
+                PARTITION BY priced.source_key
+                ORDER BY CASE WHEN priced.is_commercial THEN 0 ELSE 1 END,
+                  priced.warehouse_priority ASC NULLS LAST,
+                  priced.customer_price ASC NULLS LAST,
+                  priced.id
+              ) AS priority_rank
+            FROM (
+              SELECT candidates.*,
+                (candidates.remaining_quantity>0 AND candidates.customer_price>0)
+                  AS is_commercial
+              FROM (
+                SELECT po.id,
+                  COALESCE('supplier:'||COALESCE(po.supplier_id,w.supplier_id)::text,
+                    'warehouse:'||w.id::text, 'offer:'||po.id::text) AS source_key,
+                  COALESCE(s.warehouse_priority_enabled,FALSE) AS warehouse_priority_enabled,
+                  CASE WHEN w.priority>0 THEN w.priority END AS warehouse_priority,
+                  GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)
+                    AS remaining_quantity,
+                  CASE WHEN effective_price.retail_price>0
+                    AND (po.minimum_sale_price IS NULL OR po.minimum_sale_price>=0)
+                    THEN CASE WHEN $9::boolean
+                      THEN ROUND(COALESCE(po.minimum_sale_price,effective_price.retail_price)::numeric,2)
+                      ELSE GREATEST(
+                        ROUND((ROUND(effective_price.retail_price::numeric,2)*(1-$8::numeric/100))::numeric,2),
+                        ROUND(COALESCE(po.minimum_sale_price,effective_price.retail_price)::numeric,2)
+                      ) END
+                  END AS customer_price
             FROM product_offers po
             LEFT JOIN warehouses w ON w.id=po.warehouse_id
             LEFT JOIN suppliers s ON s.id=COALESCE(po.supplier_id,w.supplier_id)
+            CROSS JOIN LATERAL (
+              SELECT CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL
+                THEN po.manual_retail_price ELSE po.retail_price END AS retail_price
+            ) effective_price
             LEFT JOIN LATERAL (
               SELECT COALESCE(SUM(sr.quantity),0) AS reserved_quantity
               FROM stock_reservations sr
@@ -524,13 +554,17 @@ export const PublicCatalogService = {
                     OR sr.reserved_until>CURRENT_TIMESTAMP)))
             ) reservations ON TRUE
             WHERE po.product_id=p.id AND po.is_available=TRUE AND po.is_hidden=FALSE
-              AND GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)>0
+              AND po.quantity>0
               AND (w.id IS NULL OR w.is_active=TRUE)
               AND (s.id IS NULL OR s.is_active=TRUE)
-              AND (CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL
-                THEN po.manual_retail_price ELSE po.retail_price END)>0
-          ) available
-          HAVING COUNT(*)>0
+              ) candidates
+            ) priced
+            WINDOW source_group AS (PARTITION BY priced.source_key)
+          ) ranked
+          HAVING COUNT(*) FILTER (
+            WHERE ranked.is_commercial
+              AND (NOT ranked.priority_applies OR ranked.priority_rank=1)
+          )>0
         ) offer_metrics ON TRUE
         WHERE p.is_active=TRUE
           AND (
