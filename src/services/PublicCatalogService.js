@@ -5,6 +5,7 @@ import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { parsePublicPage } from "../utils/publicPagination.js";
+import { CATALOG_DIRECTIONS, catalogDirection } from "./CatalogDirections.js";
 
 function localizedName(row, locale) {
   if (locale === "en") return row.name_en || row.name;
@@ -144,6 +145,41 @@ async function getLegacyTree(locale, db) {
 }
 
 export const PublicCatalogService = {
+  async getDirections(locale = "uk", db = pool) {
+    if (!isCustomerTaxonomyPublicEnabled()) return [];
+    locale = publicLocale(locale);
+    const tree = await this.getTree(locale, db);
+    const rootsBySlug = new Map(tree.map((root) => [root.slug, root]));
+    return CATALOG_DIRECTIONS.map((direction) => {
+      const roots = direction.roots.map((slug) => rootsBySlug.get(slug));
+      if (roots.some((root) => !root || root.isVirtual)) {
+        throw new Error(`Customer catalog direction has an unavailable root: ${direction.slug}`);
+      }
+      const subgroups = [];
+      const addSubgroups = (category, depth, rootSlug) => {
+        subgroups.push({
+          id: category.id,
+          slug: category.slug,
+          name: category.name,
+          productCount: category.productCount,
+          depth,
+          rootSlug,
+        });
+        category.children.forEach((child) => addSubgroups(child, depth + 1, rootSlug));
+      };
+      roots.forEach((root) => addSubgroups(root, 0, root.slug));
+      return {
+        slug: direction.slug,
+        name: direction.names[locale],
+        rootSlugs: direction.roots,
+        rootIds: roots.map((root) => root.id),
+        // A product has at most one approved primary membership (DB unique index).
+        productCount: roots.reduce((count, root) => count + root.productCount, 0),
+        subgroups,
+      };
+    });
+  },
+
   async getTree(locale = "uk", db = pool) {
     locale = publicLocale(locale);
     if (!isCustomerTaxonomyPublicEnabled()) {
@@ -247,14 +283,28 @@ export const PublicCatalogService = {
   async getCategoryProducts({
     slug, locale = "uk", page = 1, query = "", availability = "all",
     minPrice = null, maxPrice = null, sort = "default", pricingContext = null,
-    availabilityContext = null,
+    availabilityContext = null, directionSlug = null, subgroupSlug = null,
   }, db = pool) {
     locale = publicLocale(locale);
     const normalizedPage = parsePublicPage(page);
     if (normalizedPage === null) return null;
     const useCustomerTaxonomy = isCustomerTaxonomyPublicEnabled();
+    const isDirection = directionSlug !== null;
+    if (isDirection && (!useCustomerTaxonomy || !catalogDirection(directionSlug))) return null;
+    const direction = isDirection
+      ? (await this.getDirections(locale, db)).find((item) => item.slug === directionSlug)
+      : null;
+    const subgroup = subgroupSlug
+      ? direction?.subgroups.find((item) => item.slug === subgroupSlug)
+      : null;
+    if (isDirection && (!direction || (subgroupSlug && !subgroup))) return null;
+    const directionScopeIds = isDirection
+      ? (subgroup ? [subgroup.id] : direction.rootIds)
+      : null;
     const isVirtualOther = useCustomerTaxonomy && slug === OTHER_CATEGORY.slug;
-    const categoryResult = useCustomerTaxonomy
+    const categoryResult = isDirection
+      ? { rows: [{ id: null, parent_id: null, slug: direction.slug, name: direction.name }] }
+      : useCustomerTaxonomy
       ? (isVirtualOther
         ? { rows: [{
           id: null,
@@ -323,7 +373,24 @@ export const PublicCatalogService = {
       price_desc: "filtered.minimum_available_price DESC NULLS LAST, filtered.display_name, p.article",
       name_asc: "filtered.display_name, p.article",
     }[normalizedSort];
-    const categoryProductScopeSql = isVirtualOther
+    const categoryProductScopeSql = isDirection
+      ? `category_scope AS (
+          SELECT id FROM customer_categories
+          WHERE id = ANY($1::integer[]) AND status = 'ACTIVE' AND is_active = TRUE
+          UNION ALL
+          SELECT child.id FROM customer_categories child
+          JOIN category_scope parent ON child.parent_id = parent.id
+          WHERE child.status = 'ACTIVE' AND child.is_active = TRUE
+        ),
+        category_product_ids AS MATERIALIZED (
+          SELECT DISTINCT membership.product_id
+          FROM category_scope scope
+          JOIN product_customer_categories membership
+            ON membership.customer_category_id = scope.id
+          WHERE membership.is_primary = TRUE
+            AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        )`
+      : isVirtualOther
       ? `category_product_ids AS MATERIALIZED (
           SELECT product.id AS product_id
           FROM products product
@@ -434,20 +501,50 @@ export const PublicCatalogService = {
           AND default_translation.language_code=default_language.code
         LEFT JOIN LATERAL (
           SELECT TRUE AS has_available_offer,
-            MIN(CASE
-              WHEN $9::boolean THEN ROUND(COALESCE(available.minimum_sale_price,available.retail_price)::numeric,2)
-              ELSE GREATEST(
-                ROUND((available.retail_price*(1-$8::numeric/100))::numeric,2),
-                ROUND(COALESCE(available.minimum_sale_price,available.retail_price)::numeric,2)
-              )
-            END) AS minimum_available_price
+            MIN(ranked.customer_price) FILTER (
+              WHERE ranked.is_commercial
+                AND (NOT ranked.priority_applies OR ranked.priority_rank=1)
+            ) AS minimum_available_price
           FROM (
-            SELECT po.minimum_sale_price,
-              CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL
-                THEN po.manual_retail_price ELSE po.retail_price END AS retail_price
+            SELECT priced.*,
+              (BOOL_OR(priced.warehouse_priority_enabled) OVER source_group
+                AND BOOL_AND(priced.warehouse_priority IS NOT NULL) OVER source_group
+                AND COUNT(*) OVER source_group > 1) AS priority_applies,
+              ROW_NUMBER() OVER (
+                PARTITION BY priced.source_key
+                ORDER BY CASE WHEN priced.is_commercial THEN 0 ELSE 1 END,
+                  priced.warehouse_priority ASC NULLS LAST,
+                  priced.customer_price ASC NULLS LAST,
+                  priced.id
+              ) AS priority_rank
+            FROM (
+              SELECT candidates.*,
+                (candidates.remaining_quantity>0 AND candidates.customer_price>0)
+                  AS is_commercial
+              FROM (
+                SELECT po.id,
+                  COALESCE('supplier:'||COALESCE(po.supplier_id,w.supplier_id)::text,
+                    'warehouse:'||w.id::text, 'offer:'||po.id::text) AS source_key,
+                  COALESCE(s.warehouse_priority_enabled,FALSE) AS warehouse_priority_enabled,
+                  CASE WHEN w.priority>0 THEN w.priority END AS warehouse_priority,
+                  GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)
+                    AS remaining_quantity,
+                  CASE WHEN effective_price.retail_price>0
+                    AND (po.minimum_sale_price IS NULL OR po.minimum_sale_price>=0)
+                    THEN CASE WHEN $9::boolean
+                      THEN ROUND(COALESCE(po.minimum_sale_price,effective_price.retail_price)::numeric,2)
+                      ELSE GREATEST(
+                        ROUND((ROUND(effective_price.retail_price::numeric,2)*(1-$8::numeric/100))::numeric,2),
+                        ROUND(COALESCE(po.minimum_sale_price,effective_price.retail_price)::numeric,2)
+                      ) END
+                  END AS customer_price
             FROM product_offers po
             LEFT JOIN warehouses w ON w.id=po.warehouse_id
             LEFT JOIN suppliers s ON s.id=COALESCE(po.supplier_id,w.supplier_id)
+            CROSS JOIN LATERAL (
+              SELECT CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL
+                THEN po.manual_retail_price ELSE po.retail_price END AS retail_price
+            ) effective_price
             LEFT JOIN LATERAL (
               SELECT COALESCE(SUM(sr.quantity),0) AS reserved_quantity
               FROM stock_reservations sr
@@ -457,13 +554,17 @@ export const PublicCatalogService = {
                     OR sr.reserved_until>CURRENT_TIMESTAMP)))
             ) reservations ON TRUE
             WHERE po.product_id=p.id AND po.is_available=TRUE AND po.is_hidden=FALSE
-              AND GREATEST(po.quantity-COALESCE(reservations.reserved_quantity,0),0)>0
+              AND po.quantity>0
               AND (w.id IS NULL OR w.is_active=TRUE)
               AND (s.id IS NULL OR s.is_active=TRUE)
-              AND (CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL
-                THEN po.manual_retail_price ELSE po.retail_price END)>0
-          ) available
-          HAVING COUNT(*)>0
+              ) candidates
+            ) priced
+            WINDOW source_group AS (PARTITION BY priced.source_key)
+          ) ranked
+          HAVING COUNT(*) FILTER (
+            WHERE ranked.is_commercial
+              AND (NOT ranked.priority_applies OR ranked.priority_rank=1)
+          )>0
         ) offer_metrics ON TRUE
         WHERE p.is_active=TRUE
           AND (
@@ -482,7 +583,7 @@ export const PublicCatalogService = {
           AND ($7::numeric IS NULL OR minimum_available_price <= $7::numeric)
       )
     `;
-    const filterParameters = [isVirtualOther ? null : row.id, locale, normalizedQuery, normalizedArticleQuery,
+    const filterParameters = [isDirection ? directionScopeIds : isVirtualOther ? null : row.id, locale, normalizedQuery, normalizedArticleQuery,
       normalizedAvailability, normalizedMinPrice, normalizedMaxPrice, discountPercent, isVip];
     const [productResult, childrenResult] = await Promise.all([
       db.query(`${filteredProductsSql}
@@ -512,7 +613,11 @@ export const PublicCatalogService = {
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
       ORDER BY ${orderSql}
       LIMIT $10 OFFSET $11`, [...filterParameters, limit, (normalizedPage - 1) * limit]),
-      isVirtualOther
+      isDirection
+        ? Promise.resolve({ rows: direction.subgroups.map((item) => ({
+          ...item, product_count: item.productCount,
+        })) })
+        : isVirtualOther
         ? Promise.resolve({ rows: [] })
         : useCustomerTaxonomy
           ? db.query(`
@@ -712,6 +817,8 @@ export const PublicCatalogService = {
         slug: row.slug,
         name: categoryName,
         ...(useCustomerTaxonomy ? { isVirtual: isVirtualOther } : {}),
+        ...(isDirection ? { isDirection: true, rootSlugs: direction.rootSlugs,
+          selectedSubgroup: subgroup?.slug || null } : {}),
         parent: row.parent_id ? {
           slug: row.parent_slug,
           name: parentName,
@@ -725,6 +832,7 @@ export const PublicCatalogService = {
               ? child.name
               : localizedName(child, locale),
             productCount: Number(child.product_count),
+            ...(isDirection ? { depth: child.depth, rootSlug: child.rootSlug } : {}),
           })),
       },
       products,

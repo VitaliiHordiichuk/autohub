@@ -230,6 +230,24 @@ test("Product, Brand, Category and Merchant share one public primary offer", asy
       policy: "NON_RETURNABLE",
       source: "OFFER",
     });
+
+    // The lower-priced second warehouse is not public once supplier priority
+    // selects the first warehouse. Both catalog APIs must filter the same price
+    // that the category card actually displays, before pagination.
+    for (const scope of [
+      { slug: categorySlug },
+      { slug: "brakes", directionSlug: "brakes" },
+    ]) {
+      const filteredOut = await PublicCatalogService.getCategoryProducts({
+        ...scope, query: article, maxPrice: 175,
+      });
+      assert.equal(filteredOut.pagination.total, 0);
+      const exactPrice = await PublicCatalogService.getCategoryProducts({
+        ...scope, query: article, minPrice: 200, maxPrice: 200,
+      });
+      assert.equal(exactPrice.pagination.total, 1);
+      assert.equal(exactPrice.products[0].offers[0].retailPrice, 200);
+    }
   } finally {
     if (ids.product) {
       await pool.query(
