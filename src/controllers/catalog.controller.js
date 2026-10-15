@@ -24,6 +24,39 @@ export async function getCatalogTree(req, res) {
   }
 }
 
+export async function getCatalogDirections(req, res) {
+  try {
+    const directions = await PublicCatalogService.getDirections(req.query.locale);
+    return res.json({ success: true, directions });
+  } catch (error) {
+    console.error("Ошибка направлений каталога:", error);
+    return res.status(500).json({ success: false, error: "Не вдалося завантажити каталог" });
+  }
+}
+
+export async function getDirectionProducts(req, res) {
+  try {
+    res.set("Cache-Control", "private, no-store");
+    const [pricingContext, availabilityContext] = await Promise.all([
+      CustomerPricingService.getContext(req.auth?.userId ?? null),
+      PublicAvailabilityContextService.fromRequest(req),
+    ]);
+    const result = await PublicCatalogService.getCategoryProducts({
+      slug: req.params.slug, directionSlug: req.params.slug,
+      subgroupSlug: req.query.subgroup || null,
+      locale: req.query.locale, page: req.query.page,
+      query: req.query.q, availability: req.query.availability,
+      minPrice: req.query.minPrice, maxPrice: req.query.maxPrice,
+      sort: req.query.sort, pricingContext, availabilityContext,
+    });
+    if (!result) return res.status(404).json({ success: false, error: "Напрям або підгрупу не знайдено" });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Ошибка товаров направления:", error);
+    return res.status(500).json({ success: false, error: "Не вдалося завантажити товари" });
+  }
+}
+
 export async function getCategoryProducts(req, res) {
   try {
     res.set("Cache-Control", "private, no-store");

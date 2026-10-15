@@ -5,6 +5,7 @@ import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { parsePublicPage } from "../utils/publicPagination.js";
+import { CATALOG_DIRECTIONS, catalogDirection } from "./CatalogDirections.js";
 
 function localizedName(row, locale) {
   if (locale === "en") return row.name_en || row.name;
@@ -144,6 +145,41 @@ async function getLegacyTree(locale, db) {
 }
 
 export const PublicCatalogService = {
+  async getDirections(locale = "uk", db = pool) {
+    if (!isCustomerTaxonomyPublicEnabled()) return [];
+    locale = publicLocale(locale);
+    const tree = await this.getTree(locale, db);
+    const rootsBySlug = new Map(tree.map((root) => [root.slug, root]));
+    return CATALOG_DIRECTIONS.map((direction) => {
+      const roots = direction.roots.map((slug) => rootsBySlug.get(slug));
+      if (roots.some((root) => !root || root.isVirtual)) {
+        throw new Error(`Customer catalog direction has an unavailable root: ${direction.slug}`);
+      }
+      const subgroups = [];
+      const addSubgroups = (category, depth, rootSlug) => {
+        subgroups.push({
+          id: category.id,
+          slug: category.slug,
+          name: category.name,
+          productCount: category.productCount,
+          depth,
+          rootSlug,
+        });
+        category.children.forEach((child) => addSubgroups(child, depth + 1, rootSlug));
+      };
+      roots.forEach((root) => addSubgroups(root, 0, root.slug));
+      return {
+        slug: direction.slug,
+        name: direction.names[locale],
+        rootSlugs: direction.roots,
+        rootIds: roots.map((root) => root.id),
+        // A product has at most one approved primary membership (DB unique index).
+        productCount: roots.reduce((count, root) => count + root.productCount, 0),
+        subgroups,
+      };
+    });
+  },
+
   async getTree(locale = "uk", db = pool) {
     locale = publicLocale(locale);
     if (!isCustomerTaxonomyPublicEnabled()) {
@@ -247,14 +283,28 @@ export const PublicCatalogService = {
   async getCategoryProducts({
     slug, locale = "uk", page = 1, query = "", availability = "all",
     minPrice = null, maxPrice = null, sort = "default", pricingContext = null,
-    availabilityContext = null,
+    availabilityContext = null, directionSlug = null, subgroupSlug = null,
   }, db = pool) {
     locale = publicLocale(locale);
     const normalizedPage = parsePublicPage(page);
     if (normalizedPage === null) return null;
     const useCustomerTaxonomy = isCustomerTaxonomyPublicEnabled();
+    const isDirection = directionSlug !== null;
+    if (isDirection && (!useCustomerTaxonomy || !catalogDirection(directionSlug))) return null;
+    const direction = isDirection
+      ? (await this.getDirections(locale, db)).find((item) => item.slug === directionSlug)
+      : null;
+    const subgroup = subgroupSlug
+      ? direction?.subgroups.find((item) => item.slug === subgroupSlug)
+      : null;
+    if (isDirection && (!direction || (subgroupSlug && !subgroup))) return null;
+    const directionScopeIds = isDirection
+      ? (subgroup ? [subgroup.id] : direction.rootIds)
+      : null;
     const isVirtualOther = useCustomerTaxonomy && slug === OTHER_CATEGORY.slug;
-    const categoryResult = useCustomerTaxonomy
+    const categoryResult = isDirection
+      ? { rows: [{ id: null, parent_id: null, slug: direction.slug, name: direction.name }] }
+      : useCustomerTaxonomy
       ? (isVirtualOther
         ? { rows: [{
           id: null,
@@ -323,7 +373,24 @@ export const PublicCatalogService = {
       price_desc: "filtered.minimum_available_price DESC NULLS LAST, filtered.display_name, p.article",
       name_asc: "filtered.display_name, p.article",
     }[normalizedSort];
-    const categoryProductScopeSql = isVirtualOther
+    const categoryProductScopeSql = isDirection
+      ? `category_scope AS (
+          SELECT id FROM customer_categories
+          WHERE id = ANY($1::integer[]) AND status = 'ACTIVE' AND is_active = TRUE
+          UNION ALL
+          SELECT child.id FROM customer_categories child
+          JOIN category_scope parent ON child.parent_id = parent.id
+          WHERE child.status = 'ACTIVE' AND child.is_active = TRUE
+        ),
+        category_product_ids AS MATERIALIZED (
+          SELECT DISTINCT membership.product_id
+          FROM category_scope scope
+          JOIN product_customer_categories membership
+            ON membership.customer_category_id = scope.id
+          WHERE membership.is_primary = TRUE
+            AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        )`
+      : isVirtualOther
       ? `category_product_ids AS MATERIALIZED (
           SELECT product.id AS product_id
           FROM products product
@@ -482,7 +549,7 @@ export const PublicCatalogService = {
           AND ($7::numeric IS NULL OR minimum_available_price <= $7::numeric)
       )
     `;
-    const filterParameters = [isVirtualOther ? null : row.id, locale, normalizedQuery, normalizedArticleQuery,
+    const filterParameters = [isDirection ? directionScopeIds : isVirtualOther ? null : row.id, locale, normalizedQuery, normalizedArticleQuery,
       normalizedAvailability, normalizedMinPrice, normalizedMaxPrice, discountPercent, isVip];
     const [productResult, childrenResult] = await Promise.all([
       db.query(`${filteredProductsSql}
@@ -512,7 +579,11 @@ export const PublicCatalogService = {
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
       ORDER BY ${orderSql}
       LIMIT $10 OFFSET $11`, [...filterParameters, limit, (normalizedPage - 1) * limit]),
-      isVirtualOther
+      isDirection
+        ? Promise.resolve({ rows: direction.subgroups.map((item) => ({
+          ...item, product_count: item.productCount,
+        })) })
+        : isVirtualOther
         ? Promise.resolve({ rows: [] })
         : useCustomerTaxonomy
           ? db.query(`
@@ -712,6 +783,8 @@ export const PublicCatalogService = {
         slug: row.slug,
         name: categoryName,
         ...(useCustomerTaxonomy ? { isVirtual: isVirtualOther } : {}),
+        ...(isDirection ? { isDirection: true, rootSlugs: direction.rootSlugs,
+          selectedSubgroup: subgroup?.slug || null } : {}),
         parent: row.parent_id ? {
           slug: row.parent_slug,
           name: parentName,
@@ -725,6 +798,7 @@ export const PublicCatalogService = {
               ? child.name
               : localizedName(child, locale),
             productCount: Number(child.product_count),
+            ...(isDirection ? { depth: child.depth, rootSlug: child.rootSlug } : {}),
           })),
       },
       products,
