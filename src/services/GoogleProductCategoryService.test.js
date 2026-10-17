@@ -65,6 +65,70 @@ test("classifies real Mercedes shirt B66959811 as Shirts & Tops", () => {
 });
 
 
+test("classifies approved customer taxonomy Mercedes parts with legacy Other", () => {
+  const examples = [
+    { slug: "steering-pumps", root_slug: "steering" },
+    { slug: "engine-intake-manifolds-throttle", root_slug: "engine" },
+  ];
+  for (const category of examples) {
+    assert.equal(
+      googleProductCategoryFor(product({
+        merchant_categories: [{ slug: "other" }],
+        merchant_customer_category: { ...category, approval_status: "AUTO_APPROVED" },
+      })),
+      GOOGLE_PRODUCT_CATEGORY.vehiclePartsAndAccessories
+    );
+  }
+});
+
+test("customer collection classifies shirts but not other accessories", () => {
+  const category = {
+    slug: "accessories-collection",
+    root_slug: "accessories",
+    approval_status: "AUTO_APPROVED",
+  };
+  assert.equal(
+    googleProductCategoryFor(product({
+      merchant_name: "Теніска L",
+      merchant_categories: [{ slug: "other" }],
+      merchant_customer_category: category,
+    })),
+    GOOGLE_PRODUCT_CATEGORY.shirtsAndTops
+  );
+  assert.equal(
+    googleProductCategoryFor(product({
+      merchant_name: "Парасоля",
+      merchant_customer_category: category,
+    })),
+    null
+  );
+});
+
+test("ignores unapproved or unknown customer category evidence", () => {
+  assert.equal(
+    googleProductCategoryFor(product({
+      merchant_categories: [{ slug: "other" }],
+      merchant_customer_category: {
+        slug: "steering-pumps",
+        root_slug: "steering",
+        approval_status: "REVIEW",
+      },
+    })),
+    null
+  );
+  assert.equal(
+    googleProductCategoryFor(product({
+      merchant_customer_category: {
+        slug: "accessories-collection",
+        root_slug: "accessories",
+        approval_status: "MANUAL_APPROVED",
+      },
+      merchant_name: "Без назви",
+    })),
+    null
+  );
+});
+
 test("does not treat the Mercedes-Benz brand as automotive evidence", () => {
   assert.equal(
     googleProductCategoryFor(product({

@@ -12,6 +12,18 @@ export const GoogleMerchantFeedRepository = {
           .filter((id) => Number.isInteger(id) && id > 0))]
       : null;
     const result = await db.query(`
+      WITH RECURSIVE customer_category_roots AS (
+        SELECT id, slug AS root_slug
+        FROM customer_categories
+        WHERE parent_id IS NULL
+          AND status = 'ACTIVE' AND is_active = TRUE
+        UNION ALL
+        SELECT child.id, ancestor.root_slug
+        FROM customer_categories child
+        JOIN customer_category_roots ancestor
+          ON ancestor.id = child.parent_id
+        WHERE child.status = 'ACTIVE' AND child.is_active = TRUE
+      )
       SELECT
         p.id AS merchant_product_id,
         p.article AS merchant_article,
@@ -39,6 +51,7 @@ export const GoogleMerchantFeedRepository = {
         COALESCE(b.name, pm.name) AS merchant_brand,
         pt.name AS merchant_product_type,
         categories.merchant_categories,
+        customer_category.merchant_customer_category,
         images.image_urls AS merchant_image_urls,
 
         po.id,
@@ -125,6 +138,22 @@ export const GoogleMerchantFeedRepository = {
           AND parent.is_active = TRUE
         WHERE assignment.product_id = p.id
       ) categories ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT JSON_BUILD_OBJECT(
+          'slug', category.slug,
+          'root_slug', root.root_slug,
+          'approval_status', assignment.approval_status
+        ) AS merchant_customer_category
+        FROM product_customer_categories assignment
+        JOIN customer_categories category
+          ON category.id = assignment.customer_category_id
+          AND category.status = 'ACTIVE' AND category.is_active = TRUE
+        JOIN customer_category_roots root ON root.id = category.id
+        WHERE assignment.product_id = p.id
+          AND assignment.is_primary = TRUE
+          AND assignment.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        LIMIT 1
+      ) customer_category ON TRUE
       LEFT JOIN LATERAL (
         SELECT ARRAY_AGG(
           COALESCE(pi.merchant_url_1500, pi.original_url)

@@ -25,6 +25,26 @@ const AUTOMOTIVE_CATEGORY_SLUGS = new Set([
 ]);
 
 
+// The approved customer taxonomy is a second, independent source of evidence.
+// 'accessories' is intentionally excluded: it also contains clothing/merchandise.
+const CUSTOMER_AUTOMOTIVE_ROOT_SLUGS = new Set([
+  "engine",
+  "fuel-system",
+  "cooling",
+  "brakes",
+  "suspension",
+  "steering",
+  "electrical-electronics-lighting",
+  "filters-maintenance",
+  "body-glass",
+  "transmission-drivetrain",
+  "wheels",
+  "climate",
+  "exhaust",
+  "interior-safety",
+  "fasteners-seals-standard-parts",
+]);
+
 const AUTOMOTIVE_ACCESSORY_SLUGS = new Set([
   "mb-accessories-floor-mats",
   "mb-accessories-luggage",
@@ -70,6 +90,25 @@ function isMercedesCollection(category) {
   return categorySlug(category) === "mb-accessories-collection";
 }
 
+function approvedCustomerCategory(product) {
+  const category = product?.merchant_customer_category;
+  if (!category || !["AUTO_APPROVED", "MANUAL_APPROVED"].includes(category.approval_status)) {
+    return null;
+  }
+  return category;
+}
+
+function isCustomerCollection(product) {
+  const category = approvedCustomerCategory(product);
+  return categorySlug(category) === "accessories-collection"
+    && text(category?.root_slug).toLowerCase() === "accessories";
+}
+
+function isCustomerAutomotiveCategory(product) {
+  const category = approvedCustomerCategory(product);
+  return CUSTOMER_AUTOMOTIVE_ROOT_SLUGS.has(text(category?.root_slug).toLowerCase());
+}
+
 
 function isAutomotiveCategory(category) {
   const slug = categorySlug(category);
@@ -84,7 +123,8 @@ function isAutomotiveCategory(category) {
 
 function isShirt(product) {
   const hasCollectionCategory =
-    categories(product).some(isMercedesCollection);
+    categories(product).some(isMercedesCollection)
+    || isCustomerCollection(product);
   if (!hasCollectionCategory) return false;
 
   return SHIRT_PATTERN.test([
@@ -99,7 +139,8 @@ export function googleProductCategoryFor(product) {
     return GOOGLE_PRODUCT_CATEGORY.shirtsAndTops;
   }
 
-  if (categories(product).some(isAutomotiveCategory)) {
+  if (categories(product).some(isAutomotiveCategory)
+      || isCustomerAutomotiveCategory(product)) {
     return GOOGLE_PRODUCT_CATEGORY.vehiclePartsAndAccessories;
   }
 
