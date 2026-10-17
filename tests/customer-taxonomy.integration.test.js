@@ -47,7 +47,7 @@ after(async () => {
   await pool.end();
 });
 
-test("initial taxonomy contains hidden READY structure, seeded rules and zero memberships", async () => {
+test("initial taxonomy contains hidden READY structure, seeded rules and no memberships for a fresh fixture", async () => {
   const topLevel = await pool.query(`
     SELECT category.id, category.slug, category.status,
            category.is_active, category.is_navigation_visible,
@@ -107,11 +107,11 @@ test("initial taxonomy contains hidden READY structure, seeded rules and zero me
   const seededFoundation = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rule_count,
-      (SELECT COUNT(*)::integer FROM product_customer_categories) AS membership_count
-  `);
+      (SELECT COUNT(*)::integer FROM product_customer_categories WHERE product_id = $1) AS fixture_membership_count
+  `, [ids.product]);
   assert.deepEqual(seededFoundation.rows[0], {
     rule_count: 2280,
-    membership_count: 0,
+    fixture_membership_count: 0,
   });
 });
 

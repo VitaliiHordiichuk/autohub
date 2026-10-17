@@ -27,22 +27,17 @@ function flattenSlugs(categories, { customerTaxonomy = false } = {}) {
 }
 
 before(async () => {
-  const result = await pool.query(`
-    SELECT legacy.slug
-    FROM categories legacy
-    WHERE legacy.is_active = TRUE
-      AND NOT EXISTS (
-        SELECT 1
-        FROM customer_categories customer
-        WHERE customer.slug = legacy.slug
-          AND customer.status = 'ACTIVE'
-          AND customer.is_active = TRUE
-      )
-    ORDER BY legacy.parent_id NULLS FIRST, legacy.sort_order, legacy.id
-    LIMIT 1
+  // Legacy sitemap includes only visible categories with active products,
+  // not every active DB category. Choose the fixture from the public tree.
+  setPublicTaxonomyFlag("false");
+  const visibleLegacySlugs = flattenSlugs(await PublicCatalogService.getTree("uk"));
+  const activeCustomerCategories = await pool.query(`
+    SELECT slug FROM customer_categories
+    WHERE status = 'ACTIVE' AND is_active = TRUE
   `);
-  legacyOnlySlug = result.rows[0]?.slug;
-  assert.ok(legacyOnlySlug, "An active legacy-only category fixture is required");
+  const activeCustomerSlugs = new Set(activeCustomerCategories.rows.map((row) => row.slug));
+  legacyOnlySlug = visibleLegacySlugs.find((slug) => !activeCustomerSlugs.has(slug));
+  assert.ok(legacyOnlySlug, "A visible legacy-only category fixture is required");
 });
 
 after(async () => {
