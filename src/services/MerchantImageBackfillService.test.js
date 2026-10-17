@@ -30,36 +30,18 @@ function storageMock(overrides = {}) {
   };
 }
 
-test("creates a clean Merchant object and records the public product update", async () => {
-  const uploads = [];
-  const queries = [];
-  const db = {
-    async query(sql, parameters) {
-      queries.push({ sql, parameters });
-      return { rows: [{ id: parameters[0] }] };
-    },
-  };
+test("delegates publication to the atomic image lifecycle instead of deleting from catch", async () => {
+  const calls = [];
+  const db = { query: async () => { throw new Error('publication must use the lifecycle'); } };
   const summary = await backfillMerchantImages({ limit: 1 }, {
     db,
     loadCandidates: candidateLoader([imageRow()]),
-    storage: storageMock({
-      uploadWebp: async (key, body) => uploads.push({ key, body }),
-    }),
-    processMerchant: async () => ({ variant: Buffer.from("clean-merchant") }),
+    processRecord: async (id, database) => { calls.push({ id, database }); return { processed: true }; },
   });
 
   assert.equal(summary.processed, 1);
   assert.equal(summary.failed, 0);
-  assert.equal(uploads.length, 1);
-  assert.match(uploads[0].key, /^products\/6537\/merchant\/a4653201502-photo-595-.*-clean-1500\.webp$/);
-  assert.equal(uploads[0].body.toString(), "clean-merchant");
-  assert.equal(queries.length, 1);
-  assert.match(queries[0].sql, /SET merchant_url_1500=\$2,merchant_storage_key_1500=\$3/);
-  assert.match(queries[0].sql, /UPDATE products product/);
-  assert.match(queries[0].sql, /SET updated_at=CURRENT_TIMESTAMP/);
-  assert.doesNotMatch(queries[0].sql, /processed_url|display_mode|image_branding_mode|original_url=/);
-  assert.equal(queries[0].parameters[1], `https://images.example.test/${uploads[0].key}`);
-  assert.equal(queries[0].parameters[2], uploads[0].key);
+  assert.deepEqual(calls, [{ id: 595, database: db }]);
 });
 
 test("skips an image that already has both Merchant fields", async () => {
@@ -100,13 +82,10 @@ test("continues the batch when processing one image fails", async () => {
       imageRow({ id: 595, original_storage_key: "bad-original" }),
       imageRow({ id: 596, original_storage_key: "good-original" }),
     ]),
-    storage: storageMock({
-      read: async (key) => Buffer.from(key),
-      uploadWebp: async (key) => uploads.push(key),
-    }),
-    processMerchant: async (input) => {
-      if (input.toString() === "bad-original") throw new Error("invalid image");
-      return { variant: Buffer.from("clean") };
+    processRecord: async (id) => {
+      if (id === 595) throw Object.assign(new Error('invalid image'), { imageStage: 'processing_error' });
+      uploads.push(id);
+      return { processed: true };
     },
   });
 
@@ -115,7 +94,7 @@ test("continues the batch when processing one image fails", async () => {
   assert.equal(summary.failed, 1);
   assert.equal(summary.reasons.processing_error, 1);
   assert.equal(uploads.length, 1);
-  assert.match(uploads[0], /photo-596-/);
+  assert.equal(uploads[0], 596);
 });
 
 test("dry run reads candidates but never reads R2, uploads or writes to the database", async () => {

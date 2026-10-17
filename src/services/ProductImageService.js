@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { pool } from "../config/db.js";
 import {
   IMAGE_BRANDING_MODE,
@@ -13,6 +13,7 @@ import {
 } from "./ProductImageProcessor.js";
 import { ProductPublicUpdateService } from "./ProductPublicUpdateService.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
+import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, transaction, withImageLock } from './ProductImageLifecycle.js';
 
 const mimeExtensions = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
@@ -36,6 +37,8 @@ function storageConfig() {
 
 function client(config) {
   return new S3Client({ region: "auto", endpoint: config.endpoint,
+    // Do not auto-add a second checksum: R2 uploads explicitly use Content-MD5.
+    requestChecksumCalculation: "WHEN_REQUIRED",
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey } });
 }
 
@@ -199,8 +202,22 @@ export function createProductImageStorage() {
         Key: storageKey,
         Body: body,
         ContentType: "image/webp",
+        ContentMD5: createHash('md5').update(body).digest('base64'),
+        IfNoneMatch: '*',
         CacheControl: "public, max-age=31536000, immutable",
       }));
+    },
+    async verify(storageKey, body) {
+      const head = await r2.send(new HeadObjectCommand({ Bucket: config.bucket, Key: storageKey }));
+      // Our single-part PUTs have an MD5 ETag. Existing multipart objects are checked byte-for-byte.
+      const expected = createHash('md5').update(body).digest('hex');
+      if (Number(head.ContentLength) !== body.length) throw new Error('Stored image size mismatch');
+      if (String(head.ETag || '').replaceAll('"', '') !== expected) {
+        if (!(await this.read(storageKey)).equals(body)) throw new Error('Stored image checksum mismatch');
+      }
+    },
+    async head(storageKey) {
+      return r2.send(new HeadObjectCommand({ Bucket: config.bucket, Key: storageKey }));
     },
     async remove(storageKey) {
       await r2.send(new DeleteObjectCommand({
@@ -257,108 +274,107 @@ async function buildSmartPreview(source, settings) {
   };
 }
 
-async function removeKeys(keys) {
-  const unique = [...new Set(keys.filter(Boolean))];
-  if (!unique.length) return;
-  const config = storageConfig();
-  const r2 = client(config);
-  await Promise.all(unique.map((key) => r2.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })).catch(() => {})));
+export async function processProductImageRecord(imageId, db = pool, dependencies = {}) {
+  const id = positiveId(imageId, "imageId");
+  return withImageLock(db, id, async session => {
+    const rowResult = await session.query(`SELECT pi.*,p.article
+      FROM product_images pi
+      JOIN products p ON p.id=pi.product_id
+      WHERE pi.id=$1`, [id]);
+    const row = rowResult.rows[0];
+    if (!row?.original_storage_key) throw new Error("Оригинал изображения не найден");
+    const storage = dependencies.storage || createProductImageStorage();
+    const process = dependencies.process || ProductImageProcessor.process;
+    await session.query("UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL WHERE id=$1 AND processing_request_id=$2", [id, row.processing_request_id]);
+    try {
+      await rememberExisting(session, row, storage);
+      const source = await storage.read(row.original_storage_key);
+      await rememberOriginal(session, { key: row.original_storage_key, imageId: row.id,
+        productId: row.product_id, body: source, url: row.original_url });
+      const configuredMode = resolveImageProcessingMode(row.image_processing_mode);
+      const effectiveMode = configuredMode !== IMAGE_PROCESSING_MODE.LEGACY
+        && !isSmartProductImageProcessingEnabled()
+        ? IMAGE_PROCESSING_MODE.LEGACY
+        : configuredMode;
+      const processingConfig = row.image_processing_config && typeof row.image_processing_config === "object"
+        ? row.image_processing_config
+        : {};
+      const processed = await process(source, {
+        brandingMode: row.image_branding_mode,
+        processingMode: effectiveMode,
+        crop: processingConfig.crop,
+        cropPaddingRatio: processingConfig.cropPaddingRatio,
+      });
+      const variants = [];
+      for (const slot of IMAGE_SLOTS) {
+        variants.push(await prepareVariant(session, storage, row, slot,
+          slot.role === 'merchant-1500' ? processed.merchant.variant : processed.variants[slot.size]));
+      }
+      return await transaction(session, async () => {
+        const current = await session.query('SELECT processing_request_id FROM product_images WHERE id=$1 FOR UPDATE', [id]);
+        if (String(current.rows[0]?.processing_request_id) !== String(row.processing_request_id)) return { superseded: true };
+        await session.query(`UPDATE product_images SET
+          processed_url_1600=$2,processed_url_1200=$3,processed_url_800=$4,processed_url_400=$5,
+          processed_storage_key_1600=$6,processed_storage_key_1200=$7,
+          processed_storage_key_800=$8,processed_storage_key_400=$9,
+          original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
+          image_quality_status=$14,merchant_url_1500=$15,merchant_storage_key_1500=$16,
+          processing_version=$17,image_review_status=$18,image_review_reason=$19,
+          processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
+          processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
+          WHERE id=$1`, [id, ...variants.slice(0,4).map(item => item.url),
+          ...variants.slice(0,4).map(item => item.key),
+          processed.metadata.originalWidth, processed.metadata.originalHeight,
+          processed.metadata.processedWidth, processed.metadata.processedHeight,
+          processed.metadata.qualityStatus, variants[4].url, variants[4].key,
+          processed.metadata.processingVersion || PRODUCT_IMAGE_PROCESSING_VERSION,
+          processed.metadata.reviewStatus || "APPROVED", processed.metadata.reviewReason || null]);
+        await publishObjects(session, row, variants);
+        if (variants.some(item => !item.reused) || row.display_mode !== 'PROCESSED') {
+          await ProductPublicUpdateService.touch(row.product_id, session);
+        }
+        return { processed: true, reused: variants.every(item => item.reused) };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Never delete in this catch: COMMIT/upload responses may be lost after succeeding.
+      // Previous URLs, display mode, keys and Merchant image remain untouched on failure.
+      await session.query(`UPDATE product_images SET processing_status='FAILED',processing_error=$2
+        WHERE id=$1 AND processing_request_id=$3 AND processing_status='PROCESSING'`,
+      [id, message.slice(0, 1000), row.processing_request_id]).catch(() => {});
+      throw error;
+    }
+  });
 }
 
-export async function processProductImageRecord(imageId, db = pool) {
-  const id = positiveId(imageId, "imageId");
-  const rowResult = await db.query(`SELECT pi.id,pi.product_id,pi.url,pi.original_url,pi.display_mode,pi.original_storage_key,
-      pi.processed_storage_key_1600,pi.processed_storage_key_1200,
-      pi.processed_storage_key_800,pi.processed_storage_key_400,
-      pi.merchant_storage_key_1500,
-      pi.image_branding_mode,pi.image_processing_mode,pi.image_processing_config,p.article
-    FROM product_images pi
-    JOIN products p ON p.id=pi.product_id
-    WHERE pi.id=$1`, [id]);
-  const row = rowResult.rows[0];
-  if (!row?.original_storage_key) throw new Error("Оригинал изображения не найден");
-  await db.query("UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL WHERE id=$1", [id]);
-  const config = storageConfig();
-  const r2 = client(config);
-  const uploadedKeys = [];
-  try {
-    const source = await r2.send(new GetObjectCommand({ Bucket: config.bucket, Key: row.original_storage_key }));
-    const configuredMode = resolveImageProcessingMode(row.image_processing_mode);
-    const effectiveMode = configuredMode !== IMAGE_PROCESSING_MODE.LEGACY
-      && !isSmartProductImageProcessingEnabled()
-      ? IMAGE_PROCESSING_MODE.LEGACY
-      : configuredMode;
-    const processingConfig = row.image_processing_config && typeof row.image_processing_config === "object"
-      ? row.image_processing_config
-      : {};
-    const processed = await ProductImageProcessor.process(await bodyToBuffer(source.Body), {
-      brandingMode: row.image_branding_mode,
-      processingMode: effectiveMode,
-      crop: processingConfig.crop,
-      cropPaddingRatio: processingConfig.cropPaddingRatio,
-    });
-    const revision = randomUUID();
-    const articleSlug = imageArticleSlug(row.article, row.product_id);
-    const keys = {};
-    const variantSlots = [
-      { slot: 1600, outputSize: PROCESSED_IMAGE_SIZE },
-      { slot: 1200, outputSize: 1200 },
-      { slot: 800, outputSize: 800 },
-      { slot: 400, outputSize: 400 },
-    ];
-    for (const { slot, outputSize } of variantSlots) {
-      const key = `products/${row.product_id}/processed/${articleSlug}-photo-${id}-${revision}-${outputSize}.webp`;
-      await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: processed.variants[outputSize],
-        ContentType: "image/webp", CacheControl: "public, max-age=31536000, immutable" }));
-      keys[slot] = key;
-      uploadedKeys.push(key);
-    }
-    const merchantKey = buildMerchantImageStorageKey({
-      productId: row.product_id,
-      imageId: id,
-      article: row.article,
-      revision,
-    });
-    await r2.send(new PutObjectCommand({
-      Bucket: config.bucket,
-      Key: merchantKey,
-      Body: processed.merchant.variant,
-      ContentType: "image/webp",
-      CacheControl: "public, max-age=31536000, immutable",
-    }));
-    uploadedKeys.push(merchantKey);
-    const oldKeys = [row.processed_storage_key_1600, row.processed_storage_key_1200,
-      row.processed_storage_key_800, row.processed_storage_key_400,
-      row.merchant_storage_key_1500];
-    await db.query(`UPDATE product_images SET
-      processed_url_1600=$2,processed_url_1200=$3,processed_url_800=$4,processed_url_400=$5,
-      processed_storage_key_1600=$6,processed_storage_key_1200=$7,
-      processed_storage_key_800=$8,processed_storage_key_400=$9,
-      original_width=$10,original_height=$11,processed_width=$12,processed_height=$13,
-      image_quality_status=$14,merchant_url_1500=$15,merchant_storage_key_1500=$16,
-      processing_version=$17,image_review_status=$18,image_review_reason=$19,
-      processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
-      processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
-      WHERE id=$1`, [id, publicUrl(config, keys[1600]), publicUrl(config, keys[1200]),
-      publicUrl(config, keys[800]), publicUrl(config, keys[400]),
-      keys[1600], keys[1200], keys[800], keys[400],
-      processed.metadata.originalWidth, processed.metadata.originalHeight,
-      processed.metadata.processedWidth, processed.metadata.processedHeight,
-      processed.metadata.qualityStatus, publicUrl(config, merchantKey), merchantKey,
-      processed.metadata.processingVersion || PRODUCT_IMAGE_PROCESSING_VERSION,
-      processed.metadata.reviewStatus || "APPROVED", processed.metadata.reviewReason || null]);
-    await ProductPublicUpdateService.touch(row.product_id, db);
-    await removeKeys(oldKeys);
-  } catch (error) {
-    await removeKeys(uploadedKeys);
-    const message = error instanceof Error ? error.message : String(error);
-    await db.query(`UPDATE product_images SET processing_status='FAILED',processing_error=$2,
-      display_mode='ORIGINAL',url=original_url,storage_key=original_storage_key WHERE id=$1`, [id, message.slice(0, 1000)]);
-    if (row.display_mode !== "ORIGINAL" || row.url !== row.original_url) {
-      await ProductPublicUpdateService.touch(row.product_id, db);
-    }
-    throw error;
-  }
+export async function processMerchantImageRecord(imageId, db = pool, dependencies = {}) {
+  return withImageLock(db, positiveId(imageId, 'imageId'), async session => {
+    const result = await session.query('SELECT * FROM product_images WHERE id=$1', [imageId]);
+    const row = result.rows[0];
+    if (!row) return { skipped: 'missing_original' };
+    if (row.merchant_url_1500 && row.merchant_storage_key_1500) return { skipped: 'already_has_merchant' };
+    if (!row.original_storage_key) return { skipped: 'missing_original' };
+    const storage = dependencies.storage || createProductImageStorage();
+    let stage = 'original_not_accessible';
+    try {
+      await rememberExisting(session, row, storage);
+      const original = await storage.read(row.original_storage_key);
+      stage = 'processing_error';
+      const merchant = await (dependencies.processMerchant || ProductImageProcessor.processMerchant)(original);
+      stage = 'upload_error';
+      const variant = await prepareVariant(session, storage, row, IMAGE_SLOTS[4], merchant.variant);
+      stage = 'db_update_error';
+      return await transaction(session, async () => {
+        const updated = await session.query(`UPDATE product_images SET merchant_url_1500=$2,merchant_storage_key_1500=$3
+          WHERE id=$1 AND (merchant_url_1500 IS NULL OR merchant_storage_key_1500 IS NULL) RETURNING id`,
+        [imageId, variant.url, variant.key]);
+        if (!updated.rows[0]) return { skipped: 'already_has_merchant' };
+        await publishObjects(session, row, [variant]);
+        await ProductPublicUpdateService.touch(row.product_id, session);
+        return { processed: true };
+      });
+    } catch (error) { error.imageStage = stage; throw error; }
+  });
 }
 
 function enqueue(imageId) {
@@ -439,35 +455,42 @@ export const ProductImageService = {
     const articleSlug = imageArticleSlug(exists.rows[0].article, id);
     const config = storageConfig();
     const r2 = client(config);
-    const current = await db.query("SELECT COALESCE(MAX(priority),-1)::integer AS priority FROM product_images WHERE product_id=$1", [id]);
-    let priority = Number(current.rows[0].priority);
-    const added = [];
-    for (const file of files) {
-      const extension = mimeExtensions.get(file.mimetype);
-      if (!extension) throw new Error("Поддерживаются фотографии JPG, PNG и WEBP");
-      const storageKey = `products/${id}/originals/${articleSlug}-photo-${randomUUID()}${extension}`;
-      await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: storageKey,
-        Body: file.buffer, ContentType: file.mimetype, CacheControl: "public, max-age=31536000, immutable" }));
-      const url = publicUrl(config, storageKey);
-      let result;
-      try {
-        result = await db.query(`INSERT INTO product_images(
-          product_id,url,source,priority,storage_key,original_url,original_storage_key,
-          processing_status,display_mode,image_branding_mode,image_processing_mode,
-          image_processing_config,image_review_status,image_review_reason)
-          VALUES($1,$2,'R2',$3,$4,$2,$4,'PROCESSING','ORIGINAL',$5,$6,$7,'APPROVED',NULL)
-          RETURNING *`,
-        [id, url, ++priority, storageKey, processing.brandingMode,
-          processing.processingMode, JSON.stringify(processing.processingConfig)]);
-      } catch (error) {
-        await r2.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: storageKey })).catch(() => {});
-        throw error;
+    const storage = createProductImageStorage();
+    const result = await withImageLock(db, `upload-${id}`, async session => {
+      const current = await session.query("SELECT COALESCE(MAX(priority),-1)::integer AS priority FROM product_images WHERE product_id=$1", [id]);
+      let priority = Number(current.rows[0].priority);
+      const added = [];
+      for (const file of files) {
+        const extension = mimeExtensions.get(file.mimetype);
+        if (!extension) throw new Error("Поддерживаются фотографии JPG, PNG и WEBP");
+        const storageKey = `products/${id}/originals/${articleSlug}-photo-${randomUUID()}${extension}`;
+        const url = publicUrl(config, storageKey);
+        await rememberOriginal(session, { key: storageKey, productId: id, body: file.buffer, url, pending: true });
+        await r2.send(new PutObjectCommand({ Bucket: config.bucket, Key: storageKey,
+          Body: file.buffer, ContentType: file.mimetype, IfNoneMatch: '*',
+          ContentMD5: createHash('md5').update(file.buffer).digest('base64'),
+          CacheControl: "public, max-age=31536000, immutable" }));
+        await storage.verify(storageKey, file.buffer);
+        const result = await transaction(session, async () => {
+          const inserted = await session.query(`INSERT INTO product_images(
+            product_id,url,source,priority,storage_key,original_url,original_storage_key,
+            processing_status,display_mode,image_branding_mode,image_processing_mode,
+            image_processing_config,image_review_status,image_review_reason)
+            VALUES($1,$2,'R2',$3,$4,$2,$4,'PROCESSING','ORIGINAL',$5,$6,$7,'APPROVED',NULL)
+            RETURNING *`,
+          [id, url, ++priority, storageKey, processing.brandingMode,
+            processing.processingMode, JSON.stringify(processing.processingConfig)]);
+          await rememberOriginal(session, { key: storageKey, productId: id, imageId: inserted.rows[0].id, url });
+          await ProductPublicUpdateService.touch(id, session);
+          return inserted;
+        });
+        added.push(result.rows[0]);
+        enqueue(result.rows[0].id);
       }
-      added.push(result.rows[0]);
-      enqueue(result.rows[0].id);
-    }
-    if (added.length) await ProductPublicUpdateService.touch(id, db);
-    return added;
+      return added;
+    });
+    if (result?.busy) throw new Error('Завантаження фото цього товару вже виконується. Спробуй ще раз.');
+    return result;
   },
 
   async previewUpload(productId, file, settings, db = pool) {
@@ -524,9 +547,11 @@ export const ProductImageService = {
     const safeMode = String(mode).toUpperCase();
     if (!["ORIGINAL", "PROCESSED"].includes(safeMode)) throw new Error("Некорректный режим изображения");
     const result = await db.query(`UPDATE product_images SET display_mode=$3,
+      processing_request_id=processing_request_id+1,
+      processing_status=CASE WHEN processed_storage_key_1600 IS NOT NULL THEN 'PROCESSED' ELSE 'ORIGINAL_ONLY' END,
       url=CASE WHEN $3='PROCESSED' THEN processed_url_1600 ELSE original_url END,
       storage_key=CASE WHEN $3='PROCESSED' THEN processed_storage_key_1600 ELSE original_storage_key END
-      WHERE id=$1 AND product_id=$2 AND ($3='ORIGINAL' OR processing_status='PROCESSED') RETURNING id`,
+      WHERE id=$1 AND product_id=$2 AND ($3='ORIGINAL' OR processed_storage_key_1600 IS NOT NULL) RETURNING id`,
     [image, product, safeMode]);
     if (!result.rows[0]) throw new Error(safeMode === "PROCESSED" ? "Обработанная версия ещё не готова" : "Изображение не найдено");
     await ProductPublicUpdateService.touch(product, db);
@@ -547,6 +572,7 @@ export const ProductImageService = {
       });
     }
     const result = await db.query(`UPDATE product_images SET processing_status='PROCESSING',processing_error=NULL,
+      processing_request_id=processing_request_id+1,
       image_branding_mode=$3,image_processing_mode=$4,image_processing_config=$5,
       image_review_status='APPROVED',image_review_reason=NULL
       WHERE id=$1 AND product_id=$2 RETURNING id`,
@@ -597,17 +623,18 @@ export const ProductImageService = {
   },
 
   async remove(productId, imageId, db = pool) {
-    const result = await db.query(`SELECT storage_key,original_storage_key,processed_storage_key_1600,
-      processed_storage_key_1200,processed_storage_key_800,processed_storage_key_400,
-      merchant_storage_key_1500
-      FROM product_images WHERE id=$1 AND product_id=$2`,
-      [positiveId(imageId, "imageId"), positiveId(productId, "productId")]);
-    if (!result.rows[0]) throw new Error("Изображение не найдено");
-    const row = result.rows[0];
-    await removeKeys([row.storage_key,row.original_storage_key,row.processed_storage_key_1600,
-      row.processed_storage_key_1200,row.processed_storage_key_800,row.processed_storage_key_400,
-      row.merchant_storage_key_1500]);
-    await db.query("DELETE FROM product_images WHERE id=$1", [positiveId(imageId, "imageId")]);
-    await ProductPublicUpdateService.touch(productId, db);
+    const result = await withImageLock(db, positiveId(imageId, 'imageId'), async session => {
+      return transaction(session, async () => {
+        const found = await session.query(`SELECT * FROM product_images WHERE id=$1 AND product_id=$2 FOR UPDATE`,
+          [positiveId(imageId, "imageId"), positiveId(productId, "productId")]);
+        if (!found.rows[0]) throw new Error("Изображение не найдено");
+        await rememberExisting(session, found.rows[0], createProductImageStorage());
+        await session.query(`UPDATE product_image_objects SET state='RETIRED',delete_after=NOW()+INTERVAL '7 days'
+          WHERE image_id=$1 AND role<>'original' AND state='CURRENT'`, [imageId]);
+        await session.query("DELETE FROM product_images WHERE id=$1", [imageId]);
+        await ProductPublicUpdateService.touch(productId, session);
+      });
+    });
+    if (result?.busy) throw new Error('Фото ще обробляється. Спробуй видалити його пізніше.');
   },
 };

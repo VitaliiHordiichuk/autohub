@@ -1,9 +1,5 @@
 import { pool } from "../config/db.js";
-import { ProductImageProcessor } from "./ProductImageProcessor.js";
-import {
-  buildMerchantImageStorageKey,
-  createProductImageStorage,
-} from "./ProductImageService.js";
+import { processMerchantImageRecord } from "./ProductImageService.js";
 
 export const MERCHANT_IMAGE_BACKFILL_DEFAULT_LIMIT = 50;
 export const MERCHANT_IMAGE_BACKFILL_MAX_LIMIT = 500;
@@ -14,6 +10,7 @@ export const MERCHANT_IMAGE_BACKFILL_REASONS = Object.freeze([
   "processing_error",
   "upload_error",
   "db_update_error",
+  "busy",
 ]);
 
 function integerOption(value, { name, minimum, maximum }) {
@@ -83,10 +80,6 @@ async function loadCandidates(db, { limit, cursor }) {
   };
 }
 
-async function removeUploadedQuietly(storage, storageKey) {
-  await storage.remove(storageKey).catch(() => {});
-}
-
 export async function backfillMerchantImages({
   limit = MERCHANT_IMAGE_BACKFILL_DEFAULT_LIMIT,
   cursor = 0,
@@ -115,9 +108,7 @@ export async function backfillMerchantImages({
     dryRun: Boolean(dryRun),
     totalCandidates: Number(candidateSet.totalCandidates || rows.length),
   });
-  let storage = dependencies.storage || null;
-  const processMerchant = dependencies.processMerchant
-    || ProductImageProcessor.processMerchant;
+  const processRecord = dependencies.processRecord || processMerchantImageRecord;
 
   for (const row of rows) {
     summary.scanned += 1;
@@ -138,58 +129,13 @@ export async function backfillMerchantImages({
       continue;
     }
 
-    if (!storage) storage = createProductImageStorage();
-    let original;
     try {
-      original = await storage.read(row.original_storage_key);
+      const outcome = await processRecord(row.id, db, dependencies);
+      if (outcome?.busy) addResult(summary, row, 'skipped', 'busy');
+      else if (outcome?.skipped) addResult(summary, row, 'skipped', outcome.skipped);
+      else addResult(summary, row, 'processed');
     } catch (error) {
-      addResult(summary, row, "skipped", "original_not_accessible", error);
-      continue;
-    }
-
-    let merchant;
-    try {
-      merchant = await processMerchant(original);
-    } catch (error) {
-      addResult(summary, row, "failed", "processing_error", error);
-      continue;
-    }
-
-    const merchantKey = buildMerchantImageStorageKey({
-      productId: row.product_id,
-      imageId: row.id,
-      article: row.article,
-    });
-    try {
-      await storage.uploadWebp(merchantKey, merchant.variant);
-    } catch (error) {
-      await removeUploadedQuietly(storage, merchantKey);
-      addResult(summary, row, "failed", "upload_error", error);
-      continue;
-    }
-
-    try {
-      const updated = await db.query(`WITH updated_image AS (
-          UPDATE product_images
-          SET merchant_url_1500=$2,merchant_storage_key_1500=$3
-          WHERE id=$1
-            AND (merchant_url_1500 IS NULL OR merchant_storage_key_1500 IS NULL)
-          RETURNING id,product_id
-        )
-        UPDATE products product
-        SET updated_at=CURRENT_TIMESTAMP
-        FROM updated_image image
-        WHERE product.id=image.product_id
-        RETURNING image.id,image.product_id`, [row.id, storage.publicUrl(merchantKey), merchantKey]);
-      if (!updated.rows[0]) {
-        await removeUploadedQuietly(storage, merchantKey);
-        addResult(summary, row, "skipped", "already_has_merchant");
-        continue;
-      }
-      addResult(summary, row, "processed");
-    } catch (error) {
-      await removeUploadedQuietly(storage, merchantKey);
-      addResult(summary, row, "failed", "db_update_error", error);
+      addResult(summary, row, 'failed', error.imageStage || 'db_update_error', error);
     }
   }
 
