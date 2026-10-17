@@ -138,6 +138,7 @@ after(async () => {
 });
 
 test("guest batch returns localized current product data without creating account history", async () => {
+  const beforeCount = await pool.query("SELECT COUNT(*)::integer AS count FROM client_recently_viewed_products");
   const { response, data } = await request("/api/products/recently-viewed", {
     method: "POST",
     body: {
@@ -170,7 +171,7 @@ test("guest batch returns localized current product data without creating accoun
   }
 
   const count = await pool.query("SELECT count(*) FROM client_recently_viewed_products");
-  assert.equal(Number(count.rows[0].count), 0);
+  assert.equal(Number(count.rows[0].count), beforeCount.rows[0].count);
 });
 
 test("account endpoints require a signed-in client", async () => {

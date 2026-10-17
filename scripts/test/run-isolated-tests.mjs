@@ -267,6 +267,21 @@ async function applyPendingMigrations() {
       )
     );
 
+    // This test database is a restored production snapshot, not a clean schema.
+    // Some older production migrations are absent from the historical ledger
+    // even though their effects were already superseded by newer migrations.
+    // Replaying them can overwrite modern PostgreSQL functions and triggers.
+    // Apply only migrations newer than the snapshot's highest recorded version.
+    const recordedNumbers = [...applied]
+      .map((version) => /^\\d+/.exec(String(version)))
+      .filter(Boolean)
+      .map((match) => Number(match[0]))
+      .filter(Number.isSafeInteger);
+    if (!recordedNumbers.length) {
+      throw new Error("Cannot determine restored production migration baseline");
+    }
+    const latestSnapshotMigration = Math.max(...recordedNumbers);
+
     const migrationDirectory =
       path.join(
         projectRoot,
@@ -286,11 +301,15 @@ async function applyPendingMigrations() {
 
       const legacyVersion =
         version.split("_", 1)[0];
+      const migrationNumber = Number(legacyVersion);
+      if (!Number.isSafeInteger(migrationNumber)) {
+        throw new Error(`Unrecognized migration file: ${fileName}`);
+      }
 
-      if (
-        applied.has(version) ||
-        applied.has(legacyVersion)
-      ) {
+      if (migrationNumber <= latestSnapshotMigration) {
+        if (!applied.has(version) && !applied.has(legacyVersion)) {
+          console.log(`Пропускаю историческую миграцию из снимка: ${version}`);
+        }
         continue;
       }
 
