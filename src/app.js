@@ -74,6 +74,7 @@ import { optionalAuthSilent } from "./middleware/auth.middleware.js";
 import { enforceApiErrorLanguage } from "./middleware/api-error-language.middleware.js";
 import { seoRouter } from "./routes/seo.routes.js";
 import { productPlaceholderRouter } from "./routes/product-placeholder.routes.js";
+import { productMediaRouter } from './routes/product-media.routes.js';
 import {
   adminSiteContactRouter,
   siteContactRouter,
@@ -88,6 +89,8 @@ import {
 } from "./routes/recently-viewed.routes.js";
 
 export const app = express();
+
+app.use('/api/product-media', productMediaRouter);
 
 app.set(
   "trust proxy",
