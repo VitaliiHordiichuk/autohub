@@ -273,7 +273,7 @@ async function applyPendingMigrations() {
     // Replaying them can overwrite modern PostgreSQL functions and triggers.
     // Apply only migrations newer than the snapshot's highest recorded version.
     const recordedNumbers = [...applied]
-      .map((version) => /^\\d+/.exec(String(version)))
+      .map((version) => /^\d+/.exec(String(version)))
       .filter(Boolean)
       .map((match) => Number(match[0]))
       .filter(Number.isSafeInteger);
