@@ -1,9 +1,11 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from 'node:crypto';
 
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -24,6 +26,13 @@ const originalEnvironment = Object.fromEntries(
   environmentNames.map((name) => [name, process.env[name]]),
 );
 const originalSend = S3Client.prototype.send;
+
+function lifecycleQuery(sql) {
+  if (/pg_try_advisory_lock/.test(sql)) return { rows: [{ locked: true }] };
+  if (/SELECT processing_request_id/.test(sql)) return { rows: [{ processing_request_id: 0 }] };
+  if (/product_image_objects|pg_advisory_unlock/.test(sql) || ['BEGIN','COMMIT','ROLLBACK'].includes(sql)) return { rows: [] };
+  return null;
+}
 
 before(() => {
   process.env.R2_ENDPOINT = "https://r2.example.test";
@@ -52,15 +61,22 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
 
   const puts = [];
   const deletes = [];
+  const objects = new Map();
   S3Client.prototype.send = async function send(command) {
+    if (command instanceof HeadObjectCommand) {
+      const body = objects.get(command.input.Key);
+      if (!body) throw Object.assign(new Error('missing'), { name: 'NotFound' });
+      return { ContentLength: body.length, ETag: createHash('md5').update(body).digest('hex') };
+    }
     if (command instanceof GetObjectCommand) {
       return {
-        Body: { transformToByteArray: async () => original },
+        Body: { transformToByteArray: async () => objects.get(command.input.Key) || original },
         ContentType: "image/png",
       };
     }
     if (command instanceof PutObjectCommand) {
       puts.push({ key: command.input.Key, body: Buffer.from(command.input.Body) });
+      objects.set(command.input.Key, Buffer.from(command.input.Body));
       return {};
     }
     if (command instanceof DeleteObjectCommand) {
@@ -72,6 +88,8 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
 
   const row = {
     id: 595,
+    processing_request_id: 0,
+    display_mode: 'PROCESSED',
     product_id: 6537,
     original_storage_key: "products/6537/originals/a4653201502-source.png",
     processed_storage_key_1600: null,
@@ -86,7 +104,8 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
   const publicUpdateTouches = [];
   const db = {
     async query(sql, parameters) {
-      if (/SELECT pi\.id,pi\.product_id/.test(sql)) return { rows: [{ ...row }] };
+      const lifecycle = lifecycleQuery(sql); if (lifecycle) return lifecycle;
+      if (/SELECT pi\.\*,p.article/.test(sql)) return { rows: [{ ...row }] };
       if (/processed_url_1600=\$2/.test(sql)) {
         completedUpdates.push({ sql, parameters });
         row.processed_storage_key_1600 = parameters[5];
@@ -108,8 +127,8 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
   await processProductImageRecord(row.id, db);
   const firstRun = puts.slice(0, 5);
   assert.equal(firstRun.length, 5);
-  const firstSite = firstRun.find(({ key }) => /\/processed\/.*-1500\.webp$/.test(key));
-  const firstMerchant = firstRun.find(({ key }) => /\/merchant\/.*-clean-1500\.webp$/.test(key));
+  const firstSite = firstRun.find(({ key }) => /\/processed\/.*-site-1500\.webp$/.test(key));
+  const firstMerchant = firstRun.find(({ key }) => /\/merchant\/.*-merchant-1500\.webp$/.test(key));
   assert.ok(firstSite);
   assert.ok(firstMerchant);
   assert.notEqual(firstSite.key, firstMerchant.key);
@@ -119,17 +138,17 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
 
   row.image_branding_mode = "STAMP_ONLY";
   await processProductImageRecord(row.id, db);
-  const secondRun = puts.slice(5, 10);
-  assert.equal(secondRun.length, 5);
+  const secondRun = puts.slice(5);
+  assert.equal(secondRun.length, 4, 'identical CLEAN output is reused independently of store branding');
   const secondSite = secondRun.find(({ key }) => /\/processed\/.*-1500\.webp$/.test(key));
-  const secondMerchant = secondRun.find(({ key }) => /\/merchant\/.*-clean-1500\.webp$/.test(key));
+  const secondMerchant = firstMerchant;
   assert.ok(secondSite);
   assert.ok(secondMerchant);
   assert.notEqual(secondSite.key, firstSite.key);
-  assert.notEqual(secondMerchant.key, firstMerchant.key);
+  assert.equal(completedUpdates[1].parameters[15], firstMerchant.key);
   assert.equal(secondSite.body.equals(secondMerchant.body), false);
   assert.equal(secondMerchant.body.equals(firstMerchant.body), true);
-  assert.ok(deletes.includes(firstMerchant.key));
+  assert.equal(deletes.length, 0, 'processing never deletes a published object');
   assert.deepEqual(publicUpdateTouches, [row.product_id, row.product_id]);
 
   const merchantMetadata = await sharp(secondMerchant.body).metadata();
@@ -152,13 +171,21 @@ test("SMART SAFE reprocesses from the immutable original and stores review metad
     create: { width: 1600, height: 1200, channels: 3, background: "#ffffff" },
   }).composite([{ input: part, left: 450, top: 420 }]).png().toBuffer();
   const puts = [];
+  const objects = new Map();
   S3Client.prototype.send = async function send(command) {
+    if (command instanceof HeadObjectCommand) {
+      const body = objects.get(command.input.Key);
+      if (!body) throw Object.assign(new Error('missing'), { name: 'NotFound' });
+      return { ContentLength: body.length, ETag: createHash('md5').update(body).digest('hex') };
+    }
     if (command instanceof GetObjectCommand) {
+      if (command.input.Key.includes('previous-')) throw Object.assign(new Error('missing'), { name: 'NotFound' });
       assert.equal(command.input.Key, "products/91/originals/source.png");
       return { Body: { transformToByteArray: async () => original }, ContentType: "image/png" };
     }
     if (command instanceof PutObjectCommand) {
       puts.push({ key: command.input.Key, body: Buffer.from(command.input.Body) });
+      objects.set(command.input.Key, Buffer.from(command.input.Body));
       return {};
     }
     if (command instanceof DeleteObjectCommand) return {};
@@ -168,6 +195,7 @@ test("SMART SAFE reprocesses from the immutable original and stores review metad
   const completedUpdates = [];
   const row = {
     id: 17,
+    processing_request_id: 0,
     product_id: 91,
     original_storage_key: "products/91/originals/source.png",
     processed_storage_key_1600: "products/91/processed/previous-1500.webp",
@@ -182,7 +210,8 @@ test("SMART SAFE reprocesses from the immutable original and stores review metad
   };
   const db = {
     async query(sql, parameters) {
-      if (/SELECT pi\.id,pi\.product_id/.test(sql)) return { rows: [{ ...row }] };
+      const lifecycle = lifecycleQuery(sql); if (lifecycle) return lifecycle;
+      if (/SELECT pi\.\*,p.article/.test(sql)) return { rows: [{ ...row }] };
       if (/processed_url_1600=\$2/.test(sql)) {
         completedUpdates.push({ sql, parameters });
         return { rows: [] };
@@ -199,7 +228,7 @@ test("SMART SAFE reprocesses from the immutable original and stores review metad
 
   assert.equal(puts.length, 5);
   const site = puts.find(({ key }) => /\/processed\/.*-1500\.webp$/.test(key));
-  const merchant = puts.find(({ key }) => /\/merchant\/.*-clean-1500\.webp$/.test(key));
+  const merchant = puts.find(({ key }) => /\/merchant\/.*-merchant-1500\.webp$/.test(key));
   assert.ok(site);
   assert.ok(merchant);
   assert.equal(site.body.equals(merchant.body), false, "site output must retain MAKA branding");
