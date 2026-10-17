@@ -33,6 +33,7 @@ let historicalFilterRule;
 let phase2fHighId;
 let phase2fSafeId;
 const createdPhase2fProductIds = [];
+let originalPhase2fMembershipRows = [];
 
 async function taxonomyEpcFingerprint() {
   const result = await pool.query(`
@@ -144,6 +145,10 @@ async function findOrInsertReviewedProduct(article, name) {
 }
 
 before(async () => {
+  // This fixture resets two already-classified production articles only in
+  // the disposable database, then restores their original memberships.
+  const database = await pool.query("SELECT current_database() AS name");
+  assert.match(database.rows[0].name, /_test$/, "Backfill integration tests require a disposable test database");
   const categoryResult = await pool.query(`
     SELECT id, slug
     FROM customer_categories
@@ -203,6 +208,21 @@ before(async () => {
   phase2fHighId = await findOrInsertReviewedProduct("A0002020719", "Ролик натяжний");
   phase2fSafeId = await findOrInsertReviewedProduct("A0002021619", "Ролик");
 
+  // An actual shop snapshot already contains approved PHASE 2F memberships.
+  // Preserve all their provenance/timestamps and temporarily unassign them
+  // in the isolated _test database to exercise the first-time backfill path.
+  const originalPhase2f = await pool.query(`
+    SELECT row_to_json(membership) AS value
+    FROM product_customer_categories membership
+    WHERE membership.product_id = ANY($1::integer[])
+    ORDER BY membership.product_id, membership.customer_category_id
+  `, [[phase2fHighId, phase2fSafeId]]);
+  originalPhase2fMembershipRows = originalPhase2f.rows.map((row) => row.value);
+  await pool.query(`
+    DELETE FROM product_customer_categories
+    WHERE product_id = ANY($1::integer[])
+  `, [[phase2fHighId, phase2fSafeId]]);
+
   await pool.query(`
     INSERT INTO product_customer_categories(
       product_id, customer_category_id, is_primary,
@@ -248,6 +268,15 @@ after(async () => {
       "DELETE FROM product_customer_categories WHERE product_id = ANY($1::integer[])",
       [[phase2fHighId, phase2fSafeId].filter(Boolean)],
     );
+    if (originalPhase2fMembershipRows.length) {
+      await pool.query(`
+        INSERT INTO product_customer_categories
+        SELECT * FROM jsonb_populate_recordset(
+          NULL::product_customer_categories,
+          $1::jsonb
+        )
+      `, [JSON.stringify(originalPhase2fMembershipRows)]);
+    }
   }
   if (createdPhase2fProductIds.length) {
     await pool.query(
