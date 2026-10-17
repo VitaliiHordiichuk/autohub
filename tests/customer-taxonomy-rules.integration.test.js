@@ -1029,6 +1029,9 @@ test("an unknown EPC 49 clamp never resolves to a generic Fasteners leaf", () =>
 });
 
 test("detector v10 preserves every detector-v8 classification target without writes", async () => {
+  const beforeMemberships = await pool.query(
+    "SELECT COUNT(*)::integer AS count FROM product_customer_categories",
+  );
   const products = await CustomerTaxonomyRepository.listProductsForPreview(pool);
   const historicalResult = await pool.query(`
     SELECT
@@ -1077,5 +1080,5 @@ test("detector v10 preserves every detector-v8 classification target without wri
   const membershipCount = await pool.query(
     "SELECT COUNT(*)::integer AS count FROM product_customer_categories",
   );
-  assert.equal(membershipCount.rows[0].count, 0);
+  assert.equal(membershipCount.rows[0].count, beforeMemberships.rows[0].count);
 });
