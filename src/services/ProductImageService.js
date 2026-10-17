@@ -37,6 +37,8 @@ function storageConfig() {
 
 function client(config) {
   return new S3Client({ region: "auto", endpoint: config.endpoint,
+    // Do not auto-add a second checksum: R2 uploads explicitly use Content-MD5.
+    requestChecksumCalculation: "WHEN_REQUIRED",
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey } });
 }
 
