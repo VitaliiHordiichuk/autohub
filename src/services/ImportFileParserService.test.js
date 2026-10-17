@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as XLSX from "xlsx";
 
 import {
   ImportFileParserService,
@@ -174,3 +175,23 @@ test(
     );
   }
 );
+
+
+test("читает XLSX SheetJS 0.20.3: стартовая строка, артикул, цена и кириллица", async () => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Бренд", "Артикул", "Название", "Цена", "Количество"],
+    ["MERCEDES", "A4653201502", "Амортизатор", 65263, 2],
+    ["MANN", "HU7185X", "Фільтр оливи", 350.5, 4],
+  ]);
+  XLSX.utils.book_append_sheet(workbook, sheet, "Прайс");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+  const rows = await ImportFileParserService.parseFileBuffer({
+    buffer: Buffer.from(buffer), fileType: "XLSX", startRow: 2,
+  });
+  assert.deepEqual(rows, [
+    ["MERCEDES", "A4653201502", "Амортизатор", 65263, 2],
+    ["MANN", "HU7185X", "Фільтр оливи", 350.5, 4],
+  ]);
+});
