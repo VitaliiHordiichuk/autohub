@@ -628,7 +628,12 @@ export const ProductImageService = {
         const found = await session.query(`SELECT * FROM product_images WHERE id=$1 AND product_id=$2 FOR UPDATE`,
           [positiveId(imageId, "imageId"), positiveId(productId, "productId")]);
         if (!found.rows[0]) throw new Error("Изображение не найдено");
-        await rememberExisting(session, found.rows[0], createProductImageStorage());
+        const record = found.rows[0];
+        // URL-only/DB-only images have no R2 objects to register.
+        // Avoid requiring storage credentials when deleting such records.
+        if (record.original_storage_key || IMAGE_SLOTS.some(slot => record[slot.key])) {
+          await rememberExisting(session, record, createProductImageStorage());
+        }
         await session.query(`UPDATE product_image_objects SET state='RETIRED',delete_after=NOW()+INTERVAL '7 days'
           WHERE image_id=$1 AND role<>'original' AND state='CURRENT'`, [imageId]);
         await session.query("DELETE FROM product_images WHERE id=$1", [imageId]);

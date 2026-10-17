@@ -13,6 +13,7 @@ const fixtures = {};
 let brakesId;
 let brakesDiscsId;
 let windshieldsId;
+let baselineWindshieldCount;
 
 async function insertProduct(key, { active = true } = {}) {
   const article = `CT${key.toUpperCase()}${suffix}`;
@@ -53,6 +54,13 @@ before(async () => {
   assert.ok(brakesId);
   assert.ok(brakesDiscsId);
   assert.ok(windshieldsId);
+
+  // The isolated test DB is restored from production and can already contain windshields.
+  const baselineTree = await PublicCatalogService.getTree("uk");
+  const windshieldLeaf = baselineTree.find((category) => category.slug === "body-glass")
+    ?.children.find((category) => category.slug === "body-windshields");
+  assert.ok(windshieldLeaf, "Windshield category must exist before adding fixtures");
+  baselineWindshieldCount = windshieldLeaf.productCount;
 
   const unresolved = await insertProduct("unresolved");
   const reviewed = await insertProduct("reviewed");
@@ -190,7 +198,7 @@ test("windshield leaf is public in three locales, lists only its products and en
     const body = tree.find((category) => category.slug === "body-glass");
     const leaf = body?.children.find((category) => category.slug === "body-windshields");
     assert.equal(leaf?.name, label, locale);
-    assert.equal(leaf?.productCount, 1, locale);
+    assert.equal(leaf?.productCount, baselineWindshieldCount + 1, locale);
 
     const listing = await PublicCatalogService.getCategoryProducts({
       slug: "body-windshields",
