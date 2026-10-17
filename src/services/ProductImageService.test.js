@@ -63,6 +63,8 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
   const deletes = [];
   const objects = new Map();
   S3Client.prototype.send = async function send(command) {
+    const checksumSetting = this.config.requestChecksumCalculation;
+    assert.equal(typeof checksumSetting === 'function' ? await checksumSetting() : checksumSetting, 'WHEN_REQUIRED');
     if (command instanceof HeadObjectCommand) {
       const body = objects.get(command.input.Key);
       if (!body) throw Object.assign(new Error('missing'), { name: 'NotFound' });
