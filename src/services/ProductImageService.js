@@ -13,7 +13,7 @@ import {
 } from "./ProductImageProcessor.js";
 import { ProductPublicUpdateService } from "./ProductPublicUpdateService.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
-import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, transaction, withImageLock } from './ProductImageLifecycle.js';
+import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, sha256, transaction, withImageLock } from './ProductImageLifecycle.js';
 
 const mimeExtensions = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
@@ -460,7 +460,7 @@ export const ProductImageService = {
     return result.rows;
   },
 
-  async replace(productId, oldImageId, newImageId, db = pool) {
+  async replace(productId, oldImageId, newImageId, db = pool, dependencies = {}) {
     const product = positiveId(productId, 'productId');
     const oldId = positiveId(oldImageId, 'oldImageId');
     const nextId = positiveId(newImageId, 'newImageId');
@@ -481,11 +481,27 @@ export const ProductImageService = {
           if (oldPhoto.processing_status !== 'PROCESSED' || newPhoto.processing_status !== 'PROCESSED') {
             throw new Error('Сначала дождись завершения обработки обеих фотографий');
           }
-          if (!newPhoto.url || !newPhoto.original_url) {
-            throw new Error('У новой фотографии отсутствует проверенный оригинал');
+          if (!newPhoto.url || !newPhoto.original_url || !newPhoto.original_storage_key
+            || IMAGE_SLOTS.some(slot => !newPhoto[slot.key])) {
+            throw new Error('Новая фотография должна иметь оригинал и все пять готовых версий');
+          }
+          const storage = dependencies.storage || createProductImageStorage();
+          // The managed redirect needs a verified, published target even if the selected
+          // destination photo was created before migration 108 (legacy direct R2 links).
+          await rememberExisting(lockedSession, newPhoto, storage);
+          for (const slot of IMAGE_SLOTS) {
+            const key = newPhoto[slot.key];
+            const bytes = await storage.read(key);
+            if (!bytes.length) throw new Error('Один из файлов новой фотографии пуст');
+            const actualHash = sha256(bytes);
+            const updated = await lockedSession.query(`
+              UPDATE product_image_objects SET sha256=$2,byte_size=$3
+              WHERE storage_key=$1 AND (sha256 IS NULL OR sha256=$2)
+              RETURNING storage_key`, [key, actualHash, bytes.length]);
+            if (!updated.rows.length) throw new Error('Контрольная сумма файла новой фотографии не совпадает');
           }
           if (oldPhoto.original_storage_key || IMAGE_SLOTS.some(slot => oldPhoto[slot.key])) {
-            await rememberExisting(lockedSession, oldPhoto, createProductImageStorage());
+            await rememberExisting(lockedSession, oldPhoto, storage);
           }
           // Existing old aliases must follow the new active photo, including a chain A -> B -> C.
           await lockedSession.query(
