@@ -136,5 +136,21 @@ export async function resolvePublishedImage(db, imageId, role, hash) {
     JOIN product_image_objects current ON current.storage_key=image.${slot.key}
     WHERE old.image_id=$1 AND old.role=$2 AND old.sha256=$3 AND old.published_at IS NOT NULL
       AND current.state='CURRENT' AND current.published_at IS NOT NULL LIMIT 1`, [imageId, role, hash]);
-  return result.rows[0] || null;
+  if (result.rows[0]) return { ...result.rows[0], current_image_id: Number(imageId) };
+
+  // An explicitly replaced source no longer has a product_images row. Resolve only
+  // registered, actually published managed aliases from the durable history table.
+  // current_image_id is always an active image; chained replacements are flattened.
+  const archived = await db.query(`SELECT current.storage_key,current.sha256,current.byte_size,
+      current.public_url,history.current_image_id
+    FROM product_image_objects old
+    JOIN product_image_replacements history ON history.old_image_id=old.image_id
+    JOIN product_images image ON image.id=history.current_image_id
+      AND image.product_id=history.product_id
+    JOIN product_image_objects current ON current.storage_key=image.${slot.key}
+    WHERE old.image_id=$1 AND old.role=$2 AND old.sha256=$3
+      AND old.published_at IS NOT NULL
+      AND current.state='CURRENT' AND current.published_at IS NOT NULL
+    LIMIT 1`, [imageId, role, hash]);
+  return archived.rows[0] || null;
 }
