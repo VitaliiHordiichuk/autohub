@@ -23,7 +23,7 @@ const storage = {
 };
 
 before(async () => {
-  assert.ok(enabled, 'Run only through npm test with isolated LOCAL *_test PostgreSQL');
+  assert.ok(enabled, 'Run with isolated LOCAL *_test PostgreSQL (scripts/test/run-photo-management-tests.mjs)');
   productId = (await pool.query('SELECT id FROM products ORDER BY id LIMIT 1')).rows[0]?.id;
   assert.ok(productId);
 });
@@ -89,7 +89,16 @@ test('replacement preserves archived image while removing it from public catalog
     [old.id, oldOriginal.length]);
   const complete = (await ProductImageService.history(productId, pool))
     .find(item => Number(item.old_image_id) === old.id);
-  assert.ok(Number(complete.byte_size) > 0);
+  const expectedBytes = oldOriginal.length + IMAGE_SLOTS.reduce((sum, slot) => sum + memory.get(oldImage[slot.key]).length, 0);
+  assert.equal(Number(complete.byte_size), expectedBytes);
+  // Every derivative, not just the original, can have unknown legacy metadata.
+  for (const slot of IMAGE_SLOTS) {
+    await pool.query('UPDATE product_image_objects SET byte_size=NULL WHERE storage_key=$1', [oldImage[slot.key]]);
+    const partial = (await ProductImageService.history(productId, pool)).find(item => Number(item.old_image_id) === old.id);
+    assert.equal(partial.byte_size, null, `${slot.role}: partial totals must remain unknown`);
+    assert.equal(Number(partial.object_count), 6);
+    await pool.query('UPDATE product_image_objects SET byte_size=$2 WHERE storage_key=$1', [oldImage[slot.key], memory.get(oldImage[slot.key]).length]);
+  }
 
   const resolved = await resolvePublishedImage(pool, old.id, 'site-1500', hash);
   assert.equal(Number(resolved.current_image_id), current.id);
@@ -156,4 +165,23 @@ test('replacement rejects an empty original without retiring old photo aliases',
     /Оригинал новой фотографии отсутствует или пуст/);
   assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM product_images WHERE id=$1',
     [old.id])).rows[0].n, 1);
+});
+
+test('concurrent replacements of one source cannot commit conflicting targets', async () => {
+  const old = await insertPhoto();
+  const targetB = await insertPhoto();
+  const targetC = await insertPhoto();
+  let entered, release;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const delayedStorage = { ...storage, read: async key => { entered(); await gate; return storage.read(key); } };
+  const first = ProductImageService.replace(productId, old.id, targetB.id, pool, { storage: delayedStorage });
+  try {
+    await ready;
+    await assert.rejects(ProductImageService.replace(productId, old.id, targetC.id, pool, { storage }), /сейчас обрабатывается/);
+    assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM product_images WHERE id=$1', [old.id])).rows[0].n, 1);
+  } finally { release(); await first; }
+  const aliases = (await pool.query('SELECT current_image_id FROM product_image_replacements WHERE old_image_id=$1', [old.id])).rows;
+  assert.deepEqual(aliases.map(item => Number(item.current_image_id)), [targetB.id]);
+  assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM product_images WHERE id=$1', [targetC.id])).rows[0].n, 1);
 });
