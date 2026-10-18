@@ -450,7 +450,10 @@ export const ProductImageService = {
       LEFT JOIN product_images current ON current.id=r.current_image_id
         AND current.product_id=r.product_id
       LEFT JOIN LATERAL (
-        SELECT SUM(byte_size) AS byte_size, COUNT(*) AS object_count
+        SELECT CASE
+          WHEN COUNT(*) > 0 AND COUNT(*) = COUNT(byte_size) THEN SUM(byte_size)
+          ELSE NULL
+        END AS byte_size, COUNT(*) AS object_count
         FROM product_image_objects
         WHERE image_id=r.old_image_id AND state <> 'DELETED'
       ) objects ON TRUE
@@ -486,9 +489,22 @@ export const ProductImageService = {
             throw new Error('Новая фотография должна иметь оригинал и все пять готовых версий');
           }
           const storage = dependencies.storage || createProductImageStorage();
+          // A populated DB key is not proof that the immutable original still exists.
+          // It must be recoverable for any future reprocessing; fail before replacement.
+          const source = await storage.read(newPhoto.original_storage_key);
+          if (!Buffer.isBuffer(source) || source.length === 0) {
+            throw new Error('Оригинал новой фотографии отсутствует или пуст');
+          }
           // The managed redirect needs a verified, published target even if the selected
           // destination photo was created before migration 108 (legacy direct R2 links).
           await rememberExisting(lockedSession, newPhoto, storage);
+          await rememberOriginal(lockedSession, {
+            key: newPhoto.original_storage_key,
+            imageId: newPhoto.id,
+            productId: product,
+            body: source,
+            url: newPhoto.original_url,
+          });
           for (const slot of IMAGE_SLOTS) {
             const key = newPhoto[slot.key];
             const bytes = await storage.read(key);
