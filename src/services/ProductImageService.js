@@ -444,7 +444,7 @@ export const ProductImageService = {
              r.old_snapshot->>'original_url' AS original_url,
              r.old_snapshot->>'image_processing_mode' AS processing_mode,
              current.url AS current_url,
-             COALESCE(objects.byte_size, 0)::bigint AS byte_size,
+             objects.byte_size::bigint AS byte_size,
              COALESCE(objects.object_count, 0)::integer AS object_count
       FROM product_image_replacements r
       LEFT JOIN product_images current ON current.id=r.current_image_id
