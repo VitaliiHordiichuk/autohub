@@ -435,6 +435,85 @@ export const ProductImageService = {
     return result.rows;
   },
 
+  async history(productId, db = pool) {
+    const product = positiveId(productId, "productId");
+    const result = await db.query(`
+      SELECT r.old_image_id, r.current_image_id, r.replaced_at,
+             r.old_preview_url,
+             r.old_snapshot->>'url' AS old_url,
+             r.old_snapshot->>'original_url' AS original_url,
+             r.old_snapshot->>'image_processing_mode' AS processing_mode,
+             current.url AS current_url,
+             COALESCE(objects.byte_size, 0)::bigint AS byte_size,
+             COALESCE(objects.object_count, 0)::integer AS object_count
+      FROM product_image_replacements r
+      LEFT JOIN product_images current ON current.id=r.current_image_id
+        AND current.product_id=r.product_id
+      LEFT JOIN LATERAL (
+        SELECT SUM(byte_size) AS byte_size, COUNT(*) AS object_count
+        FROM product_image_objects
+        WHERE image_id=r.old_image_id AND state <> 'DELETED'
+      ) objects ON TRUE
+      WHERE r.product_id=$1
+      ORDER BY r.replaced_at DESC, r.old_image_id DESC
+    `, [product]);
+    return result.rows;
+  },
+
+  async replace(productId, oldImageId, newImageId, db = pool) {
+    const product = positiveId(productId, 'productId');
+    const oldId = positiveId(oldImageId, 'oldImageId');
+    const nextId = positiveId(newImageId, 'newImageId');
+    if (oldId === nextId) throw new Error('Нельзя заменить фотографию самой собой');
+    // Lock both images in canonical order to prevent replacement, processing and deletion
+    // from crossing between the preflight check and the committed replacement.
+    const [first, second] = [oldId, nextId].sort((a, b) => a - b);
+    const outcome = await withImageLock(db, first, async session =>
+      withImageLock(session, second, async lockedSession =>
+        transaction(lockedSession, async () => {
+          const found = await lockedSession.query(
+            `SELECT * FROM product_images
+              WHERE product_id=$1 AND id=ANY($2::bigint[])
+              ORDER BY id FOR UPDATE`, [product, [oldId, nextId]]);
+          const oldPhoto = found.rows.find(row => Number(row.id) === oldId);
+          const newPhoto = found.rows.find(row => Number(row.id) === nextId);
+          if (!oldPhoto || !newPhoto) throw new Error('Обе фотографии должны принадлежать одному товару');
+          if (oldPhoto.processing_status !== 'PROCESSED' || newPhoto.processing_status !== 'PROCESSED') {
+            throw new Error('Сначала дождись завершения обработки обеих фотографий');
+          }
+          if (!newPhoto.url || !newPhoto.original_url) {
+            throw new Error('У новой фотографии отсутствует проверенный оригинал');
+          }
+          if (oldPhoto.original_storage_key || IMAGE_SLOTS.some(slot => oldPhoto[slot.key])) {
+            await rememberExisting(lockedSession, oldPhoto, createProductImageStorage());
+          }
+          // Existing old aliases must follow the new active photo, including a chain A -> B -> C.
+          await lockedSession.query(
+            'UPDATE product_image_replacements SET current_image_id=$2 WHERE current_image_id=$1 AND product_id=$3',
+            [oldId, nextId, product]);
+          await lockedSession.query(`
+            INSERT INTO product_image_replacements(
+              old_image_id,product_id,current_image_id,old_snapshot,old_preview_url)
+            VALUES($1,$2,$3,$4::jsonb,$5)`,
+          [oldId, product, nextId, JSON.stringify(oldPhoto), oldPhoto.original_url || oldPhoto.url]);
+          // The deleted source row automatically disappears from all public catalog/feed queries.
+          // Keep durable alias metadata and raw R2 files until a separately approved purge.
+          await lockedSession.query(
+            "UPDATE product_image_objects SET state='RETIRED',delete_after=NULL WHERE image_id=$1 AND state='CURRENT' AND role<>'original'",
+            [oldId]);
+          await lockedSession.query('DELETE FROM product_images WHERE id=$1 AND product_id=$2', [oldId, product]);
+          await lockedSession.query(
+            'UPDATE product_images SET priority=LEAST(priority,$2) WHERE id=$1 AND product_id=$3',
+            [nextId, oldPhoto.priority, product]);
+          await ProductPublicUpdateService.touch(product, lockedSession);
+          return { oldImageId: oldId, newImageId: nextId };
+        })
+      )
+    );
+    if (outcome?.busy) throw new Error('Фотография сейчас обрабатывается. Попробуй позже.');
+    return outcome;
+  },
+
   async upload(productId, files, settings, database = pool) {
     const request = resolveSettingsAndDatabase(settings, database);
     const db = request.db;
@@ -629,6 +708,12 @@ export const ProductImageService = {
           [positiveId(imageId, "imageId"), positiveId(productId, "productId")]);
         if (!found.rows[0]) throw new Error("Изображение не найдено");
         const record = found.rows[0];
+        const aliases = await session.query(
+          'SELECT 1 FROM product_image_replacements WHERE product_id=$1 AND current_image_id=$2 LIMIT 1',
+          [positiveId(productId, "productId"), positiveId(imageId, "imageId")]);
+        if (aliases.rows.length) {
+          throw new Error('Эта фотография является заменой для старых ссылок. Сначала замени её другой фотографией.');
+        }
         // URL-only/DB-only images have no R2 objects to register.
         // Avoid requiring storage credentials when deleting such records.
         if (record.original_storage_key || IMAGE_SLOTS.some(slot => record[slot.key])) {
