@@ -12,9 +12,10 @@ export function createProductMediaRouter({ db = pool, storageFactory = createPro
     try {
       const image = await resolvePublishedImage(db, req.params.imageId, req.params.role, hash);
       if (!image) return res.sendStatus(404);
-      if (image.sha256 !== hash) {
-        // Only previously published versions resolve. Never redirect to a caller-supplied URL.
-        const target = `/api/product-media/${req.params.imageId}/${req.params.role}/${image.sha256}.webp`;
+      if (image.sha256 !== hash || Number(image.current_image_id) !== Number(req.params.imageId)) {
+        // The old managed URL follows its replacement, even across image ids.
+        // Never redirect to a caller-supplied URL or an unverified R2 key.
+        const target = `/api/product-media/${image.current_image_id}/${req.params.role}/${image.sha256}.webp`;
         return res.set('Cache-Control', 'public, max-age=300').redirect(302, target);
       }
       // Do not expose a disposable R2 URL as a redirect target: Google would rediscover it.
