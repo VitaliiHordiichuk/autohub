@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   previewExistingProductImage,
   previewProductImageUpload,
+  replaceProductImage,
   reprocessProductImage,
   uploadProductImages,
 } from "./admin-product-image.controller.js";
@@ -86,6 +87,7 @@ test("smart preview and publication routes remain behind the ADMIN-only router g
     "/:productId/preview",
     "/:productId/:imageId/preview",
     "/:productId/:imageId/reprocess",
+    "/:productId/:imageId/replace",
   ]) {
     const routeIndex = stack.findIndex((layer) => layer.route?.path === path);
     assert.ok(routeIndex > roleIndex, `${path} must be registered after the admin gate`);
@@ -102,4 +104,22 @@ test("smart preview and publication routes remain behind the ADMIN-only router g
   assert.equal(statusCode, 403);
   roleGate({ auth: { role: "ADMIN" } }, response, () => { nextCalls += 1; });
   assert.equal(nextCalls, 1);
+});
+
+test("admin photo replacement forwards the selected target without permitting arbitrary URL inputs", async (t) => {
+  const original = ProductImageService.replace;
+  t.after(() => { ProductImageService.replace = original; });
+  const calls = [];
+  ProductImageService.replace = async (...args) => {
+    calls.push(args);
+    return { oldImageId: 41, newImageId: 42 };
+  };
+  const res = response();
+  await replaceProductImage({
+    params: { productId: "5", imageId: "41" },
+    body: { replacementImageId: 42, url: "https://external.invalid/" },
+  }, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(calls, [["5", "41", 42]]);
+  assert.deepEqual(res.payload, { success: true, replaced: { oldImageId: 41, newImageId: 42 } });
 });

@@ -13,7 +13,7 @@ import {
 } from "./ProductImageProcessor.js";
 import { ProductPublicUpdateService } from "./ProductPublicUpdateService.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
-import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, transaction, withImageLock } from './ProductImageLifecycle.js';
+import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, sha256, transaction, withImageLock } from './ProductImageLifecycle.js';
 
 const mimeExtensions = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
@@ -435,6 +435,117 @@ export const ProductImageService = {
     return result.rows;
   },
 
+  async history(productId, db = pool) {
+    const product = positiveId(productId, "productId");
+    const result = await db.query(`
+      SELECT r.old_image_id, r.current_image_id, r.replaced_at,
+             r.old_preview_url,
+             r.old_snapshot->>'url' AS old_url,
+             r.old_snapshot->>'original_url' AS original_url,
+             r.old_snapshot->>'image_processing_mode' AS processing_mode,
+             current.url AS current_url,
+             objects.byte_size::bigint AS byte_size,
+             COALESCE(objects.object_count, 0)::integer AS object_count
+      FROM product_image_replacements r
+      LEFT JOIN product_images current ON current.id=r.current_image_id
+        AND current.product_id=r.product_id
+      LEFT JOIN LATERAL (
+        SELECT CASE
+          WHEN COUNT(*) > 0 AND COUNT(*) = COUNT(byte_size) THEN SUM(byte_size)
+          ELSE NULL
+        END AS byte_size, COUNT(*) AS object_count
+        FROM product_image_objects
+        WHERE image_id=r.old_image_id AND state <> 'DELETED'
+      ) objects ON TRUE
+      WHERE r.product_id=$1
+      ORDER BY r.replaced_at DESC, r.old_image_id DESC
+    `, [product]);
+    return result.rows;
+  },
+
+  async replace(productId, oldImageId, newImageId, db = pool, dependencies = {}) {
+    const product = positiveId(productId, 'productId');
+    const oldId = positiveId(oldImageId, 'oldImageId');
+    const nextId = positiveId(newImageId, 'newImageId');
+    if (oldId === nextId) throw new Error('Нельзя заменить фотографию самой собой');
+    // Lock both images in canonical order to prevent replacement, processing and deletion
+    // from crossing between the preflight check and the committed replacement.
+    const [first, second] = [oldId, nextId].sort((a, b) => a - b);
+    const outcome = await withImageLock(db, first, async session =>
+      withImageLock(session, second, async lockedSession =>
+        transaction(lockedSession, async () => {
+          const found = await lockedSession.query(
+            `SELECT * FROM product_images
+              WHERE product_id=$1 AND id=ANY($2::bigint[])
+              ORDER BY id FOR UPDATE`, [product, [oldId, nextId]]);
+          const oldPhoto = found.rows.find(row => Number(row.id) === oldId);
+          const newPhoto = found.rows.find(row => Number(row.id) === nextId);
+          if (!oldPhoto || !newPhoto) throw new Error('Обе фотографии должны принадлежать одному товару');
+          if (oldPhoto.processing_status !== 'PROCESSED' || newPhoto.processing_status !== 'PROCESSED') {
+            throw new Error('Сначала дождись завершения обработки обеих фотографий');
+          }
+          if (!newPhoto.url || !newPhoto.original_url || !newPhoto.original_storage_key
+            || IMAGE_SLOTS.some(slot => !newPhoto[slot.key])) {
+            throw new Error('Новая фотография должна иметь оригинал и все пять готовых версий');
+          }
+          const storage = dependencies.storage || createProductImageStorage();
+          // A populated DB key is not proof that the immutable original still exists.
+          // It must be recoverable for any future reprocessing; fail before replacement.
+          const source = await storage.read(newPhoto.original_storage_key);
+          if (!Buffer.isBuffer(source) || source.length === 0) {
+            throw new Error('Оригинал новой фотографии отсутствует или пуст');
+          }
+          // The managed redirect needs a verified, published target even if the selected
+          // destination photo was created before migration 108 (legacy direct R2 links).
+          await rememberExisting(lockedSession, newPhoto, storage);
+          await rememberOriginal(lockedSession, {
+            key: newPhoto.original_storage_key,
+            imageId: newPhoto.id,
+            productId: product,
+            body: source,
+            url: newPhoto.original_url,
+          });
+          for (const slot of IMAGE_SLOTS) {
+            const key = newPhoto[slot.key];
+            const bytes = await storage.read(key);
+            if (!bytes.length) throw new Error('Один из файлов новой фотографии пуст');
+            const actualHash = sha256(bytes);
+            const updated = await lockedSession.query(`
+              UPDATE product_image_objects SET sha256=$2,byte_size=$3
+              WHERE storage_key=$1 AND (sha256 IS NULL OR sha256=$2)
+              RETURNING storage_key`, [key, actualHash, bytes.length]);
+            if (!updated.rows.length) throw new Error('Контрольная сумма файла новой фотографии не совпадает');
+          }
+          if (oldPhoto.original_storage_key || IMAGE_SLOTS.some(slot => oldPhoto[slot.key])) {
+            await rememberExisting(lockedSession, oldPhoto, storage);
+          }
+          // Existing old aliases must follow the new active photo, including a chain A -> B -> C.
+          await lockedSession.query(
+            'UPDATE product_image_replacements SET current_image_id=$2 WHERE current_image_id=$1 AND product_id=$3',
+            [oldId, nextId, product]);
+          await lockedSession.query(`
+            INSERT INTO product_image_replacements(
+              old_image_id,product_id,current_image_id,old_snapshot,old_preview_url)
+            VALUES($1,$2,$3,$4::jsonb,$5)`,
+          [oldId, product, nextId, JSON.stringify(oldPhoto), oldPhoto.original_url || oldPhoto.url]);
+          // The deleted source row automatically disappears from all public catalog/feed queries.
+          // Keep durable alias metadata and raw R2 files until a separately approved purge.
+          await lockedSession.query(
+            "UPDATE product_image_objects SET state='RETIRED',delete_after=NULL WHERE image_id=$1 AND state='CURRENT' AND role<>'original'",
+            [oldId]);
+          await lockedSession.query('DELETE FROM product_images WHERE id=$1 AND product_id=$2', [oldId, product]);
+          await lockedSession.query(
+            'UPDATE product_images SET priority=LEAST(priority,$2) WHERE id=$1 AND product_id=$3',
+            [nextId, oldPhoto.priority, product]);
+          await ProductPublicUpdateService.touch(product, lockedSession);
+          return { oldImageId: oldId, newImageId: nextId };
+        })
+      )
+    );
+    if (outcome?.busy) throw new Error('Фотография сейчас обрабатывается. Попробуй позже.');
+    return outcome;
+  },
+
   async upload(productId, files, settings, database = pool) {
     const request = resolveSettingsAndDatabase(settings, database);
     const db = request.db;
@@ -629,6 +740,12 @@ export const ProductImageService = {
           [positiveId(imageId, "imageId"), positiveId(productId, "productId")]);
         if (!found.rows[0]) throw new Error("Изображение не найдено");
         const record = found.rows[0];
+        const aliases = await session.query(
+          'SELECT 1 FROM product_image_replacements WHERE product_id=$1 AND current_image_id=$2 LIMIT 1',
+          [positiveId(productId, "productId"), positiveId(imageId, "imageId")]);
+        if (aliases.rows.length) {
+          throw new Error('Эта фотография является заменой для старых ссылок. Сначала замени её другой фотографией.');
+        }
         // URL-only/DB-only images have no R2 objects to register.
         // Avoid requiring storage credentials when deleting such records.
         if (record.original_storage_key || IMAGE_SLOTS.some(slot => record[slot.key])) {
