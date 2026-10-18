@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { deleteProductImage,downloadProcessedProductImage,getProductImages,makePrimaryProductImage,previewExistingProductImage,previewProductImageUpload,reprocessProductImage,searchImageProducts,setProductImageDisplayMode,uploadProductImages } from "../controllers/admin-product-image.controller.js";
+import { deleteProductImage,downloadProcessedProductImage,getProductImages,makePrimaryProductImage,previewExistingProductImage,previewProductImageUpload,replaceProductImage,reprocessProductImage,searchImageProducts,setProductImageDisplayMode,uploadProductImages } from "../controllers/admin-product-image.controller.js";
 import { requireAuth, requireRole } from "../middleware/auth.middleware.js";
 
 const imageUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:20*1024*1024,files:8}});
@@ -15,4 +15,5 @@ adminProductImageRouter.post("/:productId",imageUpload.array("images",8),uploadP
 adminProductImageRouter.patch("/:productId/:imageId/primary",makePrimaryProductImage);
 adminProductImageRouter.patch("/:productId/:imageId/display",setProductImageDisplayMode);
 adminProductImageRouter.post("/:productId/:imageId/reprocess",reprocessProductImage);
+adminProductImageRouter.post("/:productId/:imageId/replace",replaceProductImage);
 adminProductImageRouter.delete("/:productId/:imageId",deleteProductImage);
