@@ -80,7 +80,16 @@ test('replacement preserves archived image while removing it from public catalog
   const entry = history.find(item => Number(item.old_image_id) === old.id);
   assert.equal(Number(entry.current_image_id), current.id);
   assert.equal(entry.old_preview_url, storage.publicUrl(oldImage.original_storage_key));
-  assert.ok(Number(entry.byte_size) > 0);
+  // Legacy originals may be tracked without size. Do not show a misleading
+  // partial sum as if it described every R2 object.
+  assert.equal(entry.byte_size, null);
+  assert.equal(Number(entry.object_count), 6);
+  const oldOriginal = memory.get(oldImage.original_storage_key);
+  await pool.query("UPDATE product_image_objects SET byte_size=$2 WHERE image_id=$1 AND role='original'",
+    [old.id, oldOriginal.length]);
+  const complete = (await ProductImageService.history(productId, pool))
+    .find(item => Number(item.old_image_id) === old.id);
+  assert.ok(Number(complete.byte_size) > 0);
 
   const resolved = await resolvePublishedImage(pool, old.id, 'site-1500', hash);
   assert.equal(Number(resolved.current_image_id), current.id);
@@ -119,4 +128,32 @@ test('replacement fails closed for incomplete target without losing active old p
     /пять готовых версий/);
   assert.equal((await pool.query('SELECT count(*)::integer AS n FROM product_images WHERE id=$1', [old.id])).rows[0].n, 1);
   assert.equal((await pool.query('SELECT count(*)::integer AS n FROM product_image_replacements WHERE old_image_id=$1', [old.id])).rows[0].n, 0);
+});
+
+test('replacement rejects a missing original even when all five derivatives still exist', async () => {
+  const old = await insertPhoto();
+  const candidate = await insertPhoto();
+  const target = (await pool.query('SELECT original_storage_key FROM product_images WHERE id=$1',
+    [candidate.id])).rows[0];
+  memory.delete(target.original_storage_key);
+  await assert.rejects(
+    ProductImageService.replace(productId, old.id, candidate.id, pool, { storage }),
+    /missing R2 object/);
+  assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM product_images WHERE id=$1',
+    [old.id])).rows[0].n, 1, 'old active image survives failed replacement');
+  assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM product_image_replacements WHERE old_image_id=$1',
+    [old.id])).rows[0].n, 0, 'no replacement history committed');
+});
+
+test('replacement rejects an empty original without retiring old photo aliases', async () => {
+  const old = await insertPhoto();
+  const candidate = await insertPhoto();
+  const target = (await pool.query('SELECT original_storage_key FROM product_images WHERE id=$1',
+    [candidate.id])).rows[0];
+  memory.set(target.original_storage_key, Buffer.alloc(0));
+  await assert.rejects(
+    ProductImageService.replace(productId, old.id, candidate.id, pool, { storage }),
+    /Оригинал новой фотографии отсутствует или пуст/);
+  assert.equal((await pool.query('SELECT COUNT(*)::integer AS n FROM product_images WHERE id=$1',
+    [old.id])).rows[0].n, 1);
 });
