@@ -296,8 +296,12 @@ test("manual PRODUCT FOCUS preview is available with the automatic flag off, but
   }).png().toBuffer() };
   const db = { query: async () => ({ rows: [{ exists: 1 }] }) };
   const settings = { processingMode: "PRODUCT_FOCUS", crop: { left: 0.1, top: 0.1, width: 0.8, height: 0.8 }, cropPaddingRatio: 0.06 };
-  const preview = await ProductImageService.previewUpload(22, file, settings, db);
+  const wireSettings = { ...settings, crop: JSON.stringify(settings.crop), cropPaddingRatio: "0.06", brandingMode: "FULL_BRANDED" };
+  const preview = await ProductImageService.previewUpload(22, file, wireSettings, db);
   assert.match(preview.preview, /^data:image\/webp;base64,/);
+  const expected = await processProductImage(file.buffer, preview.processing);
+  assert.deepEqual(Buffer.from(preview.preview.split(',')[1], 'base64'), expected.variants[1500],
+    'confirmed manual preview must use the exact storefront processing settings');
   assert.match(preview.previewToken, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   assert.equal(preview.metadata.processingMode, "PRODUCT_FOCUS");
   await assert.rejects(ProductImageService.upload(22, [file], settings, db),
@@ -307,7 +311,7 @@ test("manual PRODUCT FOCUS preview is available with the automatic flag off, but
   }, db), /Сначала проверь и подтверди предварительный просмотр/);
   let reachedPublicationQuery = false;
   await assert.rejects(ProductImageService.upload(22, [file], {
-    ...settings, previewToken: preview.previewToken,
+    ...wireSettings, previewToken: preview.previewToken,
   }, { query: async () => { reachedPublicationQuery = true; return { rows: [] }; } }), /Товар не найден/);
   assert.equal(reachedPublicationQuery, true, "confirmed manual settings pass the publication gate with the flag off");
   await assert.rejects(ProductImageService.previewUpload(22, file, { processingMode: "PRODUCT_FOCUS" }, db), /выбери область кадра/);

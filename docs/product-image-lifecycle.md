@@ -61,14 +61,20 @@ The local working DB has an older image schema and was not used as a production 
 
 Opt in with `PRODUCT_IMAGE_DELIVERY_BASE_URL=https://maka.com.ua/api/product-media` **only after
 the route has been verified through the actual public proxy/CDN**. No new DNS domain is required.
-The current URL is `/api/product-media/{imageId}/{role}/{sha256}.webp` and returns image bytes.
-A previously published version returns a 302 directly to the latest version of the **same role**.
+Changed/new storefront derivatives use the stable
+`/api/product-media/{imageId}/site-{size}/current.webp` URL. Its immutable R2 object can
+change after an approved reprocessing, while the public URL stays the same. CLEAN Merchant
+derivatives use `/api/product-media/{imageId}/merchant-1500/{sha256}.webp`: unchanged bytes
+keep the URL, changed bytes receive a new URL. Previously published hash URLs return a 302
+directly to the latest version of the **same role**.
 The historical metadata is kept after deleting its physical object. Random hashes do not resolve.
-Store and Merchant branches cannot redirect into each other.
+Store and Merchant branches cannot redirect into each other. After an explicit photo
+replacement, old stable and managed hash URLs follow the replacement chain.
 
 The final 200 response intentionally does not redirect to a disposable R2 key: that would expose
-another breakable address to Google. GET/HEAD are public, successful images cache for 1 hour,
-redirects for 5 minutes; temporary failures are 503/no-store/Retry-After, not cached 404s.
+another breakable address to Google. GET/HEAD are public. Stable storefront responses use
+`no-cache, must-revalidate` with content ETags; current managed hash responses cache for 1 hour,
+redirects for 5 minutes. Temporary failures are 503/no-store/Retry-After, not cached 404s.
 The application does not add noindex or require cookies. The current frontend robots allows `/`;
 verify it and any proxy security rules at rollout. Keep this route available permanently once used.
 
@@ -129,12 +135,14 @@ therefore makes no promise of automatic safe deletion of historical direct R2 UR
 ## Deployment checklist (NOT executed)
 
 1. Review this branch, back up DB/schema and coordinate pausing photo edits/old workers.
-2. Apply **108_product_image_lifecycle.sql** using the existing migration procedure. It is additive;
-   do not deploy this worker against a pre-108 schema. Only the isolated local test DB was migrated.
+2. Apply **108_product_image_lifecycle.sql** and **109_product_image_replacements.sql** using
+   the existing migration procedure. Both are additive; do not deploy this worker against a
+   pre-109 schema. Only the isolated local test DB was migrated.
 3. Deploy all backend workers together. A mixed old/new worker rollout is unsafe because old code
    deletes files outside the new locks/ledger. Keep GC disabled.
-4. Verify `/api/product-media/...` GET/HEAD and old-to-new redirect using a deliberately approved
-   test photo and a controlled host. Check actual Nginx routing, robots, HTTPS and CDN responses.
+4. Verify stable `/current.webp` and managed hash GET/HEAD, ETag revalidation, and old-to-new
+   redirects using a deliberately approved test photo and a controlled host. Check actual
+   Nginx routing, robots, HTTPS and CDN responses.
    Do not assume extension-specific proxy rules pass the route; do not enable managed URLs until proven.
 5. Set the delivery base to the verified public endpoint. No mass URL update/reprocess is required.
    Validate both branded and CLEAN results, Merchant/SEO references and the original restore switch.

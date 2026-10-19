@@ -127,8 +127,12 @@ test('reprocessing keeps storefront URL; unchanged CLEAN bytes retain Merchant U
     assert.equal(response.headers.get('cache-control'), 'public, no-cache, must-revalidate');
     assert.equal(await response.text(), 'v2:store:1500');
     const etag = response.headers.get('etag');
-    const unchanged = await fetch(stable, { headers: { 'If-None-Match': etag } });
+    const unchanged = await fetch(stable, { headers: { 'If-None-Match': etag, 'Cache-Control': 'no-cache' } });
     assert.equal(unchanged.status, 304);
+    assert.equal(unchanged.headers.get('etag'), etag);
+    const stale = await fetch(stable, { headers: { 'If-None-Match': '"older-version"' } });
+    assert.equal(stale.status, 200);
+    assert.equal(await stale.text(), 'v2:store:1500');
 
     const previous = await fetch(base + new URL(previousUrl).pathname, { redirect: 'manual' });
     assert.equal(previous.status, 302);
@@ -258,6 +262,9 @@ test('incorrect ledger state cannot authorize deleting current keys or an origin
 
 test('old managed store and Merchant URLs redirect directly to current bytes after old physical files are collected', async () => {
   await run(); const v1 = await current(); await run('v2'); await ageGarbage();
+  const v2 = await current();
+  assert.equal(v2.url, v1.url, 'the storefront URL stays stable when both outputs change');
+  assert.notEqual(v2.merchant_url_1500, v1.merchant_url_1500, 'changed CLEAN bytes get a new Merchant URL');
   await collectProductImageGarbage({ apply: true }, { db: pool, storage });
   const app = express(); app.use('/api/product-media', createProductMediaRouter({ db: pool, storageFactory: () => storage }));
   const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
@@ -277,6 +284,14 @@ test('old managed store and Merchant URLs redirect directly to current bytes aft
     }
     assert.equal((await fetch(`${base}/api/product-media/${row.id}/original/${'f'.repeat(64)}.webp`)).status, 404);
     assert.equal(await resolvePublishedImage(pool,row.id,'site-1500','f'.repeat(64)), null);
+    const currentMerchant = await current();
+    const read = storage.read;
+    storage.read = async key => key === currentMerchant.merchant_storage_key_1500 ? Buffer.from('corrupted') : read(key);
+    const corrupted = await fetch(base + new URL(currentMerchant.merchant_url_1500).pathname);
+    assert.equal(corrupted.status, 503);
+    assert.equal(corrupted.headers.get('cache-control'), 'no-store');
+    const corruptHead = await fetch(base + new URL(currentMerchant.merchant_url_1500).pathname, { method: 'HEAD' });
+    assert.equal(corruptHead.status, 503);
     storage.read = async () => { throw new Error('temporary error'); };
     const unavailable = await fetch(base + new URL((await current()).url).pathname);
     assert.equal(unavailable.status, 503); assert.equal(unavailable.headers.get('cache-control'), 'no-store');

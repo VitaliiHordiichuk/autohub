@@ -3,6 +3,14 @@ import { pool } from '../config/db.js';
 import { createProductImageStorage } from '../services/ProductImageService.js';
 import { resolveCurrentPublishedImage, resolvePublishedImage, sha256 } from '../services/ProductImageLifecycle.js';
 
+function matchesIfNoneMatch(value, etag) {
+  if (typeof value !== 'string') return false;
+  return value.split(',').some(candidate => {
+    const tag = candidate.trim();
+    return tag === '*' || tag === etag || tag === `W/${etag}`;
+  });
+}
+
 export function createProductMediaRouter({ db = pool, storageFactory = createProductImageStorage } = {}) {
   const router = Router();
   // Storefront URLs are stable; the R2 object behind them remains immutable.
@@ -23,7 +31,9 @@ export function createProductMediaRouter({ db = pool, storageFactory = createPro
         'X-Content-Type-Options': 'nosniff',
         ETag: etag,
       });
-      if (req.fresh) return res.status(304).end();
+      // A client may send Cache-Control: no-cache while revalidating. Express's
+      // req.fresh treats that as stale even when If-None-Match matches.
+      if (matchesIfNoneMatch(req.headers['if-none-match'], etag)) return res.status(304).end();
       const storage = storageFactory();
       if (req.method === 'HEAD') {
         const head = await storage.head(image.storage_key);
@@ -57,10 +67,14 @@ export function createProductMediaRouter({ db = pool, storageFactory = createPro
       const storage = storageFactory();
       if (req.method === 'HEAD') {
         const head = await storage.head(image.storage_key);
+        if (image.byte_size !== null && Number(head.ContentLength) !== Number(image.byte_size)) {
+          throw new Error('Stored image size mismatch');
+        }
         return res.set({ 'Content-Type': 'image/webp', 'Content-Length': String(head.ContentLength),
           'Cache-Control': 'public, max-age=3600', ETag: `"${hash}"` }).end();
       }
       const body = await storage.read(image.storage_key);
+      if (sha256(body) !== image.sha256) throw new Error('Stored image checksum mismatch');
       return res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=3600',
         'X-Content-Type-Options': 'nosniff', ETag: `"${hash}"` }).send(body);
     } catch {
