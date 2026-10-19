@@ -96,6 +96,156 @@ test('all derivatives verified before atomic publication; identical bytes preser
   assert.equal(objects.get(row.original_storage_key).toString(), 'immutable original');
 });
 
+test('reprocessing keeps the storefront URL while Merchant changes only when CLEAN bytes change', async () => {
+  await run('v1');
+  const first = await current();
+  assert.match(first.url, new RegExp(`/api/product-media/${row.id}/site-1500/current\\.webpimport test, { before, beforeEach, afterEach, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import express from 'express';
+import { pool } from '../config/db.js';
+import { ProductImageService, processProductImageRecord, processMerchantImageRecord } from './ProductImageService.js';
+import { IMAGE_SLOTS, rememberOriginal, resolvePublishedImage } from './ProductImageLifecycle.js';
+import { collectProductImageGarbage } from './ProductImageGarbageCollector.js';
+import { createProductMediaRouter } from '../routes/product-media.routes.js';
+
+// Real PostgreSQL transactions/locks; R2 is ALWAYS replaced with an in-memory store.
+const enabled = process.env.NODE_ENV === 'test' && /_test$/.test(process.env.DB_NAME || '')
+  && ['127.0.0.1','localhost','::1'].includes(process.env.DB_HOST);
+let row, storage, objects, uploads, deletes, productId;
+const originals = {};
+const env = ['PRODUCT_IMAGE_DELIVERY_BASE_URL','PRODUCT_IMAGE_GC_ENABLED','R2_ENDPOINT','R2_BUCKET','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','R2_PUBLIC_BASE_URL'];
+
+before(async () => {
+  assert.ok(enabled, 'Run through npm test: isolated local *_test PostgreSQL required');
+  for (const name of env) originals[name] = process.env[name];
+  Object.assign(process.env, {
+    PRODUCT_IMAGE_DELIVERY_BASE_URL: 'https://maka.example.test/api/product-media', PRODUCT_IMAGE_GC_ENABLED: 'true',
+    R2_ENDPOINT: 'https://r2.example.test', R2_BUCKET: 'test', R2_ACCESS_KEY_ID: 'test',
+    R2_SECRET_ACCESS_KEY: 'test', R2_PUBLIC_BASE_URL: 'https://r2.example.test',
+  });
+  productId = (await pool.query('SELECT id FROM products ORDER BY id LIMIT 1')).rows[0].id;
+});
+
+beforeEach(async () => {
+  if (!enabled) return;
+  objects = new Map(); uploads = []; deletes = [];
+  const key = `products/${productId}/originals/lifecycle-${randomUUID()}.jpg`;
+  const inserted = await pool.query(`INSERT INTO product_images(product_id,url,original_url,original_storage_key,source,processing_status,display_mode)
+    VALUES($1,$2,$2,$3,'TEST','PROCESSED','PROCESSED') RETURNING *`, [productId, `https://old.example.test/${key}`, key]);
+  row = inserted.rows[0];
+  objects.set(key, Buffer.from('immutable original'));
+  for (const slot of IMAGE_SLOTS) {
+    const oldKey = `products/${productId}/${slot.role.startsWith('merchant') ? 'merchant' : 'processed'}/legacy-${row.id}-${slot.role}.webp`;
+    await pool.query(`UPDATE product_images SET ${slot.key}=$2,${slot.url}=$3 WHERE id=$1`, [row.id, oldKey, `https://old.example.test/${oldKey}`]);
+    objects.set(oldKey, Buffer.from(`old:${slot.role}`));
+  }
+  await pool.query('UPDATE product_images SET url=processed_url_1600,storage_key=processed_storage_key_1600 WHERE id=$1', [row.id]);
+  row = await current();
+  storage = {
+    read: async key => { if (!objects.has(key)) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' }); return objects.get(key); },
+    head: async key => ({ ContentLength: (await storage.read(key)).length }),
+    verify: async (key, body) => assert.deepEqual(await storage.read(key), body),
+    uploadWebp: async (key, body) => { assert.ok(!objects.has(key), 'never overwrite'); objects.set(key, body); uploads.push(key); },
+    remove: async key => { deletes.push(key); objects.delete(key); },
+    publicUrl: key => `https://r2.example.test/${key}`,
+  };
+});
+
+afterEach(async () => {
+  if (!enabled || !row) return;
+  await pool.query('DELETE FROM product_images WHERE id=$1', [row.id]);
+  await pool.query('DELETE FROM product_image_objects WHERE image_id=$1', [row.id]);
+});
+after(async () => {
+  for (const name of env) {
+    if (originals[name] === undefined) delete process.env[name]; else process.env[name] = originals[name];
+  }
+  await pool.end();
+});
+
+async function current() { return (await pool.query('SELECT * FROM product_images WHERE id=$1', [row.id])).rows[0]; }
+function output(version = 'v1') {
+  return { variants: Object.fromEntries([1500,1200,800,400].map(size => [size, Buffer.from(`${version}:store:${size}`)])),
+    merchant: { variant: Buffer.from(`${version}:clean`) }, metadata: { originalWidth: 1000, originalHeight: 800,
+      processedWidth: 1500, processedHeight: 1500, qualityStatus: 'GOOD' } };
+}
+const run = (version = 'v1', db = pool) => processProductImageRecord(row.id, db, { storage, process: async () => output(version) });
+function samePublished(a, b) {
+  for (const field of ['url','storage_key','display_mode','original_url','original_storage_key', ...IMAGE_SLOTS.flatMap(s => [s.key,s.url])]) assert.equal(a[field], b[field], field);
+}
+async function ageGarbage() { await pool.query("UPDATE product_image_objects SET delete_after=NOW()-INTERVAL '1 day' WHERE image_id=$1 AND state<>'CURRENT'", [row.id]); }
+function faultPool(inject) {
+  return { connect: async () => {
+    const session = await pool.connect();
+    return { query: (sql, args) => inject(sql, args, session), release: error => session.release(error) };
+  } };
+}
+
+test('all derivatives verified before atomic publication; identical bytes preserve URLs and issue zero PUTs', async () => {
+  await run();
+  const first = await current();
+  assert.equal(uploads.length, 5);
+  assert.equal(deletes.length, 0);
+  assert.match(first.merchant_url_1500, /\/merchant-1500\/[a-f0-9]{64}\.webp$/);
+  assert.notEqual(first.merchant_url_1500, first.url);
+  assert.equal((await storage.read(first.merchant_storage_key_1500)).toString(), 'v1:clean');
+  const result = await run();
+  assert.equal(result.reused, true);
+  assert.equal(uploads.length, 5);
+  samePublished(await current(), first);
+  assert.equal(objects.get(row.original_storage_key).toString(), 'immutable original');
+});
+
+));
+  assert.match(first.merchant_url_1500, /\\/merchant-1500\\/[a-f0-9]{64}\\.webp$/);
+  const originalMerchantUrl = first.merchant_url_1500;
+  const oldSiteObject = (await pool.query(
+    'SELECT sha256 FROM product_image_objects WHERE storage_key=$1', [first.processed_storage_key_1600]
+  )).rows[0];
+  const oldHashUrl = `https://maka.example.test/api/product-media/${row.id}/site-1500/${oldSiteObject.sha256}.webp`;
+
+  const revised = output('v2');
+  revised.merchant = output('v1').merchant; // Only the site's branded output changes.
+  const result = await processProductImageRecord(row.id, pool, {
+    storage, process: async () => revised,
+  });
+  assert.equal(result.processed, true);
+  const second = await current();
+  assert.equal(second.url, first.url);
+  assert.equal(second.processed_url_400, first.processed_url_400);
+  assert.equal(second.merchant_url_1500, originalMerchantUrl);
+  assert.notEqual(second.processed_storage_key_1600, first.processed_storage_key_1600);
+  assert.equal(uploads.length, 9, 'Merchant has no extra R2 PUT when its bytes are unchanged');
+
+  const app = express();
+  app.use('/api/product-media', createProductMediaRouter({ db: pool, storageFactory: () => storage }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const stable = base + new URL(first.url).pathname;
+    const response = await fetch(stable);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'public, no-cache, must-revalidate');
+    assert.equal(await response.text(), 'v2:store:1500');
+    const etag = response.headers.get('etag');
+    const unchanged = await fetch(stable, { headers: { 'If-None-Match': etag } });
+    assert.equal(unchanged.status, 304);
+
+    const oldHash = await fetch(base + new URL(oldHashUrl).pathname, { redirect: 'manual' });
+    assert.equal(oldHash.status, 302);
+    assert.equal((await fetch(base + new URL(oldHashUrl).pathname)).status, 200);
+    const head = await fetch(stable, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(Number(head.headers.get('content-length')), Buffer.byteLength('v2:store:1500'));
+    assert.equal((await fetch(`${base}/api/product-media/${row.id}/merchant-1500/current.webp`)).status, 404);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('identical pre-migration UUID objects also retain original URLs', async () => {
   const out = output();
   for (const slot of IMAGE_SLOTS) objects.set(row[slot.key], slot.role === 'merchant-1500' ? out.merchant.variant : out.variants[slot.size]);
@@ -217,7 +367,10 @@ test('old managed store and Merchant URLs redirect directly to current bytes aft
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     for (const slot of [IMAGE_SLOTS[0], IMAGE_SLOTS[4]]) {
-      const url = base + new URL(v1[slot.url]).pathname;
+      const priorHash = (await pool.query(
+        'SELECT sha256 FROM product_image_objects WHERE storage_key=$1', [v1[slot.key]]
+      )).rows[0].sha256;
+      const url = `${base}/api/product-media/${row.id}/${slot.role}/${priorHash}.webp`;
       const redirect = await fetch(url, { redirect: 'manual' }); assert.equal(redirect.status, 302);
       assert.ok(!redirect.headers.get('location').includes('.r2.'));
       const response = await fetch(url); assert.equal(response.status, 200);
