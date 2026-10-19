@@ -139,7 +139,11 @@ function verifyPreviewToken(token, expected) {
 
 function resolveProcessingSettings(settings, { requireSmartEnabled = true } = {}) {
   const processingMode = resolveImageProcessingMode(settings.processingMode);
+  // Explicit, bounded PRODUCT_FOCUS remains available for admins even when
+  // automatic Smart processing is disabled. Preview confirmation is still
+  // mandatory for publication; PRODUCT MAX/SMART SAFE retain the flag gate.
   if (processingMode !== IMAGE_PROCESSING_MODE.LEGACY
+    && processingMode !== IMAGE_PROCESSING_MODE.PRODUCT_FOCUS
     && requireSmartEnabled
     && !isSmartProductImageProcessingEnabled()) {
     throw new Error("Smart-обработка фотографий временно отключена");
@@ -292,7 +296,10 @@ export async function processProductImageRecord(imageId, db = pool, dependencies
       await rememberOriginal(session, { key: row.original_storage_key, imageId: row.id,
         productId: row.product_id, body: source, url: row.original_url });
       const configuredMode = resolveImageProcessingMode(row.image_processing_mode);
+      // A confirmed manual crop must not silently publish as LEGACY if the
+      // automatic feature flag is off while the background job runs.
       const effectiveMode = configuredMode !== IMAGE_PROCESSING_MODE.LEGACY
+        && configuredMode !== IMAGE_PROCESSING_MODE.PRODUCT_FOCUS
         && !isSmartProductImageProcessingEnabled()
         ? IMAGE_PROCESSING_MODE.LEGACY
         : configuredMode;
@@ -391,6 +398,7 @@ export const ProductImageService = {
     const smartProcessing = isSmartProductImageProcessingEnabled();
     return {
       smartProcessing,
+      manualProcessing: true,
       preferredMode: smartProcessing ? IMAGE_PROCESSING_MODE.PRODUCT_MAX : IMAGE_PROCESSING_MODE.LEGACY,
       modes: [
         IMAGE_PROCESSING_MODE.PRODUCT_MAX,
