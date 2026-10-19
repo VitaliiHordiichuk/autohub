@@ -25,6 +25,38 @@ export function managedImageUrl(imageId, role, hash, base = deliveryBase()) {
   return base ? `${base}/${imageId}/${role}/${hash}.webp` : null;
 }
 
+/**
+ * Stable storefront image URLs are backed by immutable, content-addressed R2 objects.
+ * Merchant URLs deliberately remain content-addressed so Google detects changed bytes.
+ */
+export function stableSiteImageUrl(imageId, role, base = deliveryBase()) {
+  if (!base || !/^site-(1500|1200|800|400)$/.test(String(role))
+    || !/^[1-9]\d{0,14}$/.test(String(imageId))) return null;
+  return `${base}/${imageId}/${role}/current.webp`;
+}
+
+/**
+ * Resolve a stable storefront URL to the latest published image object.
+ * Never expose unpublished bytes, unknown roles, or direct R2 paths.
+ * A replaced image id follows its current replacement via replacement history.
+ */
+export async function resolveCurrentPublishedImage(db, imageId, role) {
+  const slot = IMAGE_SLOTS.find(item => item.role === role && item.role.startsWith('site-'));
+  if (!slot || !/^[1-9]\d{0,14}$/.test(String(imageId))) return null;
+  const current = await db.query(`SELECT pi.id AS current_image_id, obj.storage_key, obj.sha256, obj.byte_size
+    FROM product_images pi JOIN product_image_objects obj ON obj.storage_key=pi.${slot.key}
+    WHERE pi.id=$1 AND obj.state='CURRENT' AND obj.published_at IS NOT NULL
+      AND obj.sha256 IS NOT NULL LIMIT 1`, [imageId]);
+  if (current.rows[0]) return current.rows[0];
+  const replaced = await db.query(`SELECT pi.id AS current_image_id, obj.storage_key, obj.sha256, obj.byte_size
+    FROM product_image_replacements history
+    JOIN product_images pi ON pi.id=history.current_image_id AND pi.product_id=history.product_id
+    JOIN product_image_objects obj ON obj.storage_key=pi.${slot.key}
+    WHERE history.old_image_id=$1 AND obj.state='CURRENT'
+      AND obj.published_at IS NOT NULL AND obj.sha256 IS NOT NULL LIMIT 1`, [imageId]);
+  return replaced.rows[0] || null;
+}
+
 // A dedicated session serializes workers, GC and explicit image deletion across processes.
 // Request generation CAS below still allows a newer admin request to supersede a slow worker.
 export async function withImageLock(db, id, work) {
@@ -90,7 +122,11 @@ export async function prepareVariant(db, storage, row, slot, body) {
       try {
         await storage.verify(previousKey, body);
         await db.query('UPDATE product_image_objects SET sha256=$2,byte_size=$3 WHERE storage_key=$1', [previousKey, hash, body.length]);
-        return { ...slot, key: previousKey, url: row[slot.url] || storage.publicUrl(previousKey), hash, reused: true };
+        const previousUrl = row[slot.url] || storage.publicUrl(previousKey);
+        // Keep immutable URLs in the object ledger even when the storefront uses /current.webp.
+        const versionedUrl = previousUrl === stableSiteImageUrl(row.id, slot.role)
+          ? managedImageUrl(row.id, slot.role, hash) : null;
+        return { ...slot, key: previousKey, url: versionedUrl || previousUrl, hash, reused: true };
       } catch (error) { if (!isMissingObject(error)) throw error; }
     }
   }
