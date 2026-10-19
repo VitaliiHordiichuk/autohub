@@ -96,6 +96,53 @@ test('all derivatives verified before atomic publication; identical bytes preser
   assert.equal(objects.get(row.original_storage_key).toString(), 'immutable original');
 });
 
+test('reprocessing keeps storefront URL; unchanged CLEAN bytes retain Merchant URL', async () => {
+  await run('v1');
+  const first = await current();
+  assert.ok(first.url.endsWith(`/api/product-media/${row.id}/site-1500/current.webp`));
+  assert.match(first.merchant_url_1500, /\/merchant-1500\/[a-f0-9]{64}\.webp$/);
+  const oldHash = (await pool.query(
+    'SELECT sha256 FROM product_image_objects WHERE storage_key=$1', [first.processed_storage_key_1600]
+  )).rows[0].sha256;
+  const previousUrl = `https://maka.example.test/api/product-media/${row.id}/site-1500/${oldHash}.webp`;
+  const revised = output('v2');
+  revised.merchant = output('v1').merchant;
+  await processProductImageRecord(row.id, pool, { storage, process: async () => revised });
+  const second = await current();
+  assert.equal(second.url, first.url);
+  assert.equal(second.processed_url_400, first.processed_url_400);
+  assert.equal(second.merchant_url_1500, first.merchant_url_1500);
+  assert.notEqual(second.processed_storage_key_1600, first.processed_storage_key_1600);
+  assert.equal(uploads.length, 9, 'No extra Merchant PUT when CLEAN bytes are identical');
+
+  const app = express();
+  app.use('/api/product-media', createProductMediaRouter({ db: pool, storageFactory: () => storage }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const stable = base + new URL(first.url).pathname;
+    const response = await fetch(stable);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'public, no-cache, must-revalidate');
+    assert.equal(await response.text(), 'v2:store:1500');
+    const etag = response.headers.get('etag');
+    const unchanged = await fetch(stable, { headers: { 'If-None-Match': etag } });
+    assert.equal(unchanged.status, 304);
+
+    const previous = await fetch(base + new URL(previousUrl).pathname, { redirect: 'manual' });
+    assert.equal(previous.status, 302);
+    assert.equal((await fetch(base + new URL(previousUrl).pathname)).status, 200);
+    const head = await fetch(stable, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(Number(head.headers.get('content-length')), Buffer.byteLength('v2:store:1500'));
+    assert.equal((await fetch(`${base}/api/product-media/${row.id}/merchant-1500/current.webp`)).status, 404);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('identical pre-migration UUID objects also retain original URLs', async () => {
   const out = output();
   for (const slot of IMAGE_SLOTS) objects.set(row[slot.key], slot.role === 'merchant-1500' ? out.merchant.variant : out.variants[slot.size]);
@@ -217,7 +264,10 @@ test('old managed store and Merchant URLs redirect directly to current bytes aft
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     for (const slot of [IMAGE_SLOTS[0], IMAGE_SLOTS[4]]) {
-      const url = base + new URL(v1[slot.url]).pathname;
+      const previousHash = (await pool.query(
+        'SELECT sha256 FROM product_image_objects WHERE storage_key=$1', [v1[slot.key]]
+      )).rows[0].sha256;
+      const url = `${base}/api/product-media/${row.id}/${slot.role}/${previousHash}.webp`;
       const redirect = await fetch(url, { redirect: 'manual' }); assert.equal(redirect.status, 302);
       assert.ok(!redirect.headers.get('location').includes('.r2.'));
       const response = await fetch(url); assert.equal(response.status, 200);

@@ -119,6 +119,14 @@ test('replacement preserves archived image while removing it from public catalog
     const actual = await fetch(`${base}/${old.id}/site-1500/${hash}.webp`);
     assert.equal(actual.status, 200);
     assert.deepEqual(Buffer.from(await actual.arrayBuffer()), memory.get(resolved.storage_key));
+    // The stable URL survives a real replacement and resolves to the active photo.
+    const stableRedirect = await fetch(`${base}/${old.id}/site-1500/current.webp`, { redirect: 'manual' });
+    assert.equal(stableRedirect.status, 302);
+    assert.equal(stableRedirect.headers.get('location'),
+      `/api/product-media/${current.id}/site-1500/current.webp`);
+    const stableImage = await fetch(`${base}/${old.id}/site-1500/current.webp`);
+    assert.equal(stableImage.status, 200);
+    assert.deepEqual(Buffer.from(await stableImage.arrayBuffer()), memory.get(resolved.storage_key));
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 
   const newest = await insertPhoto();
