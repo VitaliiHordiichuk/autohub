@@ -13,7 +13,7 @@ import {
 } from "./ProductImageProcessor.js";
 import { ProductPublicUpdateService } from "./ProductPublicUpdateService.js";
 import { normalizeArticle } from "./articleEngine/normalize.js";
-import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, sha256, transaction, withImageLock } from './ProductImageLifecycle.js';
+import { IMAGE_SLOTS, prepareVariant, publishObjects, rememberExisting, rememberOriginal, sha256, stableSiteImageUrl, transaction, withImageLock } from './ProductImageLifecycle.js';
 
 const mimeExtensions = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
@@ -310,6 +310,16 @@ export async function processProductImageRecord(imageId, db = pool, dependencies
         variants.push(await prepareVariant(session, storage, row, slot,
           slot.role === 'merchant-1500' ? processed.merchant.variant : processed.variants[slot.size]));
       }
+      // Once a changed site derivative is published, switch storefront links to a
+      // stable MAKA URL. Later edits keep that URL and resolve to the newest R2 key.
+      // Unchanged legacy links remain untouched; Merchant keeps a versioned URL.
+      const siteVariants = variants.slice(0, 4);
+      const currentStableUrl = stableSiteImageUrl(row.id, 'site-1500');
+      const useStableSiteUrls = Boolean(currentStableUrl) && (
+        siteVariants.some(item => !item.reused) || row.processed_url_1600 === currentStableUrl
+      );
+      const siteUrls = siteVariants.map(item => useStableSiteUrls
+        ? stableSiteImageUrl(row.id, item.role) : item.url);
       return await transaction(session, async () => {
         const current = await session.query('SELECT processing_request_id FROM product_images WHERE id=$1 FOR UPDATE', [id]);
         if (String(current.rows[0]?.processing_request_id) !== String(row.processing_request_id)) return { superseded: true };
@@ -322,7 +332,7 @@ export async function processProductImageRecord(imageId, db = pool, dependencies
           processing_version=$17,image_review_status=$18,image_review_reason=$19,
           processing_status='PROCESSED',display_mode='PROCESSED',processing_error=NULL,
           processed_at=CURRENT_TIMESTAMP,url=$2,storage_key=$6
-          WHERE id=$1`, [id, ...variants.slice(0,4).map(item => item.url),
+          WHERE id=$1`, [id, ...siteUrls,
           ...variants.slice(0,4).map(item => item.key),
           processed.metadata.originalWidth, processed.metadata.originalHeight,
           processed.metadata.processedWidth, processed.metadata.processedHeight,
