@@ -1,10 +1,44 @@
 import { Router } from 'express';
 import { pool } from '../config/db.js';
 import { createProductImageStorage } from '../services/ProductImageService.js';
-import { resolvePublishedImage } from '../services/ProductImageLifecycle.js';
+import { resolveCurrentPublishedImage, resolvePublishedImage, sha256 } from '../services/ProductImageLifecycle.js';
 
 export function createProductMediaRouter({ db = pool, storageFactory = createProductImageStorage } = {}) {
   const router = Router();
+  // Storefront URLs are stable; the R2 object behind them remains immutable.
+  // Must revalidate on every access so reprocessing cannot leave a stale cached image.
+  router.get('/:imageId/:role/current.webp', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const image = await resolveCurrentPublishedImage(db, req.params.imageId, req.params.role);
+      if (!image) return res.sendStatus(404);
+      if (Number(image.current_image_id) !== Number(req.params.imageId)) {
+        return res.set('Cache-Control', 'public, no-cache, must-revalidate')
+          .redirect(302, `/api/product-media/${image.current_image_id}/${req.params.role}/current.webp`);
+      }
+      const etag = `"${image.sha256}"`;
+      res.set({
+        'Content-Type': 'image/webp',
+        'Cache-Control': 'public, no-cache, must-revalidate',
+        'X-Content-Type-Options': 'nosniff',
+        ETag: etag,
+      });
+      if (req.fresh) return res.status(304).end();
+      const storage = storageFactory();
+      if (req.method === 'HEAD') {
+        const head = await storage.head(image.storage_key);
+        if (image.byte_size !== null && Number(head.ContentLength) !== Number(image.byte_size)) {
+          throw new Error('Stored image size mismatch');
+        }
+        return res.set('Content-Length', String(head.ContentLength)).end();
+      }
+      const body = await storage.read(image.storage_key);
+      if (sha256(body) !== image.sha256) throw new Error('Stored image checksum mismatch');
+      return res.send(body);
+    } catch {
+      return res.set('Cache-Control', 'no-store').set('Retry-After', '60').sendStatus(503);
+    }
+  });
   router.get('/:imageId/:role/:file', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const hash = /^([a-f0-9]{64})\.webp$/.exec(req.params.file)?.[1];
