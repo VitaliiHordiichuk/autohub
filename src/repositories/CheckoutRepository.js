@@ -18,21 +18,6 @@ export const CheckoutRepository = {
     return result.rows;
   },
 
-  async findActiveByCartId(cartId, db = pool) {
-    const sql = `
-      SELECT *
-      FROM checkout_sessions
-      WHERE cart_id = $1
-        AND status = 'ACTIVE'
-        AND expires_at > CURRENT_TIMESTAMP
-      LIMIT 1;
-    `;
-
-    const result = await db.query(sql, [cartId]);
-
-    return result.rows[0] ?? null;
-  },
-
   async cancelActiveForCart(cartId, db = pool) {
     const sql = `
       UPDATE checkout_sessions
@@ -50,7 +35,7 @@ export const CheckoutRepository = {
       cartId,
       userId = null,
       expiresAt,
-      inventoryModel = "LEGACY_RESERVATION",
+      inventoryModel = "COMMIT_ON_SUBMIT",
     },
     db = pool
   ) {

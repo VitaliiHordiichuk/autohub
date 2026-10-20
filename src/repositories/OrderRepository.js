@@ -7,7 +7,7 @@ export const OrderRepository = {
       createdBy = null,
       comment = null,
       totalAmount = 0,
-      inventoryModel = "LEGACY_RESERVATION",
+      inventoryModel = "COMMIT_ON_SUBMIT",
       fulfillmentType = "STOCK",
       checkoutSessionId = null,
     },

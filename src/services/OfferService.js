@@ -131,8 +131,6 @@ export const OFFER_AVAILABILITY = Object.freeze({
 export function resolveOfferAvailability(offer, sourceType = offer.source_type) {
   const quantity = formatQuantity(offer.quantity);
   const stockQuantity = formatQuantity(offer.stock_quantity ?? offer.quantity);
-  const reservedQuantity = formatQuantity(offer.reserved_quantity);
-  const ownReservedQuantity = formatQuantity(offer.own_reserved_quantity);
 
   if (offer.is_available !== true || offer.is_hidden === true || stockQuantity <= 0) {
     return OFFER_AVAILABILITY.UNAVAILABLE;
@@ -144,12 +142,8 @@ export function resolveOfferAvailability(offer, sourceType = offer.source_type) 
       : OFFER_AVAILABILITY.AVAILABLE;
   }
 
-  if (reservedQuantity >= stockQuantity) {
-    return ownReservedQuantity > 0
-      ? OFFER_AVAILABILITY.RESERVED_FOR_YOU
-      : OFFER_AVAILABILITY.RESERVED;
-  }
-
+  // Remaining order-linked deductions are completed sales, not five-minute
+  // cart holds. Never describe a sold-out offer as reserved for a shopper.
   return OFFER_AVAILABILITY.UNAVAILABLE;
 }
 
@@ -457,13 +451,9 @@ function isPublicOfferCandidate(offer) {
 }
 
 
-function isReservationBlockedOffer(offer) {
-  return [
-    OFFER_AVAILABILITY.RESERVED,
-    OFFER_AVAILABILITY.RESERVED_FOR_YOU,
-  ].includes(
-    offer?.availabilityStatus
-  );
+function isSoldOutOffer(offer) {
+  return offer?.availabilityStatus === OFFER_AVAILABILITY.UNAVAILABLE
+    && Number(offer?.retailPrice) > 0;
 }
 
 
@@ -479,13 +469,13 @@ function publicPriorityOffer(group) {
     )[0] || null;
   }
 
-  const reservedOffers =
+  const soldOutOffers =
     group.filter(
-      isReservationBlockedOffer
+      isSoldOutOffer
     );
 
   return applyWarehousePriorities(
-    reservedOffers
+    soldOutOffers
   )[0] || null;
 }
 
@@ -551,13 +541,13 @@ function applyPublicWarehousePriorities(
     return commercialOffers;
   }
 
-  const reservedOffer =
+  const soldOutOffer =
     result.find(
-      isReservationBlockedOffer
+      isSoldOutOffer
     );
 
-  return reservedOffer
-    ? [reservedOffer]
+  return soldOutOffer
+    ? [soldOutOffer]
     : [];
 }
 

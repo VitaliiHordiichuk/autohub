@@ -77,6 +77,12 @@ export const OrderCancellationService = {
           await OrderRepository.updateCommittedQuantity(item.id, 0, db);
           movements.push(movement);
         }
+        // Supplier commitments are order-linked availability deductions, not
+        // physical stock. Cancelling them restores saleability without adding
+        // units to a supplier's imported quantity.
+        cancelledReservations = await ReservationRepository.cancelByOrder(
+          numericOrderId, db
+        );
       } else {
         cancelledReservations = await ReservationRepository.cancelByOrder(
           numericOrderId, db

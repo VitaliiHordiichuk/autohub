@@ -35,18 +35,56 @@ async function adjustCommittedStock({
 }) {
   if (
     order.inventory_model !== "COMMIT_ON_SUBMIT" ||
-    item.fulfillment_type !== "STOCK" ||
     delta === 0
   ) return item;
+
+  if (item.fulfillment_type === "SUPPLIER_ORDER") {
+    // The supplier quantity is an imported snapshot, not our physical stock.
+    // Only the part sold since the latest import is excluded from availability.
+    const offer = await ProductRepository.findOfferByIdForUpdate(
+      item.product_offer_id, db
+    );
+    if (!offer) throw new Error("Предложение товара недоступно");
+    if (delta > 0) {
+      const committed = await ReservationRepository.getReservedQuantity(
+        item.product_offer_id, null, db
+      );
+      const available = Math.max(0, Number(offer.quantity) - committed);
+      if (!offer.isAvailable || delta > available) {
+        throw new Error(`Недостаточно товара. Доступно: ${available}`);
+      }
+      await ReservationRepository.createOrderReservation({
+        orderId: order.id,
+        productId: item.product_id,
+        productOfferId: item.product_offer_id,
+        quantity: delta,
+      }, db);
+    } else {
+      const current = await ReservationRepository.findByOrderAndOfferForUpdate(
+        order.id, item.product_offer_id, db
+      );
+      if (current) {
+        const remaining = Number(current.quantity) + delta;
+        if (remaining <= 0) {
+          await ReservationRepository.cancelByOrderItem(item.id, db);
+        } else {
+          await ReservationRepository.updateQuantity(current.id, remaining, db);
+        }
+      }
+    }
+    return item;
+  }
+
+  if (item.fulfillment_type !== "STOCK") return item;
 
   let updatedOffer;
   let type;
   if (delta > 0) {
-    const reserved = await ReservationRepository.getReservedQuantity(
-      item.product_offer_id, null, db
-    );
     const offer = await ProductRepository.findOfferByIdForUpdate(
       item.product_offer_id, db
+    );
+    const reserved = await ReservationRepository.getReservedQuantity(
+      item.product_offer_id, null, db
     );
     const available = Math.max(0, Number(offer?.quantity || 0) - reserved);
     if (!offer?.isAvailable || delta > available) {
@@ -402,7 +440,9 @@ async removeItem({
       await adjustCommittedStock({
         order,
         item,
-        delta: -Number(item.inventory_committed_quantity || 0),
+        delta: item.fulfillment_type === "STOCK"
+          ? -Number(item.inventory_committed_quantity || 0)
+          : -Number(item.quantity),
         changedBy,
         reason,
         db,
@@ -673,7 +713,7 @@ async addItem({
         item = await adjustCommittedStock({
           order,
           item,
-          delta: fulfillmentType === "STOCK" ? newQuantity : 0,
+          delta: newQuantity,
           changedBy,
           reason,
           db,

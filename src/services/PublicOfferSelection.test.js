@@ -155,7 +155,7 @@ test("selected return policy belongs to the eligible fallback offer", () => {
 });
 
 
-test("reserved offer remains informational only when no commercial offer exists", () => {
+test("sold-out offer remains informational only when no commercial offer exists", () => {
   const offers = presentPublicOffers([
     rawOffer(1, {
       quantity: 0,
@@ -169,7 +169,7 @@ test("reserved offer remains informational only when no commercial offer exists"
   assert.equal(offers[0].id, 1);
   assert.equal(
     offers[0].availabilityStatus,
-    OFFER_AVAILABILITY.RESERVED
+    OFFER_AVAILABILITY.UNAVAILABLE
   );
   assert.equal(
     selectPrimaryPublicOffer(offers),

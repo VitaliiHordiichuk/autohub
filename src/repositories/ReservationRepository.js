@@ -35,54 +35,6 @@ export const ReservationRepository = {
     return Number(result.rows[0].reserved_quantity);
   },
 
-  async upsertCartReservation(
-  {
-    cartId,
-    cartItemId,
-    checkoutSessionId,
-    productOfferId,
-    quantity,
-    reservedUntil,
-  },
-  db = pool
-) {
-  const sql = `
-    INSERT INTO stock_reservations (
-      cart_id,
-      cart_item_id,
-      checkout_session_id,
-      product_offer_id,
-      quantity,
-      status,
-      reserved_until
-    )
-    VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6)
-
-    ON CONFLICT (cart_item_id)
-    WHERE cart_item_id IS NOT NULL
-      AND status = 'ACTIVE'
-
-    DO UPDATE SET
-      checkout_session_id = EXCLUDED.checkout_session_id,
-      product_offer_id = EXCLUDED.product_offer_id,
-      quantity = EXCLUDED.quantity,
-      reserved_until = EXCLUDED.reserved_until
-
-    RETURNING *;
-  `;
-
-  const result = await db.query(sql, [
-    cartId,
-    cartItemId,
-    checkoutSessionId,
-    productOfferId,
-    quantity,
-    reservedUntil,
-  ]);
-
-  return result.rows[0];
-},
-
   async releaseByCartItemId(cartItemId, db = pool) {
     const sql = `
       UPDATE stock_reservations
@@ -102,7 +54,7 @@ export const ReservationRepository = {
     const sql = `
       UPDATE stock_reservations
       SET status = 'RELEASED', reserved_until = CURRENT_TIMESTAMP
-      WHERE cart_id = $1 AND status = 'ACTIVE'
+      WHERE cart_id = $1 AND status = 'ACTIVE' AND order_id IS NULL
       RETURNING *;
     `;
     const result = await db.query(sql, [cartId]);

@@ -935,7 +935,7 @@ async updateOfferStockFromImport(
             ELSE $2::numeric
         END AS new_quantity
       FROM locked
-    )
+    ), updated AS (
     UPDATE product_offers po
     SET quantity = c.new_quantity,
         purchase_price = $3::numeric,
@@ -948,7 +948,23 @@ async updateOfferStockFromImport(
         updated_at = CURRENT_TIMESTAMP
     FROM calculated c
     WHERE po.id = c.id
-    RETURNING po.*, c.purchase_price AS old_purchase_price;
+    RETURNING po.*, c.purchase_price AS old_purchase_price
+    ), released_fulfilled_supplier_sales AS (
+      UPDATE stock_reservations sr
+      SET status = 'RELEASED', reserved_until = CURRENT_TIMESTAMP
+      FROM orders o, updated u
+      WHERE sr.order_id = o.id
+        AND sr.product_offer_id = u.id
+        AND sr.status = 'ORDER_PENDING'
+        AND o.inventory_model = 'COMMIT_ON_SUBMIT'
+        AND o.fulfillment_type = 'SUPPLIER_ORDER'
+        AND o.status = 'COMPLETED'
+        AND $6::boolean = FALSE
+        AND $7::varchar = 'SUPPLIER'
+      RETURNING sr.id
+    )
+    SELECT u.* FROM updated u
+    CROSS JOIN (SELECT count(*) FROM released_fulfilled_supplier_sales) release_barrier;
   `, [
     offerId,
     importedQuantity,

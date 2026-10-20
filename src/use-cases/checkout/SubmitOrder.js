@@ -328,6 +328,8 @@ export const SubmitOrder = {
               comment:
                 orderComment,
               totalAmount,
+              // Only pre-release checkout sessions may reach this branch.
+              inventoryModel: "LEGACY_RESERVATION",
             },
             db
           );

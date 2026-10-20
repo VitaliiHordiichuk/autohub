@@ -9,10 +9,7 @@ import {
 } from "./CartAccessService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { ReturnPolicyService } from "./ReturnPolicyService.js";
-import {
-  OFFER_AVAILABILITY,
-  resolveOfferAvailability,
-} from "./OfferService.js";
+import { resolveOfferAvailability } from "./OfferService.js";
 import {
   canonicalOfferClassification,
 } from "./InventoryClassificationService.js";
@@ -113,14 +110,8 @@ export function presentCartItems(items, pricingContext) {
         item.is_available === true &&
         item.is_hidden !== true &&
         availableQuantity > 0,
-      availabilityStatus:
-        Number(item.own_reserved_quantity) > 0
-          ? OFFER_AVAILABILITY.RESERVED_FOR_YOU
-          : availabilityStatus,
-      reservationExpiresAt:
-        Number(item.own_reserved_quantity) > 0
-          ? item.own_reserved_until || null
-          : null,
+      availabilityStatus,
+      reservationExpiresAt: null,
       returnPolicy,
       isReturnable: ReturnPolicyService.isReturnable(returnPolicy),
       createdAt:

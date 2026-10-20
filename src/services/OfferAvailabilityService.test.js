@@ -27,25 +27,25 @@ function rawOffer(overrides = {}) {
   };
 }
 
-test("backend distinguishes another customer's reservation from supply-on-order", () => {
+test("sold-out stock is unavailable, not mislabeled as a cart reservation", () => {
   const [offer] = presentOffers([rawOffer()], null, "ru");
 
-  assert.equal(offer.availabilityStatus, OFFER_AVAILABILITY.RESERVED);
-  assert.equal(offer.availabilityText, "В резерве");
+  assert.equal(offer.availabilityStatus, OFFER_AVAILABILITY.UNAVAILABLE);
+  assert.equal(offer.availabilityText, "Нет предложений");
   assert.equal(offer.isAvailable, false);
   assert.equal(offer.reservationExpiresAt, null);
 });
 
-test("backend exposes only the current customer's reservation expiry", () => {
+test("legacy checkout hold does not expose a misleading reserved-for-you status", () => {
   const expiresAt = new Date(Date.now() + 120_000).toISOString();
   const [offer] = presentOffers([
     rawOffer({ own_reserved_quantity: 1, own_reserved_until: expiresAt }),
   ], null, "en");
 
-  assert.equal(offer.availabilityStatus, OFFER_AVAILABILITY.RESERVED_FOR_YOU);
-  assert.equal(offer.availabilityText, "Reserved for you");
+  assert.equal(offer.availabilityStatus, OFFER_AVAILABILITY.UNAVAILABLE);
+  assert.equal(offer.availabilityText, "No offers");
   assert.equal(offer.isAvailable, false);
-  assert.equal(offer.reservationExpiresAt, expiresAt);
+  assert.equal(offer.reservationExpiresAt, null);
 });
 
 test("supplier availability remains the explicit on-order scenario", () => {
@@ -75,7 +75,7 @@ test("expired reservations return to regular availability without a stock update
   );
 });
 
-test("cart marks an active checkout hold as reserved for its owner", () => {
+test("cart never marks an offer as reserved for its owner", () => {
   const [item] = presentCartItems([{
     id: 1,
     product_offer_id: 10,
@@ -96,8 +96,8 @@ test("cart marks an active checkout hold as reserved for its owner", () => {
     is_hidden: false,
   }], null);
 
-  assert.equal(item.availabilityStatus, OFFER_AVAILABILITY.RESERVED_FOR_YOU);
-  assert.equal(item.reservationExpiresAt, "2026-10-01T12:05:00.000Z");
+  assert.equal(item.availabilityStatus, OFFER_AVAILABILITY.UNAVAILABLE);
+  assert.equal(item.reservationExpiresAt, null);
   assert.equal(item.availableQuantity, 1);
   assert.equal(item.isAvailable, true);
 });

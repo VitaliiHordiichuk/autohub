@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 
 import { pool } from "../src/config/db.js";
 import { CartRepository } from "../src/repositories/CartRepository.js";
+import { CheckoutRepository } from "../src/repositories/CheckoutRepository.js";
+import { OrderRepository } from "../src/repositories/OrderRepository.js";
 import { ProductRepository } from "../src/repositories/ProductRepository.js";
+import { ReservationRepository } from "../src/repositories/ReservationRepository.js";
 import { CartAccessService } from "../src/services/CartAccessService.js";
 import { CartService } from "../src/services/CartService.js";
 import { CheckoutService } from "../src/services/CheckoutService.js";
@@ -11,11 +14,11 @@ import { OrderCancellationService } from "../src/services/OrderCancellationServi
 import { OrderCompletionService } from "../src/services/OrderCompletionService.js";
 import { OrderConfirmationService } from "../src/services/OrderConfirmationService.js";
 import { OrderEditingService } from "../src/services/OrderEditingService.js";
+import { OfferService } from "../src/services/OfferService.js";
+import { ImportService } from "../src/services/ImportService.js";
+import { WarehouseImportProfileService } from "../src/services/WarehouseImportProfileService.js";
 import { canonicalOfferClassification } from "../src/services/InventoryClassificationService.js";
 import { SubmitOrder } from "../src/use-cases/checkout/SubmitOrder.js";
-
-const previousFlag = process.env.CHECKOUT_COMMIT_ON_SUBMIT_ENABLED;
-process.env.CHECKOUT_COMMIT_ON_SUBMIT_ENABLED = "true";
 
 const tracked = {
   carts: [],
@@ -26,6 +29,9 @@ const tracked = {
   suppliers: [],
   customers: [],
   users: [],
+  brands: [],
+  warehouseSupplierImports: [],
+  supplierImportSettings: [],
 };
 
 function suffix() {
@@ -154,9 +160,18 @@ async function offerQuantity(offerId) {
   return Number(result.rows[0].quantity);
 }
 
+async function importSupplierQuantity(offerId, quantity) {
+  await ProductRepository.updateOfferStockFromImport(offerId, {
+    importedQuantity: quantity,
+    purchasePrice: 80,
+    retailPrice: 120,
+    minimumSalePrice: 100,
+    preserveCommittedSales: false,
+    sourceType: "SUPPLIER",
+  }, pool);
+}
+
 after(async () => {
-  if (previousFlag === undefined) delete process.env.CHECKOUT_COMMIT_ON_SUBMIT_ENABLED;
-  else process.env.CHECKOUT_COMMIT_ON_SUBMIT_ENABLED = previousFlag;
   try {
     if (tracked.orders.length) {
       await pool.query("DELETE FROM user_notifications WHERE order_id=ANY($1::int[])", [tracked.orders]);
@@ -175,12 +190,22 @@ after(async () => {
       await pool.query("DELETE FROM cart_items WHERE cart_id=ANY($1::int[])", [tracked.carts]);
       await pool.query("DELETE FROM carts WHERE id=ANY($1::int[])", [tracked.carts]);
     }
+    if (tracked.warehouses.length) {
+      await pool.query("DELETE FROM imports WHERE warehouse_id=ANY($1::int[])", [tracked.warehouses]);
+    }
     if (tracked.offers.length) await pool.query("DELETE FROM product_offers WHERE id=ANY($1::int[])", [tracked.offers]);
     if (tracked.products.length) await pool.query("DELETE FROM products WHERE id=ANY($1::int[])", [tracked.products]);
+    if (tracked.warehouseSupplierImports.length) {
+      await pool.query("DELETE FROM warehouse_supplier_imports WHERE id=ANY($1::int[])", [tracked.warehouseSupplierImports]);
+    }
+    if (tracked.supplierImportSettings.length) {
+      await pool.query("DELETE FROM supplier_import_settings WHERE id=ANY($1::int[])", [tracked.supplierImportSettings]);
+    }
     if (tracked.warehouses.length) await pool.query("DELETE FROM warehouses WHERE id=ANY($1::int[])", [tracked.warehouses]);
     if (tracked.suppliers.length) await pool.query("DELETE FROM suppliers WHERE id=ANY($1::int[])", [tracked.suppliers]);
     if (tracked.customers.length) await pool.query("DELETE FROM customers WHERE id=ANY($1::int[])", [tracked.customers]);
     if (tracked.users.length) await pool.query("DELETE FROM users WHERE id=ANY($1::int[])", [tracked.users]);
+    if (tracked.brands.length) await pool.query("DELETE FROM brands WHERE id=ANY($1::int[])", [tracked.brands]);
   } finally {
     await pool.end();
   }
@@ -226,6 +251,58 @@ test("cart and checkout intent never reserve or change physical stock", async ()
   assert.equal(intent.rows[0].count, 1);
 });
 
+test("opening a new checkout releases an old five-minute cart hold", async () => {
+  const offer = await fixtureOffer({ quantity: 1 });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const legacy = await CheckoutRepository.createSession({
+    cartId: cart.cartId,
+    expiresAt: new Date(Date.now() + 300_000),
+    inventoryModel: "LEGACY_RESERVATION",
+  });
+  const hold = await pool.query(`
+    INSERT INTO stock_reservations (
+      cart_id, cart_item_id, checkout_session_id, product_offer_id,
+      quantity, status, reserved_until
+    ) VALUES ($1,$2,$3,$4,1,'ACTIVE',CURRENT_TIMESTAMP + INTERVAL '5 minutes')
+    RETURNING id
+  `, [cart.cartId, cart.items[0].id, legacy.id, offer.offerId]);
+  const current = await start(cart);
+  assert.equal(current.checkoutSession.inventory_model, "COMMIT_ON_SUBMIT");
+  assert.equal(current.reservations.length, 0);
+  const old = await pool.query(
+    "SELECT status FROM checkout_sessions WHERE id=$1", [legacy.id]
+  );
+  const oldHold = await pool.query(
+    "SELECT status FROM stock_reservations WHERE id=$1", [hold.rows[0].id]
+  );
+  assert.equal(old.rows[0].status, "CANCELLED");
+  assert.equal(oldHold.rows[0].status, "RELEASED");
+  assert.equal(await offerQuantity(offer.offerId), 1);
+});
+
+test("an already-open legacy checkout can still submit its existing hold", async () => {
+  const offer = await fixtureOffer({ quantity: 1 });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const legacy = await CheckoutRepository.createSession({
+    cartId: cart.cartId,
+    expiresAt: new Date(Date.now() + 300_000),
+    inventoryModel: "LEGACY_RESERVATION",
+  });
+  await pool.query(`
+    INSERT INTO stock_reservations (
+      cart_id, cart_item_id, checkout_session_id, product_offer_id,
+      quantity, status, reserved_until
+    ) VALUES ($1,$2,$3,$4,1,'ACTIVE',CURRENT_TIMESTAMP + INTERVAL '5 minutes')
+  `, [cart.cartId, cart.items[0].id, legacy.id, offer.offerId]);
+  const submitted = await submit(cart, legacy.id, `old-session-${suffix()}`);
+  assert.equal(submitted.order.inventory_model, "LEGACY_RESERVATION");
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  const linked = await pool.query(
+    "SELECT status FROM stock_reservations WHERE order_id=$1", [submitted.order.id]
+  );
+  assert.equal(linked.rows[0].status, "ORDER_PENDING");
+});
+
 test("authenticated carts use the same non-reserving checkout model", async () => {
   const offer = await fixtureOffer({ quantity: 2 });
   const cart = await accountCart([{ offerId: offer.offerId }]);
@@ -269,6 +346,256 @@ test("two concurrent buyers of the last unit create exactly one committed order"
     [[firstCheckout.checkoutSession.id, secondCheckout.checkoutSession.id]]
   );
   assert.equal(orders.rows[0].count, 1);
+});
+
+test("two concurrent supplier checkouts cannot sell the same last imported unit", async () => {
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const firstCart = await guestCart([{ offerId: offer.offerId }]);
+  const secondCart = await guestCart([{ offerId: offer.offerId }]);
+  const [firstCheckout, secondCheckout] = await Promise.all([start(firstCart), start(secondCart)]);
+  const results = await Promise.allSettled([
+    submit(firstCart, firstCheckout.checkoutSession.id, `supplier-a-${suffix()}`),
+    submit(secondCart, secondCheckout.checkoutSession.id, `supplier-b-${suffix()}`),
+  ]);
+  assert.equal(results.filter((entry) => entry.status === "fulfilled").length, 1);
+  const failure = results.find((entry) => entry.status === "rejected")?.reason;
+  assert.equal(failure?.code, "SUPPLIER_UNAVAILABLE");
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  const [publicOffer] = await OfferService.getOffersByProductId(offer.productId, null, "uk");
+  assert.equal(publicOffer.quantity, 0);
+  assert.equal(publicOffer.availabilityStatus, "UNAVAILABLE");
+});
+
+test("supplier cancellation restores saleability once without inflating imported stock", async () => {
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const order = await submit(cart, checkout.checkoutSession.id, `supplier-cancel-${suffix()}`);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderCancellationService.cancelOrder({ orderId: order.order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  await assert.rejects(
+    OrderCancellationService.cancelOrder({ orderId: order.order.id }),
+    /отменить нельзя/
+  );
+  assert.equal(await offerQuantity(offer.offerId), 1);
+});
+
+test("repeated supplier imports keep an unfinished sale unavailable until cancellation", async () => {
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const order = await submit(cart, checkout.checkoutSession.id, `supplier-import-${suffix()}`);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await importSupplierQuantity(offer.offerId, 1);
+  await importSupplierQuantity(offer.offerId, 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  const [unavailable] = await OfferService.getOffersByProductId(offer.productId, null, "uk");
+  assert.equal(unavailable.quantity, 0);
+  assert.equal(unavailable.availabilityStatus, "UNAVAILABLE");
+
+  const secondCart = await guestCart([{ offerId: offer.offerId }]);
+  const secondCheckout = await start(secondCart);
+  await assert.rejects(
+    submit(secondCart, secondCheckout.checkoutSession.id, `supplier-second-${suffix()}`),
+    (error) => error.code === "SUPPLIER_UNAVAILABLE"
+  );
+
+  await OrderCancellationService.cancelOrder({ orderId: order.order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  const [available] = await OfferService.getOffersByProductId(offer.productId, null, "uk");
+  assert.equal(available.quantity, 1);
+  assert.equal(available.availabilityStatus, "ON_ORDER");
+  const nextCheckout = await start(secondCart);
+  await submit(secondCart, nextCheckout.checkoutSession.id, `supplier-after-cancel-${suffix()}`);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+});
+
+test("a full supplier price import cannot resell a unit from an unfinished order", async () => {
+  const brand = await pool.query(
+    "INSERT INTO brands(name,is_active) VALUES($1,TRUE) RETURNING id",
+    [`Commit import brand ${suffix()}`]
+  );
+  const brandId = Number(brand.rows[0].id);
+  tracked.brands.push(brandId);
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const article = offer.article.toUpperCase();
+  await pool.query(
+    "UPDATE products SET brand_id=$2,article=$3,article_normalized=$3 WHERE id=$1",
+    [offer.productId, brandId, article]
+  );
+  const { profile } = await WarehouseImportProfileService.saveProfile(offer.warehouseId, {
+    fileType: "CSV",
+    brandMode: "FIXED",
+    fixedBrandId: brandId,
+    articleColumn: 1,
+    nameColumn: 2,
+    priceColumn: 3,
+    quantityColumn: 4,
+    startRow: 1,
+    isActive: true,
+    emailAutoImportEnabled: false,
+    newProductsMode: "AUTO",
+  });
+  tracked.warehouseSupplierImports.push(Number(profile.id));
+  tracked.supplierImportSettings.push(Number(profile.supplierImportSettingsId));
+  const context = {
+    warehouseId: offer.warehouseId,
+    warehouseSupplierImportId: Number(profile.id),
+    fileName: "supplier-stock-one.csv",
+    fileType: "CSV",
+    importMethod: "MANUAL",
+  };
+  const row = { article, name: `Commit product ${article}`, price: 80, quantity: 1 };
+  const firstImport = await ImportService.importRows(context, [row]);
+  assert.equal(firstImport.successRows, 1);
+  assert.equal(firstImport.replacementApplied, true);
+
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const order = await submit(cart, checkout.checkoutSession.id, `full-import-${suffix()}`);
+  const secondImport = await ImportService.importRows(context, [row]);
+  assert.equal(secondImport.successRows, 1);
+  assert.equal(secondImport.replacementApplied, true);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  const [soldOut] = await OfferService.getOffersByProductId(offer.productId, null, "uk");
+  assert.equal(soldOut.quantity, 0);
+
+  await OrderCancellationService.cancelOrder({ orderId: order.order.id });
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  const [available] = await OfferService.getOffersByProductId(offer.productId, null, "uk");
+  assert.equal(available.quantity, 1);
+});
+
+test("supplier cancellation uses the latest imported snapshot without adding units", async () => {
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const order = await submit(cart, checkout.checkoutSession.id, `supplier-latest-${suffix()}`);
+  await importSupplierQuantity(offer.offerId, 0);
+  assert.equal(await offerQuantity(offer.offerId), 0);
+  await OrderCancellationService.cancelOrder({ orderId: order.order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  assert.equal(await offerQuantity(offer.offerId), 0);
+  assert.deepEqual(await OfferService.getOffersByProductId(offer.productId, null, "uk"), []);
+  await assert.rejects(
+    OrderCancellationService.cancelOrder({ orderId: order.order.id }),
+    /отменить нельзя/
+  );
+  assert.equal(await offerQuantity(offer.offerId), 0);
+});
+
+test("first supplier import after order completion releases the sale deduction", async () => {
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const order = await submit(cart, checkout.checkoutSession.id, `supplier-complete-${suffix()}`);
+  await OrderConfirmationService.confirmOrder({ orderId: order.order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderCompletionService.completeOrder({ orderId: order.order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await importSupplierQuantity(offer.offerId, 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+  await importSupplierQuantity(offer.offerId, 1);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+});
+
+test("editing a supplier order adjusts only its completed-sale deduction", async () => {
+  const offer = await fixtureOffer({ quantity: 3, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const result = await submit(cart, checkout.checkoutSession.id, `supplier-edit-${suffix()}`);
+  const orderId = Number(result.order.id);
+  const orderItemId = Number(result.orderItems[0].id);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderEditingService.changeQuantity({ orderId, orderItemId, quantity: 2 });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 2);
+  await OrderEditingService.changeQuantity({ orderId, orderItemId, quantity: 1 });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderEditingService.removeItem({ orderId, orderItemId });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  await OrderEditingService.restoreItem({ orderId, orderItemId });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  assert.equal(await offerQuantity(offer.offerId), 3);
+  const addedOffer = await fixtureOffer({
+    quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER",
+  });
+  const added = await OrderEditingService.addItem({
+    orderId,
+    productId: addedOffer.productId,
+    productOfferId: addedOffer.offerId,
+    quantity: 1,
+  });
+  assert.equal(await ReservationRepository.getReservedQuantity(addedOffer.offerId), 1);
+  await OrderEditingService.removeItem({ orderId, orderItemId: added.item.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(addedOffer.offerId), 0);
+  assert.equal(await offerQuantity(addedOffer.offerId), 1);
+});
+
+test("an existing legacy order still confirms and cancels through its historical ledger", async () => {
+  const offer = await fixtureOffer({ quantity: 1 });
+  const order = await OrderRepository.createOrder({
+    totalAmount: 120,
+    inventoryModel: "LEGACY_RESERVATION",
+  });
+  tracked.orders.push(Number(order.id));
+  await OrderRepository.addOrderItem({
+    orderId: order.id,
+    productId: offer.productId,
+    productOfferId: offer.offerId,
+    quantity: 1,
+    priceAtPurchase: 120,
+  });
+  await ReservationRepository.createOrderReservation({
+    orderId: order.id,
+    productId: offer.productId,
+    productOfferId: offer.offerId,
+    quantity: 1,
+  });
+  await OrderConfirmationService.confirmOrder({ orderId: order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderCancellationService.cancelOrder({ orderId: order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  assert.equal(await offerQuantity(offer.offerId), 1);
+});
+
+test("supplier imports do not release historical legacy-order deductions", async () => {
+  const offer = await fixtureOffer({ quantity: 1, sourceType: "SUPPLIER", supplierType: "PARTNER" });
+  const order = await OrderRepository.createOrder({
+    totalAmount: 120,
+    inventoryModel: "LEGACY_RESERVATION",
+    fulfillmentType: "SUPPLIER_ORDER",
+  });
+  tracked.orders.push(Number(order.id));
+  await OrderRepository.addOrderItem({
+    orderId: order.id,
+    productId: offer.productId,
+    productOfferId: offer.offerId,
+    quantity: 1,
+    priceAtPurchase: 120,
+  });
+  await ReservationRepository.createOrderReservation({
+    orderId: order.id,
+    productId: offer.productId,
+    productOfferId: offer.offerId,
+    quantity: 1,
+  });
+  await importSupplierQuantity(offer.offerId, 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderConfirmationService.confirmOrder({ orderId: order.id });
+  await importSupplierQuantity(offer.offerId, 1);
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 1);
+  await OrderCancellationService.cancelOrder({ orderId: order.id });
+  assert.equal(await ReservationRepository.getReservedQuantity(offer.offerId), 0);
+  assert.equal(await offerQuantity(offer.offerId), 1);
 });
 
 test("idempotent replay returns the original order and never decrements twice", async () => {
@@ -409,7 +736,10 @@ test("repeating an own-stock import preserves sales while a real receipt increas
     "UPDATE product_offers SET last_import_quantity=1,last_import_at=CURRENT_TIMESTAMP WHERE id=$1",
     [offer.offerId]
   );
-  await ProductRepository.decreaseQuantityForSale(offer.offerId, 1, pool);
+  const cart = await guestCart([{ offerId: offer.offerId }]);
+  const checkout = await start(cart);
+  const order = await submit(cart, checkout.checkoutSession.id, `own-import-${suffix()}`);
+  assert.equal(await offerQuantity(offer.offerId), 0);
   await ProductRepository.updateOfferStockFromImport(offer.offerId, {
     importedQuantity: 1,
     purchasePrice: 80,
@@ -426,4 +756,11 @@ test("repeating an own-stock import preserves sales while a real receipt increas
     preserveCommittedSales: true,
   }, pool);
   assert.equal(await offerQuantity(offer.offerId), 1);
+  await OrderCancellationService.cancelOrder({ orderId: order.order.id });
+  assert.equal(await offerQuantity(offer.offerId), 2);
+  await assert.rejects(
+    OrderCancellationService.cancelOrder({ orderId: order.order.id }),
+    /отменить нельзя/
+  );
+  assert.equal(await offerQuantity(offer.offerId), 2);
 });

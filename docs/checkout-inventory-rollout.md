@@ -1,8 +1,8 @@
 # Checkout inventory rollout
 
 Migration `105_add_commit_on_submit_checkout.sql` is additive. It does not
-delete reservations or rewrite existing orders. The new path is disabled
-unless `CHECKOUT_COMMIT_ON_SUBMIT_ENABLED=true` is set on the backend.
+delete reservations or rewrite existing orders. All newly opened checkout
+sessions now use `COMMIT_ON_SUBMIT`; no feature flag is required.
 
 ## Production preflight (read only)
 
@@ -66,22 +66,29 @@ updated row counts before committing.
    separate schema-only backup. Record application revisions and environment.
 2. Apply migration 105 with the schema-owner role. Apply it a second time in
    staging to verify idempotency.
-3. Deploy the dual-model backend with the feature flag absent/false.
+3. Deploy the dual-model backend to all instances. New sessions never create
+   five-minute cart reservations.
 4. Deploy the compatible frontend. It understands both legacy timed checkout
    and commit-on-submit responses.
-5. Run legacy checkout, order confirmation, completion, cancellation and
-   import smoke tests while the flag remains off.
+5. Run legacy-order confirmation, completion and cancellation smoke tests.
 6. Run the read-only source audit. Repair only individually approved rows.
-7. Enable `CHECKOUT_COMMIT_ON_SUBMIT_ENABLED=true` on one backend instance,
-   restart it and run guest, account, stock, supplier and mixed-cart smoke
-   tests. Confirm `ORDER_COMMIT` movements and the absence of cart holds.
-8. Enable the remaining instances only after the first instance is verified.
+7. Run guest, account, stock, supplier and mixed-cart smoke tests. Confirm
+   `ORDER_COMMIT` movements and the absence of new cart holds. Check the
+   supplier sale deduction across repeated imports while the order is open.
+   Verify release only on the first import after completion.
+8. Let already-opened legacy checkout sessions finish or expire within five
+   minutes. Opening a fresh checkout on the same cart releases its old hold.
 9. Monitor order counts, idempotency conflicts, checkout conflict codes,
    negative quantities, movement uniqueness and import deltas.
 
 ## Import model
 
-Supplier offers remain external snapshots and are replaced absolutely. Own
+Supplier offers remain external snapshots and are replaced absolutely. A
+submitted supplier order creates an order-linked availability deduction, not
+a timed checkout hold. Repeated imports keep that deduction until the order
+is completed; the first subsequent import releases it atomically with the new
+snapshot. Cancelling an unfinished order removes the deduction without
+increasing the supplier quantity. Own
 stock imports keep `last_import_quantity` and apply only the change from the
 previous imported snapshot to the current sellable quantity. Therefore a
 repeated file cannot restore a unit committed by an order, while a higher
@@ -90,17 +97,16 @@ Manager quantity changes remain deliberate physical adjustments.
 
 ## Rollback
 
-Turning the flag off is the normal rollback for new checkout sessions. A
-session already created as `COMMIT_ON_SUBMIT` continues through the new path,
-because dispatch is based on its persisted inventory model. Existing new-model
-orders also continue through the dual confirmation/completion/cancellation
-services.
+There is no runtime flag to restore the old checkout mechanism. A session
+already created as `COMMIT_ON_SUBMIT` continues through that path because
+dispatch is based on its persisted inventory model. Existing new-model orders
+also continue through the dual confirmation/completion/cancellation services.
 
 Do not roll the backend binary back to a revision that predates the dual-model
 branches after any `COMMIT_ON_SUBMIT` order exists. That binary expects a
 reservation and cannot safely process the new order. For an application
-incident, keep or restore the dual-model backend, disable the flag and roll
-back only the frontend if needed. A database restore is a disaster-recovery
+incident, keep or restore the dual-model backend and roll back only the
+frontend if needed. A database restore is a disaster-recovery
 operation, not a normal deploy rollback, because it would also discard valid
 orders placed after the backup.
 

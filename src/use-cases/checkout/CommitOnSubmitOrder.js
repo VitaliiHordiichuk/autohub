@@ -232,20 +232,18 @@ export const CommitOnSubmitOrder = {
         const generallyAvailable = offer.is_available === true &&
           offer.is_hidden !== true && offer.warehouse_active !== false &&
           offer.supplier_active !== false;
-        if (currentFulfillment === FULFILLMENT_TYPE.STOCK) {
-          const legacyReserved = await ReservationRepository.getReservedQuantity(
-            item.product_offer_id, null, db
-          );
-          const availableQuantity = Math.max(0, Number(offer.quantity) - legacyReserved);
-          if (!generallyAvailable || Number(item.quantity) > availableQuantity) {
-            issues.push({ ...base, code: "STOCK_CHANGED", availableQuantity });
-            continue;
-          }
-        } else if (!generallyAvailable || Number(item.quantity) > Number(offer.quantity)) {
+        // Existing order-linked rows still protect historical orders. Supplier
+        // orders committed since the latest price import use the same ledger.
+        const committedQuantity = await ReservationRepository.getReservedQuantity(
+          item.product_offer_id, null, db
+        );
+        const availableQuantity = Math.max(0, Number(offer.quantity) - committedQuantity);
+        if (!generallyAvailable || Number(item.quantity) > availableQuantity) {
           issues.push({
             ...base,
-            code: "SUPPLIER_UNAVAILABLE",
-            availableQuantity: Math.max(0, Number(offer.quantity || 0)),
+            code: currentFulfillment === FULFILLMENT_TYPE.STOCK
+              ? "STOCK_CHANGED" : "SUPPLIER_UNAVAILABLE",
+            availableQuantity,
           });
           continue;
         }
@@ -345,6 +343,16 @@ export const CommitOnSubmitOrder = {
             orderItem = await OrderRepository.updateCommittedQuantity(
               orderItem.id, item.quantity, db
             );
+          } else {
+            // A supplier offer is an external snapshot. Keep this order-linked
+            // deduction across imports until completion or cancellation, without
+            // changing the supplier's reported physical quantity.
+            await ReservationRepository.createOrderReservation({
+              orderId: order.id,
+              productId: item.offer.product_id,
+              productOfferId: item.productOfferId,
+              quantity: item.quantity,
+            }, db);
           }
           orderItems.push(orderItem);
         }

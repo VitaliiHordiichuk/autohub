@@ -201,7 +201,7 @@ test("product_offers row lock serializes two PostgreSQL transactions", async () 
   }
 });
 
-test("ordinary checkout passes lockAndValidateItems for an available offer", async () => {
+test("ordinary checkout records intent without reserving an available offer", async () => {
   const warehouseId = await createWarehouse();
   const { offerId } = await createOffer({ warehouseId, quantity: 2 });
   const cart = await createGuestCart([{ offerId }]);
@@ -213,12 +213,13 @@ test("ordinary checkout passes lockAndValidateItems for an available offer", asy
   });
 
   assert.equal(result.checkoutSession.status, "ACTIVE");
-  assert.equal(result.reservations.length, 1);
-  assert.equal(Number(result.reservations[0].product_offer_id), offerId);
-  assert.equal(Number(result.reservations[0].quantity), 1);
+  assert.equal(result.checkoutSession.inventory_model, "COMMIT_ON_SUBMIT");
+  assert.equal(result.reservations.length, 0);
+  const offer = await pool.query("SELECT quantity FROM product_offers WHERE id=$1", [offerId]);
+  assert.equal(Number(offer.rows[0].quantity), 2);
 });
 
-test("two concurrent checkouts cannot both reserve the only unit", async () => {
+test("two concurrent checkouts can start for the last unit without a hold", async () => {
   const warehouseId = await createWarehouse();
   const { offerId } = await createOffer({ warehouseId, quantity: 1 });
   const firstCart = await createGuestCart([{ offerId }]);
@@ -235,12 +236,7 @@ test("two concurrent checkouts cannot both reserve the only unit", async () => {
     }),
   ]);
 
-  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
-  assert.match(
-    results.find((result) => result.status === "rejected").reason.message,
-    /Недостатньо товару/
-  );
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
 
   const reservations = await pool.query(`
     SELECT COUNT(*)::integer AS count, COALESCE(SUM(quantity), 0)::numeric AS quantity
@@ -250,19 +246,14 @@ test("two concurrent checkouts cannot both reserve the only unit", async () => {
       AND reserved_until > CURRENT_TIMESTAMP;
   `, [offerId]);
 
-  assert.equal(reservations.rows[0].count, 1);
-  assert.equal(Number(reservations.rows[0].quantity), 1);
+  assert.equal(reservations.rows[0].count, 0);
+  assert.equal(Number(reservations.rows[0].quantity), 0);
 });
 
-test("failure on the second checkout item rolls back the existing session changes", async () => {
+test("invalid checkout item selection preserves the existing session", async () => {
   const warehouseId = await createWarehouse();
   const available = await createOffer({ warehouseId, quantity: 2 });
-  const unavailable = await createOffer({ warehouseId, quantity: 0, isAvailable: false });
-  assert.ok(available.offerId < unavailable.offerId);
-  const cart = await createGuestCart([
-    { offerId: available.offerId },
-    { offerId: unavailable.offerId },
-  ]);
+  const cart = await createGuestCart([{ offerId: available.offerId }]);
 
   const initial = await CheckoutService.start({
     cartId: cart.cartId,
@@ -273,27 +264,21 @@ test("failure on the second checkout item rolls back the existing session change
   await assert.rejects(
     CheckoutService.start({
       cartId: cart.cartId,
-      itemIds: cart.items.map((item) => Number(item.id)),
+      itemIds: [Number(cart.items[0].id), 999999999],
       guestToken: cart.guestToken,
     }),
-    /зараз недоступний/
+    /не знайдено/
   );
 
   const session = await pool.query(
     "SELECT status FROM checkout_sessions WHERE id = $1",
     [initial.checkoutSession.id]
   );
-  const reservation = await pool.query(
-    "SELECT status, quantity FROM stock_reservations WHERE id = $1",
-    [initial.reservations[0].id]
-  );
-
   assert.equal(session.rows[0].status, "ACTIVE");
-  assert.equal(reservation.rows[0].status, "ACTIVE");
-  assert.equal(Number(reservation.rows[0].quantity), 1);
+  assert.equal(initial.reservations.length, 0);
 });
 
-test("cart quantity change invalidates old checkout and recreates reservation with the new quantity", async () => {
+test("cart quantity change invalidates checkout intent without creating a hold", async () => {
   const warehouseId = await createWarehouse();
   const { offerId } = await createOffer({
     warehouseId,
@@ -316,10 +301,7 @@ test("cart quantity change invalidates old checkout and recreates reservation wi
       guestToken: cart.guestToken,
     });
 
-  assert.equal(
-    Number(initial.reservations[0].quantity),
-    1
-  );
+  assert.equal(initial.reservations.length, 0);
 
   const updatedCart =
     await CartService.updateItemQuantity({
@@ -343,28 +325,9 @@ test("cart quantity change invalidates old checkout and recreates reservation wi
     [initial.checkoutSession.id]
   );
 
-  const oldReservation = await pool.query(
-    `
-      SELECT status, quantity
-      FROM stock_reservations
-      WHERE id = $1;
-    `,
-    [initial.reservations[0].id]
-  );
-
   assert.equal(
     oldSession.rows[0].status,
     "CANCELLED"
-  );
-
-  assert.equal(
-    oldReservation.rows[0].status,
-    "RELEASED"
-  );
-
-  assert.equal(
-    Number(oldReservation.rows[0].quantity),
-    1
   );
 
   await assert.rejects(
@@ -373,8 +336,9 @@ test("cart quantity change invalidates old checkout and recreates reservation wi
         initial.checkoutSession.id,
       guestToken:
         cart.guestToken,
+      idempotencyKey: `invalidated-${uniqueSuffix()}`,
     }),
-    /Сесію оформлення не знайдено або строк резерву минув/
+    /Оформлення більше не активне/
   );
 
   const restarted =
@@ -390,23 +354,7 @@ test("cart quantity change invalidates old checkout and recreates reservation wi
 
   assert.equal(
     restarted.reservations.length,
-    1
-  );
-
-  assert.equal(
-    Number(
-      restarted.reservations[0]
-        .product_offer_id
-    ),
-    offerId
-  );
-
-  assert.equal(
-    Number(
-      restarted.reservations[0]
-        .quantity
-    ),
-    2
+    0
   );
 
   const activeReservations =
@@ -425,7 +373,7 @@ test("cart quantity change invalidates old checkout and recreates reservation wi
 
   assert.equal(
     activeReservations.rows[0].count,
-    1
+    0
   );
 
   assert.equal(
@@ -433,14 +381,17 @@ test("cart quantity change invalidates old checkout and recreates reservation wi
       activeReservations.rows[0]
         .quantity
     ),
-    2
+    0
   );
 });
 
 test("OrderEditingService addItem and changeQuantity use the scoped offer lock", async () => {
   const warehouseId = await createWarehouse();
   const { productId, offerId } = await createOffer({ warehouseId, quantity: 5 });
-  const order = await OrderRepository.createOrder({ comment: "A01 order editing fixture" });
+  const order = await OrderRepository.createOrder({
+    comment: "A01 order editing fixture",
+    inventoryModel: "LEGACY_RESERVATION",
+  });
   tracked.orders.push(Number(order.id));
 
   const added = await OrderEditingService.addItem({

@@ -55,3 +55,16 @@ test("attaching reservation to order removes checkout expiration", async () => {
   assert.match(executedSql, /status = 'ORDER_PENDING'/);
   assert.match(executedSql, /reserved_until = NULL/);
 });
+
+test("releasing an old cart hold cannot release an order-linked sale", async () => {
+  let executedSql = "";
+  const db = {
+    async query(sql) {
+      executedSql = sql;
+      return { rows: [] };
+    },
+  };
+
+  await ReservationRepository.releaseActiveByCartId(5, db);
+  assert.match(executedSql, /status = 'ACTIVE' AND order_id IS NULL/);
+});

@@ -21,14 +21,6 @@ export function isCustomerTaxonomyPublicEnabled(
   );
 }
 
-export function isCommitOnSubmitCheckoutEnabled(
-  env = process.env
-) {
-  return isExplicitlyEnabled(
-    env.CHECKOUT_COMMIT_ON_SUBMIT_ENABLED
-  );
-}
-
 function isExplicitlyEnabled(value) {
   return ENABLED_VALUES.has(
     String(value ?? "")
