@@ -553,6 +553,11 @@ function mapPublicOffer(
     sourceType:
       offer.sourceType,
 
+    warehouseCity:
+      offer.sourceType === "OWN_STOCK"
+        ? offer.warehouseCity || null
+        : null,
+
     sourceLabel:
       offer.sourceType ===
       "OWN_STOCK"

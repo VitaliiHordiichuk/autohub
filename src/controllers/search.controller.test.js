@@ -31,6 +31,8 @@ test("text search loads offers for the result page in one batch", async () => {
       isAvailable: true,
       availabilityText: "В наявності",
       sourceLabel: "Наш склад",
+      sourceType: "OWN_STOCK",
+      warehouseCity: "Харків",
     }]]));
   };
   OfferService.getOffersByProductId = async () => {
@@ -61,4 +63,6 @@ test("text search loads offers for the result page in one batch", async () => {
   assert.equal(calls[0].locale, "uk");
   assert.deepEqual(response.body.products.map((product) => product.id), [101, 102, 103]);
   assert.deepEqual(response.body.products.map((product) => product.offers[0].id), [1101, 1102, 1103]);
+  assert.deepEqual(response.body.products.map((product) => product.offers[0].warehouseCity), ["Харків", "Харків", "Харків"]);
+  assert.deepEqual(response.body.products.map((product) => product.offers[0].sourceType), ["OWN_STOCK", "OWN_STOCK", "OWN_STOCK"]);
 });
