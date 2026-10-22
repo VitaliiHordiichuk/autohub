@@ -318,7 +318,9 @@ export const WarehouseService = {
 
   async updateWarehouse(
     warehouseId,
-    {
+    fields
+  ) {
+    const {
       organizationId,
       supplierId,
       name,
@@ -334,8 +336,7 @@ export const WarehouseService = {
       returnableByDefault,
       returnPolicyOverride,
       returnPolicyNote,
-    }
-  ) {
+    } = fields;
     const numericWarehouseId = validateId(
       warehouseId,
       "Некорректный номер склада"
@@ -348,6 +349,23 @@ export const WarehouseService = {
 
     if (!currentWarehouse) {
       throw new Error("Склад не найден");
+    }
+
+    // A city-only PATCH must not revalidate or rewrite source, pricing or stock settings.
+    if (Object.keys(fields).length === 1 && Object.hasOwn(fields, "city")) {
+      const updatedWarehouse = await WarehouseRepository.update(
+        numericWarehouseId,
+        { city: normalizeCity(city) }
+      );
+      const effectiveReturnPolicy = ReturnPolicyService.resolve({
+        warehouseOverride: updatedWarehouse.return_policy_override,
+      });
+      return {
+        ...updatedWarehouse,
+        returnPolicyOverride: updatedWarehouse.return_policy_override,
+        returnPolicyNote: updatedWarehouse.return_policy_note,
+        effectiveReturnPolicy,
+      };
     }
 
     const nextType =

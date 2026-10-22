@@ -5,6 +5,7 @@ import { CustomerPricingService } from "./CustomerPricingService.js";
 import { TelegramNotificationService } from "./TelegramNotificationService.js";
 import { transaction } from "../db/transaction.js";
 import { ReturnPolicyService } from "./ReturnPolicyService.js";
+import { canonicalOfferClassification } from "./InventoryClassificationService.js";
 
 const statuses=new Set(['NEW','IN_PROGRESS','ANSWERED','CLOSED']);
 const modes=new Set(['CHAT','DAILY_REQUEST','DISABLED']);
@@ -17,7 +18,30 @@ function safePhone(value){try{return normalizePhone(value);}catch{return null;}}
 function serviceError(message,statusCode=400,code='VIN_REQUEST_ERROR'){const error=new Error(message);error.statusCode=statusCode;error.code=code;return error;}
 function chatText(value){const clean=String(value||'').trim();if(!clean)throw serviceError('Напишіть повідомлення',400,'MESSAGE_REQUIRED');if(clean.length>1500)throw serviceError('Повідомлення надто довге',400,'MESSAGE_TOO_LONG');return clean;}
 function maskedPhone(value){const normalized=safePhone(value);return normalized?`${normalized.slice(0,7)}•••${normalized.slice(-2)}`:null;}
-async function present(rows,userId){const list=Array.isArray(rows)?rows:[rows];const context=await CustomerPricingService.getContext(userId);const mapped=list.map(row=>({...row,recommendations:(row.recommendations||[]).map(rec=>{const pricing=CustomerPricingService.price({retailPrice:rec.retail_price,minimumSalePrice:rec.minimum_sale_price},context);const returnPolicy=ReturnPolicyService.resolveRow(rec);return{id:Number(rec.id),createdAt:rec.created_at,dismissedAt:rec.dismissed_at||null,product:{id:Number(rec.product_id),article:rec.article,name:rec.name,imageUrl:rec.image_url||null,imageVariant:rec.image_variant||null},offer:{id:Number(rec.product_offer_id),sourceLabel:rec.source_label,quantity:Number(rec.quantity),deliveryDays:Number(rec.delivery_days||0),isAvailable:Boolean(rec.is_available),returnPolicy,isReturnable:ReturnPolicyService.isReturnable(returnPolicy),retailPrice:pricing?Number(pricing.customerPrice):null}};})}));return Array.isArray(rows)?mapped:mapped[0];}
+async function present(rows,userId,{includeInternalSources=false}={}){
+  const list=Array.isArray(rows)?rows:[rows];
+  const context=await CustomerPricingService.getContext(userId);
+  const mapped=list.map(row=>({...row,recommendations:(row.recommendations||[]).map(rec=>{
+    const pricing=CustomerPricingService.price({retailPrice:rec.retail_price,minimumSalePrice:rec.minimum_sale_price},context);
+    const returnPolicy=ReturnPolicyService.resolveRow(rec);
+    const {sourceType}=canonicalOfferClassification(rec);
+    const warehouseCity=sourceType==="OWN_STOCK"?String(rec.warehouse_city||"").trim()||null:null;
+    return{
+      id:Number(rec.id),createdAt:rec.created_at,dismissedAt:rec.dismissed_at||null,
+      product:{id:Number(rec.product_id),article:rec.article,name:rec.name,imageUrl:rec.image_url||null,imageVariant:rec.image_variant||null},
+      offer:{
+        id:Number(rec.product_offer_id),
+        sourceLabel:includeInternalSources?rec.source_label:sourceType==="SUPPLIER"?"Партнерський склад":warehouseCity?`Склад: ${warehouseCity}`:"Склад MAKA",
+        sourceType,
+        warehouseCity,
+        quantity:Number(rec.quantity),deliveryDays:Number(rec.delivery_days||0),isAvailable:Boolean(rec.is_available),
+        returnPolicy,isReturnable:ReturnPolicyService.isReturnable(returnPolicy),
+        retailPrice:pricing?Number(pricing.customerPrice):null,
+      },
+    };
+  })}));
+  return Array.isArray(rows)?mapped:mapped[0];
+}
 
 export const VinRequestService={
   async create({userId,vehicleBrandId,vin,requestText,contactPhone}){
@@ -116,7 +140,7 @@ export const VinRequestService={
     }).catch((error)=>console.error('Не вдалося надіслати Telegram-сповіщення про VIN-повідомлення:',error.message));
     return present(await VinRequestRepository.findForUser(numericId,userId),userId);
   },
-  async listForStaff({status,userId}){const normalized=status?String(status).toUpperCase():null;if(normalized&&!statuses.has(normalized))throw new Error('Невідомий статус');return present(await VinRequestRepository.listForStaff({status:normalized}),userId);},
+  async listForStaff({status,userId}){const normalized=status?String(status).toUpperCase():null;if(normalized&&!statuses.has(normalized))throw new Error('Невідомий статус');return present(await VinRequestRepository.listForStaff({status:normalized}),userId,{includeInternalSources:true});},
   summary(){return VinRequestRepository.summary();},
   async setClientBlock({userId,blocked,changedBy,reason}){
     const numericUserId=id(userId);
@@ -138,10 +162,10 @@ export const VinRequestService={
     if(current.user_id&&(normalized!==current.status||Boolean(cleanMessage))){
       await NotificationRepository.createForUser({userId:Number(current.user_id),eventKey:`vin:${numericId}:update:${updated.updated_at}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:normalized}});
     }
-    return present(await VinRequestRepository.findById(numericId),changedBy);
+    return present(await VinRequestRepository.findById(numericId),changedBy,{includeInternalSources:true});
   },
-  async addRecommendation({requestId,productId,productOfferId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const added=await VinRequestRepository.addRecommendation({requestId:numericId,productId:id(productId),productOfferId:id(productOfferId),addedBy:changedBy});if(!added)throw new Error('Товар уже прикріплено або пропозицію не знайдено');if(current.user_id)await NotificationRepository.createForUser({userId:Number(current.user_id),eventKey:`vin:${numericId}:recommendation:${added.id}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:current.status}});return present(await VinRequestRepository.findById(numericId),changedBy);},
-  async removeRecommendation({requestId,recommendationId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const removed=await VinRequestRepository.removeRecommendation({requestId:numericId,recommendationId:id(recommendationId)});if(!removed)throw new Error('Прикріплений товар не знайдено');return present(await VinRequestRepository.findById(numericId),changedBy);},
+  async addRecommendation({requestId,productId,productOfferId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const added=await VinRequestRepository.addRecommendation({requestId:numericId,productId:id(productId),productOfferId:id(productOfferId),addedBy:changedBy});if(!added)throw new Error('Товар уже прикріплено або пропозицію не знайдено');if(current.user_id)await NotificationRepository.createForUser({userId:Number(current.user_id),eventKey:`vin:${numericId}:recommendation:${added.id}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:current.status}});return present(await VinRequestRepository.findById(numericId),changedBy,{includeInternalSources:true});},
+  async removeRecommendation({requestId,recommendationId,changedBy}){const numericId=id(requestId);const current=await VinRequestRepository.findById(numericId);if(!current)throw new Error('VIN-запит не знайдено');const removed=await VinRequestRepository.removeRecommendation({requestId:numericId,recommendationId:id(recommendationId)});if(!removed)throw new Error('Прикріплений товар не знайдено');return present(await VinRequestRepository.findById(numericId),changedBy,{includeInternalSources:true});},
   async dismissRecommendation({requestId,recommendationId,userId}){const numericId=id(requestId);const current=await VinRequestRepository.findForUser(numericId,userId);if(!current)throw serviceError('VIN-запит не знайдено',404,'VIN_REQUEST_NOT_FOUND');const dismissed=await VinRequestRepository.dismissRecommendationForUser({requestId:numericId,recommendationId:id(recommendationId),userId});if(!dismissed)throw serviceError('Запропоновану деталь не знайдено',404,'VIN_RECOMMENDATION_NOT_FOUND');return present(await VinRequestRepository.findForUser(numericId,userId),userId);},
   settings(){return VinRequestRepository.settings();},
   async updateSettings({mode,changedBy}){const normalized=String(mode||'').toUpperCase();if(!modes.has(normalized))throw serviceError('Невідомий режим VIN-запитів',400,'VIN_MODE_INVALID');return VinRequestRepository.updateSettings({mode:normalized,updatedBy:changedBy});},

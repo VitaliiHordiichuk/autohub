@@ -53,6 +53,13 @@ function otherCategoryName(locale) {
   return OTHER_CATEGORY.labels[publicLocale(locale)];
 }
 
+export function publicCatalogOffer(offer) {
+  const publicOffer = { ...offer };
+  delete publicOffer.supplier;
+  delete publicOffer.warehouse;
+  return publicOffer;
+}
+
 async function getLegacyTree(locale, db) {
   const result = await db.query(`
     WITH RECURSIVE visible_assignments AS (
@@ -806,9 +813,9 @@ export const PublicCatalogService = {
         hasRealImage: image.hasRealImage,
         isPlaceholder: image.isPlaceholder,
         offers:
-          offersByProductId.get(
+          (offersByProductId.get(
             Number(product.id)
-          ) || [],
+          ) || []).map(publicCatalogOffer),
       };
     });
     return {

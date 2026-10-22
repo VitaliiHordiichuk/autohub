@@ -242,6 +242,12 @@ function mapOffer(offer, pricingContext, locale) {
 
     sourceType,
 
+    // Public display may use only the city of a confirmed own warehouse.
+    warehouseCity:
+      sourceType === "OWN_STOCK"
+        ? String(offer.warehouse_city || "").trim() || null
+        : null,
+
     fulfillmentType,
 
     quantity,

@@ -63,6 +63,8 @@ export function mapPublicOffer(offer) {
     quantity: Number(offer.quantity),
     displayQuantity: offer.displayQuantity || String(offer.quantity),
     sourceLabel: offer.sourceLabel || null,
+    sourceType: offer.sourceType || null,
+    warehouseCity: offer.sourceType === "OWN_STOCK" ? offer.warehouseCity || null : null,
     deliveryDays: Number(offer.deliveryDays) || 0,
     availabilityText: offer.availabilityText,
     isAvailable: offer.isAvailable === true,

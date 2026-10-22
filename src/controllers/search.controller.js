@@ -48,6 +48,8 @@ export async function searchByText(req, res) {
         availabilityStatus: offer.availabilityStatus,
         reservationExpiresAt: offer.reservationExpiresAt,
         availabilityText: offer.availabilityText, sourceLabel: offer.sourceLabel,
+        sourceType: offer.sourceType,
+        warehouseCity: offer.sourceType === "OWN_STOCK" ? offer.warehouseCity || null : null,
       })) };
     });
     // Pagination continues the same search instead of creating another event.
