@@ -20,7 +20,7 @@ function mockServices({ viewer = null, failArticle = null } = {}) {
         calls.searched.push(article);
         if (article === failArticle) throw Error("Simulated backend error");
         if (article === "ZZZ99999") return { found: false };
-        return { found: true, exactProduct: product,
+        return { found: true, exactProduct: { ...product, article },
           replacementPath: [{ linkType: "REPLACEMENT", targetArticle: "A2711800209" }] };
       },
       buildCard: async (item, context, availability) => {
