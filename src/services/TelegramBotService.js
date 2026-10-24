@@ -78,10 +78,15 @@ async function poll() {
         ru:"\n\nЧтобы защитить VIN-чат от ботов, подтвердите номер кнопкой ниже.",
       };
       const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number",ru:"📱 Поделиться моим номером"};
+      const linkedName = connection?.role === "CLIENT"
+        ? String(connection.firstName || "").trim().replace(/[\\r\\n\\t]/g, " ").slice(0, 60)
+        : "";
+      const hello = connection?.locale === "en" ? "Hello" : connection?.locale === "ru" ? "Привет" : "Привіт";
+      const greeting = "🤖 " + hello + (linkedName ? ", " + linkedName : "") + "! Я MAKAtron.\\n\\n";
       await api("sendMessage", {
         chat_id: message.chat.id,
         text: connection
-          ? `${connectedCopy[connection.locale] || connectedCopy.uk}${connection.role==="CLIENT"&&!connection.phoneVerified?(verifyCopy[connection.locale]||verifyCopy.uk):""}`
+          ? `${greeting}${connectedCopy[connection.locale] || connectedCopy.uk}${connection.role==="CLIENT"&&!connection.phoneVerified?(verifyCopy[connection.locale]||verifyCopy.uk):""}`
           : "Посилання застаріло або вже використане. Створіть нове посилання в MAKA.",
         ...(connection?.role==="CLIENT"&&!connection.phoneVerified?{
           reply_markup:{keyboard:[[{text:buttonCopy[connection.locale]||buttonCopy.uk,request_contact:true}]],resize_keyboard:true,one_time_keyboard:true},
