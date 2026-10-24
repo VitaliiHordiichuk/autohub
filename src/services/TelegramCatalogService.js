@@ -13,7 +13,7 @@ import {
 export async function resolveTelegramPricingIdentity({ chatId, telegramUserId }, db = pool) {
   if (!chatId || !telegramUserId) return null;
   const result = await db.query(
-    "SELECT c.user_id, c.preferred_locale "
+    "SELECT c.user_id, c.preferred_locale, u.first_name "
     + "FROM user_telegram_connections c "
     + "JOIN users u ON u.id = c.user_id "
     + "JOIN roles r ON r.id = u.role_id "
@@ -23,7 +23,8 @@ export async function resolveTelegramPricingIdentity({ chatId, telegramUserId },
   );
   // Ambiguous mappings fall back to guest; never choose another person's price.
   return result.rows.length === 1
-    ? { userId: Number(result.rows[0].user_id), locale: result.rows[0].preferred_locale }
+    ? { userId: Number(result.rows[0].user_id), locale: result.rows[0].preferred_locale,
+        firstName: result.rows[0].first_name || null }
     : null;
 }
 
@@ -38,8 +39,10 @@ const deps = {
 export async function searchTelegramCatalog({ text, chatId, telegramUserId }, overrides = {}) {
   const services = { ...deps, ...overrides };
   const raw = String(text || "").trim();
-  if (!raw) return [formatTelegramHelp()];
-  if (/^\/(?:help|start)(?:\s|$)/i.test(raw)) return [formatTelegramHelp()];
+  if (!raw || /^\/(?:help|start)(?:\s|$)/i.test(raw)) {
+    const viewer = await services.resolveViewer({ chatId, telegramUserId });
+    return [formatTelegramHelp({ firstName: viewer?.firstName, locale: viewer?.locale })];
+  }
   if (raw.startsWith("/")) return []; // Existing commands are managed elsewhere.
 
   const parsed = parseTelegramArticles(raw);
