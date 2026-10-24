@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "src/services/Telegram*"
+      - "scripts/telegram-catalog-worker.mjs"
       - ".env.example"
       - ".github/workflows/telegram-catalog-checks.yml"
 
@@ -28,3 +29,4 @@ jobs:
           node --check src/services/TelegramBotService.js
           node --check src/services/TelegramCatalogFormatter.js
           node --check src/services/TelegramCatalogService.js
+          node --check scripts/telegram-catalog-worker.mjs
