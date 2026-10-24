@@ -12,6 +12,7 @@ function mockServices({ viewer = null, failArticle = null } = {}) {
     calls,
     services: {
       resolveViewer: async () => viewer,
+      getLocale: async () => "uk",
       pricing: async (userId) => {
         calls.pricingIds.push(userId);
         return { discountPercent: userId ? 5 : 0 };
@@ -99,7 +100,7 @@ test("массовый поиск возвращает последовател�
   }, services);
   assert.deepEqual(calls.searched, ["A2711800109", "ZZZ99999", "HU7185X"]);
   assert.equal(responses.length, 1);
-  assert.match(responses[0].text, /не найдено/);
+  assert.match(responses[0].text, /не знайдено/);
   assert.match(responses[0].text, /HU7185X/);
 });
 
@@ -111,7 +112,7 @@ test("сбой одной позиции не прерывает обработ�
     const results = await searchTelegramCatalog({
       text: "A2711800109\nHU7185X\nA2711800109", chatId: 1, telegramUserId: 2,
     }, services);
-    assert.match(results[0].text, /Не удалось проверить/);
+    assert.match(results[0].text, /Не вдалося перевірити/);
     assert.match(results[0].text, /A2711800109/);
   } finally { console.error = original; }
 });
@@ -164,4 +165,16 @@ test("изолированный MAKAtron не использует привяз
     if (before === undefined) delete process.env.TELEGRAM_CATALOG_GUEST_ONLY;
     else process.env.TELEGRAM_CATALOG_GUEST_ONLY = before;
   }
+});
+
+test("англомовні запити повертають лише англомовні шаблони", async () => {
+  const { services } = mockServices();
+  services.getLocale = async () => "en";
+  const responses = await searchTelegramCatalog({
+    text:"A2711800109\nZZZ99999", chatId: 1, telegramUserId: 2,
+  }, services);
+  assert.match(responses[0].text, /Results/);
+  assert.match(responses[0].text, /not found/);
+  assert.match(responses[0].text, /MAKA warehouse/);
+  assert.doesNotMatch(responses[0].text, /не знайдено|Результати/);
 });
