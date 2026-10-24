@@ -136,6 +136,10 @@ test("по /start MAKAtron приветствует клиента по имен
   assert.match(reply.text, /MAKAtron/);
   assert.equal(reply.parse_mode, "HTML");
   assert.equal(calls.searched.length, 0);
+  const [help] = await searchTelegramCatalog({ text: "/help", chatId: 1001, telegramUserId: 2002 }, services);
+  assert.doesNotMatch(help.text, /Олександр/);
+  const [searchReply] = await searchTelegramCatalog({ text: "A2711800109", chatId: 1001, telegramUserId: 2002 }, services);
+  assert.doesNotMatch(searchReply.text, /Олександр/);
 });
 
 test("по /start незарегистрированного гостя приветствует без имени", async () => {
