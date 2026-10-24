@@ -79,10 +79,10 @@ async function poll() {
       };
       const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number",ru:"📱 Поделиться моим номером"};
       const linkedName = connection?.role === "CLIENT"
-        ? String(connection.firstName || "").trim().replace(/[\\r\\n\\t]/g, " ").slice(0, 60)
+        ? String(connection.firstName || "").trim().replace(/[\r\n\t]/g, " ").slice(0, 60)
         : "";
       const hello = connection?.locale === "en" ? "Hello" : connection?.locale === "ru" ? "Привет" : "Привіт";
-      const greeting = "🤖 " + hello + (linkedName ? ", " + linkedName : "") + "! Я MAKAtron.\\n\\n";
+      const greeting = "🤖 " + hello + (linkedName ? ", " + linkedName : "") + "! Я MAKAtron.\n\n";
       await api("sendMessage", {
         chat_id: message.chat.id,
         text: connection
