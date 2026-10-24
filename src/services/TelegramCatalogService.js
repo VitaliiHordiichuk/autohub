@@ -39,9 +39,12 @@ const deps = {
 export async function searchTelegramCatalog({ text, chatId, telegramUserId }, overrides = {}) {
   const services = { ...deps, ...overrides };
   const raw = String(text || "").trim();
-  if (!raw || /^\/(?:help|start)(?:\s|$)/i.test(raw)) {
+  if (!raw || /^\/start(?:\s|$)/i.test(raw)) {
     const viewer = await services.resolveViewer({ chatId, telegramUserId });
     return [formatTelegramHelp({ firstName: viewer?.firstName, locale: viewer?.locale })];
+  }
+  if (/^\/help(?:\s|$)/i.test(raw)) {
+    return [formatTelegramHelp({ firstName: null })];
   }
   if (raw.startsWith("/")) return []; // Existing commands are managed elsewhere.
 
