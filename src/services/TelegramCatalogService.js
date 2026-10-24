@@ -3,6 +3,7 @@ import { SearchService } from "./SearchService.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
+import { TelegramLanguageService } from "./TelegramLanguageService.js";
 import {
   parseTelegramArticles, formatTelegramProduct, formatTelegramNotFound,
   formatTelegramInputError, formatTelegramBatch, formatTelegramHelp,
@@ -32,6 +33,7 @@ export async function resolveTelegramPricingIdentity({ chatId, telegramUserId },
 
 const deps = {
   resolveViewer: resolveTelegramPricingIdentity,
+  getLocale: TelegramLanguageService.get,
   pricing: CustomerPricingService.getContext,
   search: SearchService.searchByArticle,
   buildCard: ProductCardService.build,
@@ -41,19 +43,20 @@ const deps = {
 export async function searchTelegramCatalog({ text, chatId, telegramUserId }, overrides = {}) {
   const services = { ...deps, ...overrides };
   const raw = String(text || "").trim();
+  const locale = await services.getLocale(chatId);
   if (!raw || /^\/start(?:\s|$)/i.test(raw)) {
     const viewer = await services.resolveViewer({ chatId, telegramUserId });
-    return [formatTelegramHelp({ firstName: viewer?.firstName, locale: viewer?.locale })];
+    return [formatTelegramHelp({ firstName: viewer?.firstName, locale })];
   }
   if (/^\/help(?:\s|$)/i.test(raw)) {
-    return [formatTelegramHelp({ firstName: null })];
+    return [formatTelegramHelp({ firstName: null, locale })];
   }
   if (raw.startsWith("/")) return []; // Existing commands are managed elsewhere.
 
   const parsed = parseTelegramArticles(raw);
-  if (parsed.error) return [formatTelegramInputError(parsed.error)];
+  if (parsed.error) return [formatTelegramInputError(parsed.error, locale)];
   const viewer = await services.resolveViewer({ chatId, telegramUserId });
-  const locale = ["uk", "ru", "en"].includes(viewer?.locale) ? viewer.locale : "uk";
+
   // Never use a staff account ID for CustomerPricingService: it can produce
   // a priceMatrix containing other customers' prices.
   const pricingContext = await services.pricing(viewer?.userId ?? null);
@@ -62,7 +65,7 @@ export async function searchTelegramCatalog({ text, chatId, telegramUserId }, ov
     try {
       const found = await services.search(article);
       if (!found?.found) {
-        results.push(formatTelegramNotFound(article));
+        results.push(formatTelegramNotFound(article, locale));
         continue;
       }
       // When the article resolves via a Mercedes family/prefix, still present
@@ -91,13 +94,13 @@ export async function searchTelegramCatalog({ text, chatId, telegramUserId }, ov
       }));
     } catch (error) {
       console.error("Telegram catalogue lookup failed:", error);
-      results.push({ text: "⚠️ Не удалось проверить <code>"
+      results.push({ text: (locale === "en" ? "⚠️ Could not check <code>" : "⚠️ Не вдалося перевірити <code>")
         + article.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        + "</code>. Попробуйте позже." });
+        + (locale === "en" ? "</code>. Please try again later." : "</code>. Спробуйте пізніше.") });
     }
   }
   if (results.length === 1) {
     return [{ parse_mode: "HTML", ...results[0] }];
   }
-  return formatTelegramBatch(results);
+  return formatTelegramBatch(results, locale);
 }
