@@ -62,6 +62,34 @@ notification subscriptions by bot identity, followed by a controlled
 notification cutover and enabling personal prices. Never assume both
 bots can share an unqualified `user_telegram_connections` row safely.
 
+### Opt-in switch to MAKAtron for an owner-controlled pair of connections
+Only after verifying that all existing linked chats can receive a message from
+@MAKA_com_ua_bot, preparing a rollback, and confirming the customer and
+staff connection records, the existing main backend can be configured to:
+- `TELEGRAM_BOT_USERNAME=MAKA_com_ua_bot`
+- `TELEGRAM_BOT_TOKEN` = new MAKAtron token
+- `TELEGRAM_BOT_POLLING_ENABLED=false` (important: only **one** new bot poller)
+- Keep the main backend responsible for outgoing order, VIN, tracking messages.
+
+For the **isolated MAKAtron worker only**, set:
+- `TELEGRAM_BOT_LINKING_ENABLED=true`
+- `TELEGRAM_CATALOG_GUEST_ONLY=false`
+
+These worker flags default to false/true respectively. Both must only change
+after the main backend's token and bot username have been switched and its
+polling is off. The site already uses `/api/account/telegram/link` to create
+one-time 15-minute deep links, generated from the main backend's bot username;
+no frontend deployment is required for changing the destination.
+
+Before switching, back up the main .env safely (mode 600) and document
+rollback: restore the old main .env, restart ONLY the main backend, revert the
+worker flags and restart ONLY the isolated worker. An existing bot chat is
+NOT proof that a different user's legacy connection is valid. The described
+reuse applies only to the specifically owner-verified connections; for broader
+future rollout scope connections by bot identity and require new customer
+linking before personal pricing. Changing this bot credential does not
+migrate old Telegram subscribers automatically.
+
 ## Scope
 - Private-chat lookup by one article or by 2–20 articles separated by newline, comma or semicolon.
 - Reuse `SearchService` and `ProductCardService`: canonical Mercedes A/N, exact matches, replacement paths, analogues, stock offers.
