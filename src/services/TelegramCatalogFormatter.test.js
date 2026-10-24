@@ -81,3 +81,16 @@ test("краткие ответы на 20 номеров разбиваются 
   assert.ok(batches.every((chunk) => chunk.text.length < 4096));
   assert.ok(batches.every((chunk) => chunk.parse_mode === "HTML"));
 });
+
+
+test("приветствие персонализировано, но имя экранируется перед Telegram HTML", () => {
+  const hello = formatTelegramHelp({ firstName: "Олександр", locale: "uk" });
+  assert.match(hello.text, /Привіт, Олександр!/);
+  assert.equal(hello.parse_mode, "HTML");
+  assert.match(formatTelegramHelp({ firstName: "Иван", locale: "ru" }).text, /Привет, Иван!/);
+  assert.match(formatTelegramHelp({ firstName: "Alex", locale: "en" }).text, /Hello, Alex!/);
+  const unsafe = formatTelegramHelp({ firstName: "<b>Іван & Co</b>", locale: "uk" });
+  assert.match(unsafe.text, /&lt;b&gt;Іван &amp; Co&lt;\/b&gt;/);
+  assert.doesNotMatch(unsafe.text, /<b>Іван/);
+  assert.match(formatTelegramHelp().text, /Привіт! Я MAKAtron/);
+});
