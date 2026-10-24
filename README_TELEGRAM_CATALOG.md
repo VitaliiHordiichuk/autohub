@@ -30,6 +30,38 @@ register that bot and must not be enabled with the previous bot's credentials.
    replies, pricing, stock grouping and new-bot onboarding. No production
    credential change is part of this PR.
 
+
+## Two-bot transition: standalone preview (safe default)
+The currently active production backend is `makahub-backend-warehousecity`
+running from `/home/ubuntu/maka-backend-warehousecity-20261022`.
+Its Telegram token belongs to the legacy bot. **Do not edit or restart it
+to test MAKAtron**. The main backend must keep sending existing notifications.
+
+This branch now includes `scripts/telegram-catalog-worker.mjs`:
+- It runs **only** Telegram polling (no port binding, HTTP server, imports,
+  email scheduler, order/VIN push notifications, or changes to the old PM2 app).
+- It checks its API token using Telegram `getMe` and refuses to start if the
+  account is not exactly `@MAKA_com_ua_bot` (case-insensitive).
+- It **forces** `TELEGRAM_BOT_LINKING_ENABLED=false` and
+  `TELEGRAM_CATALOG_GUEST_ONLY=true` irrespective of the .env configuration.
+  Contact and deep-link verification never write old linking records.
+- It turns on catalogue lookups for **guest retail prices only**. Existing
+  personal prices are not reassigned or leaked before the bot migration.
+- Stop/rollback is limited to the new isolated worker PM2 process.
+
+Use a separate directory and a dedicated private `.env` for this worker.
+The private worker config needs `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_USER`, `DB_PASSWORD`, `TELEGRAM_BOT_USERNAME=MAKA_com_ua_bot`
+and **only the new token**, held outside Git. Do not copy or expose
+the previous bot's token. Secure the file with `chmod 600`.
+Do not register the new bot with Telegram webhooks while polling.
+
+This is **not full launch**: once lookups have been checked on live MAKA
+catalogue data, plan a separate migration of connection records and
+notification subscriptions by bot identity, followed by a controlled
+notification cutover and enabling personal prices. Never assume both
+bots can share an unqualified `user_telegram_connections` row safely.
+
 ## Scope
 - Private-chat lookup by one article or by 2–20 articles separated by newline, comma or semicolon.
 - Reuse `SearchService` and `ProductCardService`: canonical Mercedes A/N, exact matches, replacement paths, analogues, stock offers.
