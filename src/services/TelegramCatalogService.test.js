@@ -150,3 +150,18 @@ test("по /start незарегистрированного гостя прив
   assert.match(reply.text, /Привіт! Я MAKAtron/);
   assert.doesNotMatch(reply.text, /Олександр/);
 });
+
+
+test("изолированный MAKAtron не использует привязки и персональные цены прежнего бота", async () => {
+  const before = process.env.TELEGRAM_CATALOG_GUEST_ONLY;
+  process.env.TELEGRAM_CATALOG_GUEST_ONLY = "true";
+  try {
+    const identity = await resolveTelegramPricingIdentity({ chatId: 1, telegramUserId: 1 }, {
+      query: async () => { throw Error("must not read legacy Telegram connections"); },
+    });
+    assert.equal(identity, null);
+  } finally {
+    if (before === undefined) delete process.env.TELEGRAM_CATALOG_GUEST_ONLY;
+    else process.env.TELEGRAM_CATALOG_GUEST_ONLY = before;
+  }
+});
