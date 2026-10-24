@@ -1,19 +1,19 @@
-# MAKA Telegram catalogue lookup (review draft)
+# MAKAtron Telegram catalogue lookup (review draft)
 
 ## MAKA branding and clean bot launch
-**Use a new, dedicated Telegram bot identity branded MAKA.** This branch does not
+**Use a new, dedicated Telegram bot identity named MAKAtron (MAKA brand).** This branch does not
 register that bot and must not be enabled with the previous bot's credentials.
 
 1. The MAKA owner creates a new bot through the verified `@BotFather` using
-   `/newbot`. Suggested display name: **MAKA | Автозапчастини**.
-   Suggested username: **MAKA_Parts_UA_bot** (only if available; username
+   `/newbot`. Display name: **MAKAtron**.
+   Suggested username: **MAKAtronBot** (only if available; username
    availability is decided by BotFather). The bot must be owned by the MAKA
    operator's Telegram account, not a developer account.
 2. Keep the Bot API token secret: **never** commit, post to PR/issues or copy it
    into a chat. Store it securely in the deployment environment as
    `TELEGRAM_BOT_TOKEN` and set `TELEGRAM_BOT_USERNAME` to the chosen
    new username. Prefer a distinct staging bot token for initial testing.
-3. Profile setup in BotFather: MAKA brand avatar, MAKA-only description, site
+3. Profile setup in BotFather: MAKAtron robot/avatar, MAKA-only description, site
    link `https://maka.com.ua`, and commands `start` / `help`.
 4. The new bot is a **different Telegram identity**. Prior bot conversations
    and bot-owned message access do not transfer automatically. Customers should
