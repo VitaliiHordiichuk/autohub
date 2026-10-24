@@ -1,8 +1,20 @@
 import { TelegramConnectionService } from "./TelegramConnectionService.js";
+import { searchTelegramCatalog } from "./TelegramCatalogService.js";
+import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLanguageService.js";
 
 let timer = null;
 let offset = 0;
 let polling = false;
+const lastCatalogSearch = new Map();
+
+function catalogEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.TELEGRAM_CATALOG_SEARCH_ENABLED || "false"));
+}
+
+function linkingEnabled() {
+  return String(process.env.TELEGRAM_BOT_LINKING_ENABLED ?? "true").trim().toLowerCase() !== "false";
+}
+
 
 async function api(method, body = {}) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -20,10 +32,51 @@ async function poll() {
   if (polling) return;
   polling = true;
   try {
-    const updates = await api("getUpdates", { offset, timeout: 0, allowed_updates: ["message"] });
+    const updates = await api("getUpdates", { offset, timeout: 0, allowed_updates: ["message", "callback_query"] });
     for (const update of updates) {
       offset = Math.max(offset, Number(update.update_id) + 1);
+      const callback = update.callback_query;
+      if (callback && /^lang:(uk|en)$/.test(String(callback.data || ""))) {
+        const chat = callback.message?.chat;
+        if (chat?.type === "private" && String(chat.id) === String(callback.from?.id)) {
+          const locale = callback.data.slice(5);
+          await TelegramLanguageService.set(chat.id, locale);
+          await api("answerCallbackQuery", { callback_query_id: callback.id,
+            text: locale === "en" ? "English selected" : "Обрано українську" });
+          await api("editMessageReplyMarkup", { chat_id: chat.id,
+            message_id: callback.message.message_id,
+            reply_markup: telegramLanguageKeyboard(locale) });
+          await api("sendMessage", { chat_id: chat.id,
+            text: locale === "en" ? "✅ Language: English. Send a part number."
+              : "✅ Мова: українська. Надішліть артикул." });
+        } else {
+          await api("answerCallbackQuery", { callback_query_id: callback.id });
+        }
+        continue;
+      }
       const message = update.message;
+      const command = String(message?.text || "").trim().toLowerCase();
+      if (message?.chat?.type === "private" &&
+          String(message.chat.id) === String(message.from?.id) &&
+          /^\/(?:language|lang|uk|en)(?:@maka_com_ua_bot)?$/.test(command)) {
+        const desired = command.match(/^\/(uk|en)(?:@|$)/)?.[1];
+        const locale = desired
+          ? await TelegramLanguageService.set(message.chat.id, desired)
+          : await TelegramLanguageService.get(message.chat.id);
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: desired
+            ? locale === "en" ? "✅ Language: English." : "✅ Мова: українська."
+            : locale === "en" ? "🌐 Choose a language:" : "🌐 Оберіть мову:",
+          reply_markup: telegramLanguageKeyboard(locale),
+        });
+        continue;
+      }
+      // Isolated MAKAtron guest preview must not modify legacy phone verification.
+      if (!linkingEnabled() && message?.contact && message?.chat?.id) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: "Прив'язка профілю MAKAtron наразі недоступна. Надішліть артикул для пошуку." });
+        continue;
+      }
       if (message?.contact && message?.chat?.id && message?.from?.id) {
         const ownsContact = !message.contact.user_id || Number(message.contact.user_id) === Number(message.from.id);
         const verification = ownsContact
@@ -33,6 +86,7 @@ async function poll() {
               phoneNumber:message.contact.phone_number,
             })
           : {verified:false, locale:"uk", reason:"NOT_OWN_CONTACT"};
+        const locale = await TelegramLanguageService.get(message.chat.id);
         const copy = {
           uk:verification.verified
             ? "✅ Номер підтверджено. Тепер можна надсилати VIN-запити та спілкуватися з менеджером."
@@ -40,19 +94,21 @@ async function poll() {
           en:verification.verified
             ? "✅ Phone number confirmed. You can now send VIN requests and chat with a manager."
             : "This number does not match the phone number in your MAKA account. Check your profile number or share your own contact.",
-          ru:verification.verified
-            ? "✅ Номер подтверждён. Теперь можно отправлять VIN-запросы и общаться с менеджером."
-            : "Ой, этот номер не совпадает с номером в вашем аккаунте MAKA. Проверьте номер в профиле или поделитесь своим контактом.",
         };
         await api("sendMessage", {
           chat_id:message.chat.id,
-          text:copy[verification.locale] || copy.uk,
+          text:copy[locale],
           reply_markup:{remove_keyboard:true},
         });
         continue;
       }
       const match = String(message?.text || "").match(/^\/start\s+([a-f0-9]{48})$/i);
-      if (!match || !message?.chat?.id) continue;
+      if (!linkingEnabled() && match && message?.chat?.id) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: "Прив'язка акаунта MAKA до нового бота ще не ввімкнена. Можете шукати запчастини за артикулом." });
+        continue;
+      }
+      if (match && message?.chat?.id) {
       const connection = await TelegramConnectionService.connectFromTelegram({
         token: match[1],
         chatId: message.chat.id,
@@ -60,29 +116,67 @@ async function poll() {
         username: message.from?.username,
         firstName: message.from?.first_name,
       });
+      const locale = await TelegramLanguageService.get(message.chat.id);
       const connectedCopy = {
         uk:"✅ Telegram успішно підключено до MAKA. Тут надходитимуть сповіщення про замовлення.",
         en:"✅ Telegram is now connected to MAKA. Order notifications will arrive here.",
-        ru:"✅ Telegram успешно подключён к MAKA. Здесь будут приходить уведомления о заказах.",
       };
       const verifyCopy = {
         uk:"\n\nЩоб захистити VIN-чат від ботів, підтвердьте номер кнопкою нижче.",
         en:"\n\nTo protect the VIN chat from bots, confirm your phone number using the button below.",
-        ru:"\n\nЧтобы защитить VIN-чат от ботов, подтвердите номер кнопкой ниже.",
       };
-      const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number",ru:"📱 Поделиться моим номером"};
+      const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number"};
+      const linkedName = connection?.role === "CLIENT"
+        ? String(connection.firstName || "").trim().replace(/[\r\n\t]/g, " ").slice(0, 60)
+        : "";
+      const hello = locale === "en" ? "Hello" : "Привіт";
+      const greeting = "🤖 " + hello + (linkedName ? ", " + linkedName : "") + "! " +
+        (locale === "en" ? "I’m MAKAtron.\n\n" : "Я MAKAtron.\n\n");
       await api("sendMessage", {
         chat_id: message.chat.id,
         text: connection
-          ? `${connectedCopy[connection.locale] || connectedCopy.uk}${connection.role==="CLIENT"&&!connection.phoneVerified?(verifyCopy[connection.locale]||verifyCopy.uk):""}`
-          : "Посилання застаріло або вже використане. Створіть нове посилання в MAKA.",
+          ? `${greeting}${connectedCopy[locale]}${connection.role==="CLIENT"&&!connection.phoneVerified?verifyCopy[locale]:""}`
+          : (locale === "en" ? "This link expired or was already used. Create a new link in MAKA." : "Посилання застаріло або вже використане. Створіть нове посилання в MAKA."),
         ...(connection?.role==="CLIENT"&&!connection.phoneVerified?{
-          reply_markup:{keyboard:[[{text:buttonCopy[connection.locale]||buttonCopy.uk,request_contact:true}]],resize_keyboard:true,one_time_keyboard:true},
+          reply_markup:{keyboard:[[{text:buttonCopy[locale],request_contact:true}]],resize_keyboard:true,one_time_keyboard:true},
         }:{}),
       });
+        if (connection) {
+          await api("sendMessage", { chat_id: message.chat.id,
+            text: locale === "en" ? "🌐 Choose a language:" : "🌐 Оберіть мову:",
+            reply_markup: telegramLanguageKeyboard(locale) });
+        }
+        continue;
+      }
+      // Search is optional and only runs in private chats. Existing /start links
+      // and contact verification remain active regardless of this feature flag.
+      const text = String(message?.text || "").trim();
+      if (!catalogEnabled() || message?.chat?.type !== "private" ||
+          !message?.chat?.id || !message?.from?.id || !text) continue;
+      const key = String(message.from.id);
+      const now = Date.now();
+      if (now - (lastCatalogSearch.get(key) || 0) < 3000) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: (await TelegramLanguageService.get(message.chat.id)) === "en"
+            ? "⏳ Please try again in a few seconds." : "⏳ Спробуйте ще раз за кілька секунд." });
+        continue;
+      }
+      lastCatalogSearch.set(key, now);
+      // Bound in-memory throttling entries; no permanent client history.
+      if (lastCatalogSearch.size > 1000) lastCatalogSearch.clear();
+      const replies = await searchTelegramCatalog({
+        text, chatId: message.chat.id, telegramUserId: message.from.id,
+      });
+      for (const reply of replies) {
+        const showLanguages = /^\/(start|help)(?:\s|$)/i.test(text);
+        await api("sendMessage", { chat_id: message.chat.id,
+          ...reply,
+          ...(showLanguages ? { reply_markup: telegramLanguageKeyboard(await TelegramLanguageService.get(message.chat.id)) } : {}),
+        });
+      }
     }
   } catch (error) {
-    console.error("Ошибка Telegram-бота:", error.message);
+    console.error("Помилка Telegram-бота:", error.message);
   } finally {
     polling = false;
   }

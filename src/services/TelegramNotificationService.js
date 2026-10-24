@@ -16,7 +16,7 @@ function formatMoney(value) {
 }
 
 function localeOf(value) {
-  return value === "en" || value === "ru" ? value : "uk";
+  return value === "en" ? "en" : "uk";
 }
 
 async function sendMessage(chatId, payload) {
@@ -58,16 +58,6 @@ export function buildVinStaffNotification({
       missing: "Not provided",
       noText: "No message",
       open: "Open VIN request",
-    },
-    ru: {
-      newRequest: "Новый VIN-запрос",
-      newMessage: "Новое сообщение в VIN-запросе",
-      customer: "Клиент",
-      phone: "Телефон",
-      brand: "Марка",
-      missing: "Не указано",
-      noText: "Без текста",
-      open: "Открыть VIN-запрос",
     },
   }[normalizedLocale];
   const customerName = [request.first_name, request.last_name]
@@ -124,8 +114,9 @@ export const TelegramNotificationService = {
       db.query(`
         SELECT DISTINCT ON (c.telegram_chat_id)
           c.telegram_chat_id,
-          c.preferred_locale
+          COALESCE(lang.locale, 'uk') AS preferred_locale
         FROM user_telegram_connections c
+        LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id
         JOIN users u ON u.id = c.user_id
         JOIN roles r ON r.id = u.role_id
         WHERE c.notifications_enabled = TRUE
@@ -230,15 +221,14 @@ export const TelegramNotificationService = {
       })
     ));
     deliveries.forEach((delivery) => {
-      if (delivery.status === "rejected") console.error("Не удалось отправить Telegram-уведомление:", delivery.reason?.message || delivery.reason);
+      if (delivery.status === "rejected") console.error("Не вдалося надіслати Telegram-сповіщення:", delivery.reason?.message || delivery.reason);
     });
   },
 
   async sendOrderStatusToUser({ userId, orderId, status }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
     const [connectionResult, orderResult, itemsResult] = await Promise.all([
-      db.query(`SELECT telegram_chat_id, preferred_locale FROM user_telegram_connections
-        WHERE user_id = $1 AND notifications_enabled = TRUE`, [userId]),
+      db.query(`SELECT c.telegram_chat_id, COALESCE(lang.locale, 'uk') AS preferred_locale FROM user_telegram_connections c LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id WHERE c.user_id = $1 AND notifications_enabled = TRUE`, [userId]),
       db.query("SELECT total_amount FROM orders WHERE id = $1", [orderId]),
       db.query(`SELECT p.article, p.name, oi.quantity
         FROM order_items oi JOIN products p ON p.id = oi.product_id
@@ -250,7 +240,6 @@ export const TelegramNotificationService = {
     const copy = {
       uk:{ CONFIRMED:"✅ Ваше замовлення підтверджено", COMPLETED:"🎉 Ваше замовлення завершено", CANCELLED:"↩️ Ваше замовлення скасовано", order:"Замовлення", total:"Сума", more:"і ще", open:"Переглянути замовлення" },
       en:{ CONFIRMED:"✅ Your order has been confirmed", COMPLETED:"🎉 Your order has been completed", CANCELLED:"↩️ Your order has been cancelled", order:"Order", total:"Total", more:"more", open:"View order" },
-      ru:{ CONFIRMED:"✅ Ваш заказ подтверждён", COMPLETED:"🎉 Ваш заказ завершён", CANCELLED:"↩️ Ваш заказ отменён", order:"Заказ", total:"Сумма", more:"и ещё", open:"Посмотреть заказ" },
     }[locale];
     const labels = { CONFIRMED:copy.CONFIRMED, COMPLETED:copy.COMPLETED, CANCELLED:copy.CANCELLED };
     const title = labels[status];
@@ -286,14 +275,12 @@ export const TelegramNotificationService = {
     if (process.env.NODE_ENV === "test") return { sent:false, reason:"TEST" };
     if (!process.env.TELEGRAM_BOT_TOKEN) return { sent:false, reason:"BOT_NOT_CONFIGURED" };
     if (!userId) return { sent:false, reason:"CUSTOMER_NOT_REGISTERED" };
-    const result = await db.query(`SELECT telegram_chat_id, preferred_locale FROM user_telegram_connections
-      WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]);
+    const result = await db.query(`SELECT c.telegram_chat_id, COALESCE(lang.locale, 'uk') AS preferred_locale FROM user_telegram_connections c LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id WHERE c.user_id = $1 AND notifications_enabled=TRUE`, [userId]);
     if (!result.rows[0]) return { sent:false, reason:"CUSTOMER_NOT_CONNECTED" };
     const locale = localeOf(result.rows[0].preferred_locale);
     const text = {
       uk:`🚚 <b>Замовлення №${Number(orderId)} вже має ТТН</b>\nНова пошта: <code>${escapeHtml(trackingNumber)}</code>\n\nМожна копіювати номер і стежити за посилкою 💙`,
       en:`🚚 <b>Order №${Number(orderId)} now has a tracking number</b>\nNova Poshta: <code>${escapeHtml(trackingNumber)}</code>\n\nCopy the number to track your parcel 💙`,
-      ru:`🚚 <b>У заказа №${Number(orderId)} появилась ТТН</b>\nНовая почта: <code>${escapeHtml(trackingNumber)}</code>\n\nСкопируйте номер, чтобы следить за посылкой 💙`,
     }[locale];
     await sendMessage(result.rows[0].telegram_chat_id, {
       text,
@@ -304,8 +291,7 @@ export const TelegramNotificationService = {
   async sendOrderUpdatedToUser({ userId, orderId }, db = pool) {
     if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
     const [connectionResult, orderResult, itemsResult] = await Promise.all([
-      db.query(`SELECT telegram_chat_id, preferred_locale FROM user_telegram_connections
-        WHERE user_id=$1 AND notifications_enabled=TRUE`, [userId]),
+      db.query(`SELECT c.telegram_chat_id, COALESCE(lang.locale, 'uk') AS preferred_locale FROM user_telegram_connections c LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id WHERE c.user_id = $1 AND notifications_enabled=TRUE`, [userId]),
       db.query("SELECT total_amount FROM orders WHERE id=$1", [orderId]),
       db.query(`SELECT p.article, p.name, oi.quantity, oi.price_at_purchase
         FROM order_items oi JOIN products p ON p.id=oi.product_id
@@ -316,7 +302,6 @@ export const TelegramNotificationService = {
     const copy = {
       uk:{title:`✏️ <b>Замовлення №${Number(orderId)} оновлено</b>`,total:"Разом",open:"Переглянути замовлення"},
       en:{title:`✏️ <b>Order №${Number(orderId)} was updated</b>`,total:"Total",open:"View order"},
-      ru:{title:`✏️ <b>Заказ №${Number(orderId)} обновлён</b>`,total:"Итого",open:"Посмотреть заказ"},
     }[locale];
     const items = itemsResult.rows.map((item) =>
       `• <b>${escapeHtml(item.article)}</b>${item.name ? ` — ${escapeHtml(item.name)}` : ""} × ${Number(item.quantity)} = <b>${escapeHtml(formatMoney(Number(item.quantity) * Number(item.price_at_purchase)))}</b>`
@@ -333,13 +318,12 @@ export const TelegramNotificationService = {
 
   async sendReturnCompletedToUser({userId,orderId,items},db=pool){
     if(process.env.NODE_ENV==="test"||!process.env.TELEGRAM_BOT_TOKEN||!userId)return;
-    const result=await db.query(`SELECT telegram_chat_id,preferred_locale FROM user_telegram_connections WHERE user_id=$1 AND notifications_enabled=TRUE`,[userId]);
+    const result=await db.query(`SELECT c.telegram_chat_id, COALESCE(lang.locale, 'uk') AS preferred_locale FROM user_telegram_connections c LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id WHERE c.user_id = $1 AND notifications_enabled=TRUE`,[userId]);
     if(!result.rows[0])return;
     const locale=localeOf(result.rows[0].preferred_locale);
     const copy={
       uk:{title:`↩️ <b>Повернення за замовленням №${Number(orderId)} підтверджено</b>`,items:"Повернені позиції"},
       en:{title:`↩️ <b>Return for order №${Number(orderId)} confirmed</b>`,items:"Returned items"},
-      ru:{title:`↩️ <b>Возврат по заказу №${Number(orderId)} подтверждён</b>`,items:"Возвращённые позиции"},
     }[locale];
     const rows=(items||[]).map((item)=>`• <b>${escapeHtml(item.article)}</b>${item.name?` — ${escapeHtml(item.name)}`:""} × ${Number(item.quantity)}`);
     await sendMessage(result.rows[0].telegram_chat_id,{text:[copy.title,"",copy.items+":",...rows].join("\n")});
