@@ -6,8 +6,8 @@ register that bot and must not be enabled with the previous bot's credentials.
 
 1. The MAKA owner creates a new bot through the verified `@BotFather` using
    `/newbot`. Display name: **MAKA.com.ua**.
-   Suggested username: **MAKA_com_ua_bot** (only if available; username
-   availability is decided by BotFather). The bot must be owned by the MAKA
+   Confirmed username: **@MAKA_com_ua_bot** — https://t.me/MAKA_com_ua_bot
+   (created in BotFather on 2026-10-24). The bot must be owned by the MAKA
    operator's Telegram account, not a developer account.
 2. Keep the Bot API token secret: **never** commit, post to PR/issues or copy it
    into a chat. Store it securely in the deployment environment as
