@@ -35,18 +35,48 @@ export function escapeTelegramHtml(value) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-function currency(value) {
+
+function lang(locale) {
+  return locale === "en" ? "en" : "uk";
+}
+
+const COPY = {
+  uk: {
+    own: "Склад MAKA", partner: "Постачальники (під замовлення)",
+    from: "від", offers: "проп.", pcs: "шт.", more: "… і ще",
+    noOffers: "Немає доступних пропозицій.", notFound: "не знайдено",
+    part: "Запчастина", replacementNumber: "Заміна номера",
+    replacements: "Заміни", analogs: "Аналоги", open: "Переглянути на MAKA",
+    tooMany: "Максимум 20 артикулів в одному повідомленні.",
+    invalidLength: "Занадто довге або порожнє повідомлення.",
+    invalidArticle: "Надішліть артикул (літери й цифри) або список артикулів, по одному в рядку.",
+    results: "Результати", of: "з",
+  },
+  en: {
+    own: "MAKA warehouse", partner: "Suppliers (on order)",
+    from: "from", offers: "offers", pcs: "pcs", more: "… and",
+    noOffers: "No available offers.", notFound: "not found",
+    part: "Part", replacementNumber: "Superseded by",
+    replacements: "Replacements", analogs: "Alternatives", open: "View on MAKA",
+    tooMany: "You can search for up to 20 part numbers per message.",
+    invalidLength: "This message is empty or too long.",
+    invalidArticle: "Send a part number (letters and digits), or a list of part numbers, one per line.",
+    results: "Results", of: "of",
+  },
+};
+
+function currency(value, locale = "uk") {
   const amount = Number(value);
   return Number.isFinite(amount) && amount > 0
-    ? new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 2 }).format(amount) + " грн"
+    ? new Intl.NumberFormat(lang(locale) === "en" ? "en-GB" : "uk-UA", { maximumFractionDigits: 2 }).format(amount)
+      + (lang(locale) === "en" ? " UAH" : " грн")
     : null;
 }
 
 function articleUrl(article, locale) {
   const normalized = normalizeArticle(article);
   if (!ARTICLE_RE.test(normalized)) return null;
-  const lang = ["uk", "ru", "en"].includes(locale) ? locale : "uk";
-  return "https://maka.com.ua/" + lang + "/product/" + encodeURIComponent(article);
+  return "https://maka.com.ua/" + lang(locale) + "/product/" + encodeURIComponent(article);
 }
 
 function available(offers) {
@@ -55,57 +85,59 @@ function available(offers) {
 }
 
 function stockLines(offers, locale, compact) {
+  const t = COPY[lang(locale)];
   const live = available(offers);
   const own = live.filter((offer) => offer.sourceType === "OWN_STOCK");
   const partner = live.filter((offer) => offer.sourceType === "SUPPLIER");
   const groups = [
-    ["🏬", "Склад MAKA", own],
-    ["🚚", "Поставщики (под заказ)", partner],
+    ["🏬", t.own, own],
+    ["🚚", t.partner, partner],
   ];
   const lines = [];
   for (const [emoji, name, group] of groups) {
     if (!group.length) continue;
     const entries = [...group].sort((a, b) => a.retailPrice - b.retailPrice);
     if (compact) {
-      lines.push(emoji + " " + name + ": от " + currency(entries[0].retailPrice)
-        + " (" + entries.length + " предл.)");
+      lines.push(emoji + " " + name + ": " + t.from + " " + currency(entries[0].retailPrice, locale)
+        + " (" + entries.length + " " + t.offers + ")");
     } else {
       lines.push(emoji + " <b>" + name + "</b>");
       for (const offer of entries.slice(0, 3)) {
         const qty = offer.displayQuantity || String(offer.quantity);
         const city = offer.sourceType === "OWN_STOCK" && offer.warehouseCity
           ? " · " + escapeTelegramHtml(offer.warehouseCity) : "";
-        lines.push("• " + currency(offer.retailPrice) + " · " + escapeTelegramHtml(qty)
-          + " шт." + city + (offer.sourceType === "SUPPLIER" && offer.availabilityText
+        lines.push("• " + currency(offer.retailPrice, locale) + " · " + escapeTelegramHtml(qty)
+          + " " + t.pcs + city + (offer.sourceType === "SUPPLIER" && offer.availabilityText
             ? " · " + escapeTelegramHtml(offer.availabilityText) : ""));
       }
-      if (entries.length > 3) lines.push("… и ещё " + (entries.length - 3) + " предл.");
+      if (entries.length > 3) lines.push(t.more + " " + (entries.length - 3) + " " + t.offers);
     }
   }
-  if (!lines.length) lines.push("Нет доступных предложений.");
+  if (!lines.length) lines.push(t.noOffers);
   return lines;
 }
 
-function relatedLines(items, title) {
+function relatedLines(items, title, locale) {
   const visible = (items || []).filter((item) => available(item.offers).length > 0).slice(0, 3);
   if (!visible.length) return [];
   return [
     "<b>" + title + ":</b>",
     ...visible.map(({ product, offers }) => {
       const price = Math.min(...available(offers).map((offer) => Number(offer.retailPrice)));
-      return "• " + escapeTelegramHtml(product.article || "") + " — " + currency(price);
+      return "• " + escapeTelegramHtml(product.article || "") + " — " + currency(price, locale);
     }),
   ];
 }
 
 export function formatTelegramProduct({ query, card, locale = "uk", replacementArticle = null, compact = false }) {
+  const t = COPY[lang(locale)];
   if (!card?.product) {
-    return { text: "❌ <code>" + escapeTelegramHtml(query) + "</code> — не найдено" };
+    return { text: "❌ <code>" + escapeTelegramHtml(query) + "</code> — " + t.notFound };
   }
   const product = card.product;
   const article = String(product.article || query);
   const url = articleUrl(article, locale);
-  const name = String(product.name || "Запчасть").slice(0, 180);
+  const name = String(product.name || t.part).slice(0, 180);
   const heading = escapeTelegramHtml(article);
   const articleLabel = compact && url
     ? '<a href="' + escapeTelegramHtml(url) + '">' + heading + "</a>"
@@ -114,49 +146,57 @@ export function formatTelegramProduct({ query, card, locale = "uk", replacementA
   const lines = [header, ...stockLines(card.offers, locale, compact)];
   if (!compact) {
     if (replacementArticle && normalizeArticle(replacementArticle) !== normalizeArticle(article)) {
-      lines.push("🔄 Замена номера: <code>" + escapeTelegramHtml(replacementArticle) + "</code>");
+      lines.push("🔄 " + t.replacementNumber + ": <code>" + escapeTelegramHtml(replacementArticle) + "</code>");
     }
-    lines.push(...relatedLines(card.replacements, "Замены"));
-    lines.push(...relatedLines(card.analogs, "Аналоги"));
+    lines.push(...relatedLines(card.replacements, t.replacements, locale));
+    lines.push(...relatedLines(card.analogs, t.analogs, locale));
   }
   const text = lines.join("\n").slice(0, MAX_HTML_LENGTH);
   return {
     text,
     ...(url && !compact ? { reply_markup: {
-      inline_keyboard: [[{ text: "Посмотреть на MAKA", url }]],
+      inline_keyboard: [[{ text: t.open, url }]],
     } } : {}),
     ...(url && compact ? { url } : {}),
   };
 }
 
-export function formatTelegramNotFound(article) {
-  return { text: "❌ <code>" + escapeTelegramHtml(article) + "</code> — не найдено" };
+export function formatTelegramNotFound(article, locale = "uk") {
+  return { text: "❌ <code>" + escapeTelegramHtml(article) + "</code> — " + COPY[lang(locale)].notFound };
 }
 
 export function formatTelegramHelp({ firstName = null, locale = "uk" } = {}) {
   const safeName = String(firstName ?? "").trim().slice(0, 60);
-  const hello = locale === "en" ? "Hello" : locale === "ru" ? "Привет" : "Привіт";
-  const greeting = hello + (safeName ? ", " + escapeTelegramHtml(safeName) : "") + "!";
-  return { parse_mode: "HTML", text: "🤖 <b>" + greeting + " Я MAKAtron — робот-помічник MAKA.com.ua.</b>\n"
-    + "Надішліть артикул або список до 20 артикулів — по одному в рядку (або через кому чи ;).\n"
-    + "Перевірю склад MAKA, пропозиції постачальників, заміни й аналоги.\n"
-    + "Персональна ціна доступна після прив’язки Telegram у профілі MAKA." };
+  const english = lang(locale) === "en";
+  const greeting = (english ? "Hello" : "Привіт") +
+    (safeName ? ", " + escapeTelegramHtml(safeName) : "") + "!";
+  return { parse_mode: "HTML", text: english
+    ? "🤖 <b>" + greeting + " I'm MAKAtron, your MAKA.com.ua parts assistant.</b>\n"
+      + "Send a part number or a list of up to 20 numbers, one per line (or separated by comma or ;).\n"
+      + "I'll check MAKA stock, supplier offers, replacements and alternatives.\n"
+      + "Your personal price is available after connecting Telegram to your MAKA account.\n"
+      + "🌐 Change language: /language"
+    : "🤖 <b>" + greeting + " Я MAKAtron — робот-помічник MAKA.com.ua.</b>\n"
+      + "Надішліть артикул або список до 20 артикулів — по одному в рядку (або через кому чи ;).\n"
+      + "Перевірю склад MAKA, пропозиції постачальників, заміни й аналоги.\n"
+      + "Персональна ціна доступна після прив’язки Telegram у профілі MAKA.\n"
+      + "🌐 Змінити мову: /language" };
 }
 
-export function formatTelegramInputError(error) {
-  const message = error === "TOO_MANY" ? "Максимум 20 артикулов в одном сообщении."
-    : error === "INPUT_LENGTH" ? "Слишком длинное или пустое сообщение."
-    : "Отправьте артикул (буквы и цифры) или список артикулов, по одному в строке.";
+export function formatTelegramInputError(error, locale = "uk") {
+  const t = COPY[lang(locale)];
+  const message = error === "TOO_MANY" ? t.tooMany
+    : error === "INPUT_LENGTH" ? t.invalidLength : t.invalidArticle;
   return { text: "⚠️ " + message };
 }
 
-export function formatTelegramBatch(results) {
-  // 5 entries per Telegram message keeps each part below Telegram's 4096-char limit.
+export function formatTelegramBatch(results, locale = "uk") {
+  const t = COPY[lang(locale)];
   const chunks = [];
   for (let i = 0; i < results.length; i += 5) {
     chunks.push({
-      text: "<b>MAKAtron · Результати " + (i + 1) + "–" + Math.min(i + 5, results.length)
-        + " из " + results.length + "</b>\n\n"
+      text: "<b>MAKAtron · " + t.results + " " + (i + 1) + "–" + Math.min(i + 5, results.length)
+        + " " + t.of + " " + results.length + "</b>\n\n"
         + results.slice(i, i + 5).map((r) => r.text).join("\n\n"),
       parse_mode: "HTML",
     });
