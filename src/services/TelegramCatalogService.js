@@ -11,6 +11,8 @@ import {
 // Telegram identity is trusted only when BOTH the chat and sending user
 // match a currently active, uniquely linked MAKA client. No staff price matrix.
 export async function resolveTelegramPricingIdentity({ chatId, telegramUserId }, db = pool) {
+  // A new bot must never reuse personal-price identity from an old bot.
+  if (process.env.TELEGRAM_CATALOG_GUEST_ONLY === "true") return null;
   if (!chatId || !telegramUserId) return null;
   const result = await db.query(
     "SELECT c.user_id, c.preferred_locale, u.first_name "
