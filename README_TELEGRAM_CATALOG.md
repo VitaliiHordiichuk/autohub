@@ -1,5 +1,35 @@
 # MAKA Telegram catalogue lookup (review draft)
 
+## MAKA branding and clean bot launch
+**Use a new, dedicated Telegram bot identity branded MAKA.** This branch does not
+register that bot and must not be enabled with the previous bot's credentials.
+
+1. The MAKA owner creates a new bot through the verified `@BotFather` using
+   `/newbot`. Suggested display name: **MAKA | Автозапчастини**.
+   Suggested username: **MAKA_Parts_UA_bot** (only if available; username
+   availability is decided by BotFather). The bot must be owned by the MAKA
+   operator's Telegram account, not a developer account.
+2. Keep the Bot API token secret: **never** commit, post to PR/issues or copy it
+   into a chat. Store it securely in the deployment environment as
+   `TELEGRAM_BOT_TOKEN` and set `TELEGRAM_BOT_USERNAME` to the chosen
+   new username. Prefer a distinct staging bot token for initial testing.
+3. Profile setup in BotFather: MAKA brand avatar, MAKA-only description, site
+   link `https://maka.com.ua`, and commands `start` / `help`.
+4. The new bot is a **different Telegram identity**. Prior bot conversations
+   and bot-owned message access do not transfer automatically. Customers should
+   open the new bot and re-link from their MAKA account if they want personal
+   prices or notifications. Do not assume saved chat links from an earlier
+   bot are migrated or that customers can receive messages before starting
+   the new bot.
+5. Before switching production credentials, audit/migrate the
+   `user_telegram_connections` records: they were not originally scoped by
+   bot identity. Treat legacy connections as stale until re-linked through the
+   new bot. Avoid deleting live links without a database backup and migration
+   plan. Ensure order/VIN notification delivery and opt-in privacy remain intact.
+6. Maintain `TELEGRAM_CATALOG_SEARCH_ENABLED=false` until staging validates
+   replies, pricing, stock grouping and new-bot onboarding. No production
+   credential change is part of this PR.
+
 ## Scope
 - Private-chat lookup by one article or by 2–20 articles separated by newline, comma or semicolon.
 - Reuse `SearchService` and `ProductCardService`: canonical Mercedes A/N, exact matches, replacement paths, analogues, stock offers.
