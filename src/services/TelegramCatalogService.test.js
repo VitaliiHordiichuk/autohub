@@ -42,13 +42,14 @@ test("личную скидку получает только уникальна
   const queries = [];
   const db = { query: async (sql, args) => {
     queries.push({ sql, args });
-    return { rows: [{ user_id: 42, preferred_locale: "uk" }] };
+    return { rows: [{ user_id: 42, preferred_locale: "uk", first_name: "Олександр" }] };
   } };
   const result = await resolveTelegramPricingIdentity(
     { chatId: 1001, telegramUserId: 2002 }, db,
   );
-  assert.deepEqual(result, { userId: 42, locale: "uk" });
+  assert.deepEqual(result, { userId: 42, locale: "uk", firstName: "Олександр" });
   assert.deepEqual(queries[0].args, [1001, 2002]);
+  assert.match(queries[0].sql, /u\.first_name/);
   assert.match(queries[0].sql, /u\.is_active = TRUE/);
   assert.match(queries[0].sql, /r\.name = 'CLIENT'/);
   assert.match(queries[0].sql, /c\.telegram_user_id = \$2/);
@@ -121,4 +122,27 @@ test("команды /start и /help не запускают поиск по т�
   assert.match((await searchTelegramCatalog({ text: "/help" }, services))[0].text, /MAKA/);
   assert.deepEqual(await searchTelegramCatalog({ text: "/unknown" }, services), []);
   assert.equal(calls.searched.length, 0);
+});
+
+
+test("по /start MAKAtron приветствует клиента по имени из его профиля", async () => {
+  const { services, calls } = mockServices({ viewer: {
+    userId: 42, firstName: "Олександр", locale: "uk",
+  } });
+  const [reply] = await searchTelegramCatalog({
+    text: "/start", chatId: 1001, telegramUserId: 2002,
+  }, services);
+  assert.match(reply.text, /Привіт, Олександр!/);
+  assert.match(reply.text, /MAKAtron/);
+  assert.equal(reply.parse_mode, "HTML");
+  assert.equal(calls.searched.length, 0);
+});
+
+test("по /start незарегистрированного гостя приветствует без имени", async () => {
+  const { services } = mockServices();
+  const [reply] = await searchTelegramCatalog({
+    text: "/start", chatId: 1001, telegramUserId: 2002,
+  }, services);
+  assert.match(reply.text, /Привіт! Я MAKAtron/);
+  assert.doesNotMatch(reply.text, /Олександр/);
 });
