@@ -134,10 +134,10 @@ export function formatTelegramNotFound(article) {
 }
 
 export function formatTelegramHelp() {
-  return { text: "🤖 <b>MAKAtron — поиск запчастей</b>\n"
-    + "Отправьте артикул или до 20 артикулов, каждый с новой строки (можно через запятую или ;).\n"
-    + "Покажу наличие на складе MAKA, предложения поставщиков, замены и аналоги.\n"
-    + "Персональная цена доступна только после привязки Telegram в профиле MAKA." };
+  return { text: "🤖 <b>Привіт! Я MAKAtron — робот-помічник MAKA.com.ua.</b>\n"
+    + "Надішліть артикул або список до 20 артикулів — по одному в рядку (або через кому чи ;).\n"
+    + "Перевірю склад MAKA, пропозиції постачальників, заміни й аналоги.\n"
+    + "Персональна ціна доступна після прив’язки Telegram у профілі MAKA." };
 }
 
 export function formatTelegramInputError(error) {
@@ -152,7 +152,7 @@ export function formatTelegramBatch(results) {
   const chunks = [];
   for (let i = 0; i < results.length; i += 5) {
     chunks.push({
-      text: "<b>MAKAtron · Результаты " + (i + 1) + "–" + Math.min(i + 5, results.length)
+      text: "<b>MAKAtron · Результати " + (i + 1) + "–" + Math.min(i + 5, results.length)
         + " из " + results.length + "</b>\n\n"
         + results.slice(i, i + 5).map((r) => r.text).join("\n\n"),
       parse_mode: "HTML",
