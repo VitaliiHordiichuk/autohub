@@ -10,6 +10,10 @@ function catalogEnabled() {
   return /^(1|true|yes|on)$/i.test(String(process.env.TELEGRAM_CATALOG_SEARCH_ENABLED || "false"));
 }
 
+function linkingEnabled() {
+  return String(process.env.TELEGRAM_BOT_LINKING_ENABLED ?? "true").trim().toLowerCase() !== "false";
+}
+
 
 async function api(method, body = {}) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -31,6 +35,12 @@ async function poll() {
     for (const update of updates) {
       offset = Math.max(offset, Number(update.update_id) + 1);
       const message = update.message;
+      // Isolated MAKAtron guest preview must not modify legacy phone verification.
+      if (!linkingEnabled() && message?.contact && message?.chat?.id) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: "Прив'язка профілю MAKAtron наразі недоступна. Надішліть артикул для пошуку." });
+        continue;
+      }
       if (message?.contact && message?.chat?.id && message?.from?.id) {
         const ownsContact = !message.contact.user_id || Number(message.contact.user_id) === Number(message.from.id);
         const verification = ownsContact
@@ -59,6 +69,11 @@ async function poll() {
         continue;
       }
       const match = String(message?.text || "").match(/^\/start\s+([a-f0-9]{48})$/i);
+      if (!linkingEnabled() && match && message?.chat?.id) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: "Прив'язка акаунта MAKA до нового бота ще не ввімкнена. Можете шукати запчастини за артикулом." });
+        continue;
+      }
       if (match && message?.chat?.id) {
       const connection = await TelegramConnectionService.connectFromTelegram({
         token: match[1],
