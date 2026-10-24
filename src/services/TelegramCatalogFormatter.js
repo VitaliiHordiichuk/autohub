@@ -106,7 +106,11 @@ export function formatTelegramProduct({ query, card, locale = "uk", replacementA
   const article = String(product.article || query);
   const url = articleUrl(article, locale);
   const name = String(product.name || "Запчасть").slice(0, 180);
-  const header = "🔎 <b>" + escapeTelegramHtml(article) + "</b> — " + escapeTelegramHtml(name);
+  const heading = escapeTelegramHtml(article);
+  const articleLabel = compact && url
+    ? '<a href="' + escapeTelegramHtml(url) + '">' + heading + "</a>"
+    : "<b>" + heading + "</b>";
+  const header = "🔎 " + articleLabel + " — " + escapeTelegramHtml(name);
   const lines = [header, ...stockLines(card.offers, locale, compact)];
   if (!compact) {
     if (replacementArticle && normalizeArticle(replacementArticle) !== normalizeArticle(article)) {
