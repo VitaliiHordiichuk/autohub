@@ -1,8 +1,15 @@
 import { TelegramConnectionService } from "./TelegramConnectionService.js";
+import { searchTelegramCatalog } from "./TelegramCatalogService.js";
 
 let timer = null;
 let offset = 0;
 let polling = false;
+const lastCatalogSearch = new Map();
+
+function catalogEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.TELEGRAM_CATALOG_SEARCH_ENABLED || "false"));
+}
+
 
 async function api(method, body = {}) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -52,7 +59,7 @@ async function poll() {
         continue;
       }
       const match = String(message?.text || "").match(/^\/start\s+([a-f0-9]{48})$/i);
-      if (!match || !message?.chat?.id) continue;
+      if (match && message?.chat?.id) {
       const connection = await TelegramConnectionService.connectFromTelegram({
         token: match[1],
         chatId: message.chat.id,
@@ -80,6 +87,29 @@ async function poll() {
           reply_markup:{keyboard:[[{text:buttonCopy[connection.locale]||buttonCopy.uk,request_contact:true}]],resize_keyboard:true,one_time_keyboard:true},
         }:{}),
       });
+        continue;
+      }
+      // Search is optional and only runs in private chats. Existing /start links
+      // and contact verification remain active regardless of this feature flag.
+      const text = String(message?.text || "").trim();
+      if (!catalogEnabled() || message?.chat?.type !== "private" ||
+          !message?.chat?.id || !message?.from?.id || !text) continue;
+      const key = String(message.from.id);
+      const now = Date.now();
+      if (now - (lastCatalogSearch.get(key) || 0) < 3000) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: "⏳ Повторите запрос через несколько секунд." });
+        continue;
+      }
+      lastCatalogSearch.set(key, now);
+      // Bound in-memory throttling entries; no permanent client history.
+      if (lastCatalogSearch.size > 1000) lastCatalogSearch.clear();
+      const replies = await searchTelegramCatalog({
+        text, chatId: message.chat.id, telegramUserId: message.from.id,
+      });
+      for (const reply of replies) {
+        await api("sendMessage", { chat_id: message.chat.id, ...reply });
+      }
     }
   } catch (error) {
     console.error("Ошибка Telegram-бота:", error.message);
