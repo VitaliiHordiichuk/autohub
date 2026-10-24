@@ -1,5 +1,5 @@
-// Dedicated MAKAtron Telegram polling worker. Does NOT start HTTP, jobs,
-// order notifications, or modify account links in this preview mode.
+// Dedicated MAKAtron polling worker; only handles incoming Telegram messages.
+// HTTP, scheduled jobs and outgoing order notifications stay on the main backend.
 import "dotenv/config";
 
 const expectedUsername = "MAKA_com_ua_bot";
@@ -21,13 +21,21 @@ if (!response.ok || data?.ok !== true
   throw new Error("Bot token does not belong to @MAKA_com_ua_bot; worker not started");
 }
 
-// Force read-only guest testing until old and new bot account links are
-// isolated and customers explicitly relink to the new bot.
-process.env.TELEGRAM_BOT_LINKING_ENABLED = "false";
-process.env.TELEGRAM_CATALOG_GUEST_ONLY = "true";
+// Guest-only, no-linking mode is the SAFE DEFAULT. Flip flags explicitly
+// only after the active website backend is switched to this bot's token and
+// that backend has polling disabled. Existing links can be reused if their
+// chat and Telegram user IDs are verified against the new bot.
+const linkingEnabled = /^(true|1|yes|on)$/i.test(
+  String(process.env.TELEGRAM_BOT_LINKING_ENABLED ?? "false").trim()
+);
+const guestOnly = !/^(false|0|no|off)$/i.test(
+  String(process.env.TELEGRAM_CATALOG_GUEST_ONLY ?? "true").trim()
+);
+process.env.TELEGRAM_BOT_LINKING_ENABLED = String(linkingEnabled);
+process.env.TELEGRAM_CATALOG_GUEST_ONLY = String(guestOnly);
 process.env.TELEGRAM_CATALOG_SEARCH_ENABLED = "true";
 process.env.TELEGRAM_BOT_POLLING_ENABLED = "true";
 
 const { startTelegramBot } = await import("../src/services/TelegramBotService.js");
 startTelegramBot();
-console.log("MAKAtron isolated catalogue worker started (guest-only, linking disabled)");
+console.log("MAKAtron worker ready: link=" + linkingEnabled + ", guestOnly=" + guestOnly);
