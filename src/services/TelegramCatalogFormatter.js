@@ -19,7 +19,7 @@ export function parseTelegramArticles(input) {
   const seen = new Set();
   for (const part of parts) {
     const normalized = normalizeArticle(part);
-    if (!ARTICLE_RE.test(normalized) || !/\d/.test(normalized) || part.length > 255) {
+    if (/[<>{}]/.test(part) || !ARTICLE_RE.test(normalized) || !/\d/.test(normalized) || part.length > 255) {
       return { error: "INVALID_ARTICLE", articles: [] };
     }
     if (!seen.has(normalized)) {
