@@ -133,8 +133,11 @@ export function formatTelegramNotFound(article) {
   return { text: "❌ <code>" + escapeTelegramHtml(article) + "</code> — не найдено" };
 }
 
-export function formatTelegramHelp() {
-  return { text: "🤖 <b>Привіт! Я MAKAtron — робот-помічник MAKA.com.ua.</b>\n"
+export function formatTelegramHelp({ firstName = null, locale = "uk" } = {}) {
+  const safeName = String(firstName ?? "").trim().slice(0, 60);
+  const hello = locale === "en" ? "Hello" : locale === "ru" ? "Привет" : "Привіт";
+  const greeting = hello + (safeName ? ", " + escapeTelegramHtml(safeName) : "") + "!";
+  return { parse_mode: "HTML", text: "🤖 <b>" + greeting + " Я MAKAtron — робот-помічник MAKA.com.ua.</b>\n"
     + "Надішліть артикул або список до 20 артикулів — по одному в рядку (або через кому чи ;).\n"
     + "Перевірю склад MAKA, пропозиції постачальників, заміни й аналоги.\n"
     + "Персональна ціна доступна після прив’язки Telegram у профілі MAKA." };
