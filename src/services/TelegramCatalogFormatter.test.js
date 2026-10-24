@@ -44,7 +44,7 @@ test("отклоняет пустой ввод, подозрительные с�
 test("раздельно показывает MAKA и поставщиков, без недоступных предложений", () => {
   const response = formatTelegramProduct({ query: "A2711800109", card, locale: "uk" });
   assert.match(response.text, /Склад MAKA/);
-  assert.match(response.text, /Поставщики/);
+  assert.match(response.text, /Постачальники/);
   assert.match(response.text, /950/);
   assert.match(response.text, /880/);
   assert.doesNotMatch(response.text, /20 грн/);
@@ -56,10 +56,10 @@ test("раздельно показывает MAKA и поставщиков, б
 test("аналог, замена и безопасный HTML вывод", () => {
   const response = formatTelegramProduct({ query: "A2711800109", card,
     replacementArticle: "A2711800209" });
-  assert.match(response.text, /Замены/);
+  assert.match(response.text, /Заміни/);
   assert.match(response.text, /Аналоги/);
   assert.match(response.text, /HU7185X/);
-  assert.match(response.text, /Замена номера/);
+  assert.match(response.text, /Заміна номера/);
   assert.match(response.text, /&lt;Mercedes&gt; &amp;/);
   assert.doesNotMatch(response.text, /<Mercedes>/);
   assert.equal(escapeTelegramHtml('"<tag>"'), "&quot;&lt;tag&gt;&quot;");
@@ -87,10 +87,23 @@ test("приветствие персонализировано, но имя э�
   const hello = formatTelegramHelp({ firstName: "Олександр", locale: "uk" });
   assert.match(hello.text, /Привіт, Олександр!/);
   assert.equal(hello.parse_mode, "HTML");
-  assert.match(formatTelegramHelp({ firstName: "Иван", locale: "ru" }).text, /Привет, Иван!/);
+  assert.match(formatTelegramHelp({ firstName: "Іван", locale: "ru" }).text, /Привіт, Іван!/);
   assert.match(formatTelegramHelp({ firstName: "Alex", locale: "en" }).text, /Hello, Alex!/);
   const unsafe = formatTelegramHelp({ firstName: "<b>Іван & Co</b>", locale: "uk" });
   assert.match(unsafe.text, /&lt;b&gt;Іван &amp; Co&lt;\/b&gt;/);
   assert.doesNotMatch(unsafe.text, /<b>Іван/);
   assert.match(formatTelegramHelp().text, /Привіт! Я MAKAtron/);
+});
+
+test("українська — типова мова, англійська — лише після вибору", () => {
+  const en = formatTelegramProduct({ query:"A2711800109", card, locale:"en" });
+  assert.match(en.text, /MAKA warehouse/);
+  assert.match(en.text, /Suppliers \(on order\)/);
+  assert.match(en.text, /UAH/);
+  assert.doesNotMatch(en.text, /Поставщики|Замены|Склад MAKA/);
+  assert.match(en.reply_markup.inline_keyboard[0][0].url, /\/en\/product\//);
+  assert.match(formatTelegramInputError("TOO_MANY", "en").text, /up to 20/);
+  assert.match(formatTelegramHelp({ locale:"en" }).text, /Send a part number/);
+  assert.match(formatTelegramHelp({ locale:"ru" }).text, /Привіт/);
+  assert.match(formatTelegramInputError("INVALID_ARTICLE", "ru").text, /Надішліть артикул/);
 });
