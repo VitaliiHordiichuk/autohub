@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { TelegramGuestOrderRecipientRepository } from "../repositories/TelegramGuestOrderRecipientRepository.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -225,10 +226,19 @@ export const TelegramNotificationService = {
     });
   },
 
-  async sendOrderStatusToUser({ userId, orderId, status }, db = pool) {
-    if (process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN || !userId) return;
+  async sendOrderStatusToUser({ userId, orderId, status }, db = pool, transport = sendMessage) {
+    if ((process.env.NODE_ENV === "test" || !process.env.TELEGRAM_BOT_TOKEN) && transport === sendMessage) return;
+    // Registered users use the existing linked-account notifications. Only
+    // orders placed as Telegram guests use the extra private-chat recipient.
     const [connectionResult, orderResult, itemsResult] = await Promise.all([
-      db.query(`SELECT c.telegram_chat_id, COALESCE(lang.locale, 'uk') AS preferred_locale FROM user_telegram_connections c LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id WHERE c.user_id = $1 AND notifications_enabled = TRUE`, [userId]),
+      userId
+        ? db.query(`SELECT c.telegram_chat_id, COALESCE(lang.locale, 'uk') AS preferred_locale FROM user_telegram_connections c LEFT JOIN telegram_bot_locales lang ON lang.chat_id = c.telegram_chat_id WHERE c.user_id = $1 AND notifications_enabled = TRUE`, [userId])
+        : db.query(`
+          SELECT g.telegram_chat_id, COALESCE(lang.locale,'uk') AS preferred_locale
+          FROM telegram_guest_order_recipients g
+          LEFT JOIN telegram_bot_locales lang ON lang.chat_id=g.telegram_chat_id
+          WHERE g.order_id=$1
+        `, [orderId]),
       db.query("SELECT total_amount FROM orders WHERE id = $1", [orderId]),
       db.query(`SELECT p.article, p.name, oi.quantity
         FROM order_items oi JOIN products p ON p.id = oi.product_id
@@ -236,6 +246,7 @@ export const TelegramNotificationService = {
     ]);
     if (!connectionResult.rows[0]) return;
 
+    const guestOrder=!userId;
     const locale = localeOf(connectionResult.rows[0].preferred_locale);
     const copy = {
       uk:{ CONFIRMED:"✅ Ваше замовлення підтверджено", COMPLETED:"🎉 Ваше замовлення завершено", CANCELLED:"↩️ Ваше замовлення скасовано", order:"Замовлення", total:"Сума", more:"і ще", open:"Переглянути замовлення" },
@@ -263,9 +274,10 @@ export const TelegramNotificationService = {
       `${copy.total}: <b>${escapeHtml(formatMoney(orderResult.rows[0]?.total_amount))}</b>`,
     ].join("\n");
 
-    await sendMessage(connectionResult.rows[0].telegram_chat_id, {
+    await transport(connectionResult.rows[0].telegram_chat_id, {
       text,
-      ...(canOpenOrder ? {
+      // Guest buyers cannot open the private /account/orders website route.
+      ...(canOpenOrder && !guestOrder ? {
         reply_markup: { inline_keyboard: [[{ text: copy.open, url: orderUrl }]] },
       } : {}),
     });
