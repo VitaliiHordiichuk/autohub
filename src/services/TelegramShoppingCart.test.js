@@ -56,6 +56,15 @@ test("Unavailable offer cannot sneak into final checkout",async()=>{
   assert.equal(r.changed,true);
   assert.equal(r.items[0].quantity,0);
   assert.equal(r.items[0].offers.length,0);
+  assert.equal(r.items[0].missingOfferId,2143);
+  const button=renderTelegramOrder({stage:"CART",draft:{items:r.items},sessionKey:"aabbccdd11"});
+  assert.deepEqual(button.reply_markup.inline_keyboard[0].map(b=>b.text),["№1","🗑"]);
+  const restored=await refreshTelegramCartItems(r.items,{resolveItem:async()=>item("A2711800109",2143,120,0,3)});
+  assert.equal(restored.changed,true);
+  assert.equal(restored.items[0].offers[0].offerId,2143);
+  const updated=mergeTelegramCartItems(r.items,[item("A2711800109",2143,120,1,3)]);
+  assert.equal(updated.items.length,1);
+  assert.equal(updated.items[0].quantity,1);
 });
 test("Persisted cart is scoped to a private Telegram identity and survives searches",async()=>{
   let snapshot=[];
