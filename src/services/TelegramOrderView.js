@@ -3,9 +3,15 @@ import { escapeTelegramHtml } from "./TelegramCatalogFormatter.js";
 export function telegramOrderLocale(locale) { return locale === "en" ? "en" : "uk"; }
 const TXT = {
   uk: {
-    header: "🛒 <b>Ваш список запчастин</b>", count:"Доступно",selected:"Обрано",
+    header: "🔎 <b>Результати пошуку</b>", count:"Доступно",selected:"Обрано",
     none:"Не знайдено", unavailable:"Немає в наявності", total:"Разом",pcs:"шт.",
-    add:"➕ Додати запчастину", next:"✅ Підтвердити замовлення",
+    add:"➕ Ще артикул", next:"🛒 Додати вибране до кошика",
+    cartTitle:"🛒 <b>Ваш кошик</b>",cartAdd:"➕ Додати запчастини",checkout:"✅ Оформити замовлення",
+    clearCart:"🗑 Очистити кошик",clearQuestion:"<b>Видалити всі товари з кошика?</b>",
+    clearYes:"🗑 Так, очистити",clearNo:"Ні, залишити",
+    cartSaved:"✅ Вибрані товари додано до кошика.",cartEmpty:"Кошик порожній.",
+    searchPrompt:"🔎 Надішліть артикул або список артикулів для пошуку.",
+    cartWarning:"⚠️ Ціни або залишки змінилися. Перевірте оновлений кошик перед оформленням.",
     sourceOwn:"Склад MAKA", sourceSupplier:"Постачальник", more:"Змінити пропозицію",
     pickup:"🏬 Самовивіз", shipping:"🚚 Нова пошта", back:"⬅️ До списку",
     delivery:"<b>Оберіть спосіб отримання</b>", city:"Введіть місто Нової пошти повідомленням.",
@@ -27,9 +33,15 @@ const TXT = {
     split:"Товари зі складу MAKA та від постачальників оформлюються окремими замовленнями.",
   },
   en: {
-    header:"🛒 <b>Your parts list</b>",count:"Available",selected:"Selected",
+    header:"🔎 <b>Search results</b>",count:"Available",selected:"Selected",
     none:"Not found",unavailable:"Out of stock",total:"Total",pcs:"pcs",
-    add:"➕ Add part",next:"✅ Confirm items",
+    add:"➕ More articles",next:"🛒 Add selected to cart",
+    cartTitle:"🛒 <b>Your cart</b>",cartAdd:"➕ Add parts",checkout:"✅ Checkout",
+    clearCart:"🗑 Clear cart",clearQuestion:"<b>Remove every item from your cart?</b>",
+    clearYes:"🗑 Yes, clear",clearNo:"No, keep items",
+    cartSaved:"✅ Selected items were added to your cart.",cartEmpty:"Your cart is empty.",
+    searchPrompt:"🔎 Send a part number or list of part numbers.",
+    cartWarning:"⚠️ Prices or stock changed. Review your updated cart before checkout.",
     sourceOwn:"MAKA warehouse",sourceSupplier:"Supplier",more:"Switch offer",
     pickup:"🏬 Collection",shipping:"🚚 Nova Poshta",back:"⬅️ Back to parts",
     delivery:"<b>Select delivery method</b>",city:"Send your Nova Poshta city as a message.",
@@ -52,6 +64,19 @@ const TXT = {
   },
 };
 export function orderText(locale) { return TXT[telegramOrderLocale(locale)]; }
+export function telegramMainKeyboard(locale="uk") {
+  return {keyboard:[[
+    {text:locale==="en"?"🔎 Search":"🔎 Пошук"},
+    {text:locale==="en"?"🛒 Cart":"🛒 Кошик"},
+  ]],resize_keyboard:true,is_persistent:true};
+}
+export function telegramMenuIntent(text){
+  const input=String(text||"").trim();
+  if(["🔎 Пошук","🔎 Search"].includes(input))return "search";
+  if(["🛒 Кошик","🛒 Cart"].includes(input))return "cart";
+  return null;
+}
+
 export function money(value,locale="uk") {
   return new Intl.NumberFormat(locale === "en" ? "en-GB" : "uk-UA",{maximumFractionDigits:2}).format(Number(value || 0))
     + (locale === "en" ? " UAH" : " грн");
@@ -59,7 +84,7 @@ export function money(value,locale="uk") {
 function cb(key, action, index = null) {return "mo:" + key + ":" + action + (index === null ? "" : ":" + Number(index).toString(36));}
 export function orderKeyboard(key,stage,draft,locale="uk") {
   const t = orderText(locale);
-  if (stage === "EDIT") {
+  if (stage === "EDIT" || stage === "CART") {
     const rows = [];
     const items = draft.items || [];
     // One compact row per part, referenced by its number in the quote above.
@@ -87,10 +112,20 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
       if (page < pageCount - 1) navigation.push({text: "▶", callback_data: cb(key, "pgnext")});
       rows.push(navigation);
     }
-    rows.push([{text:t.add,callback_data:cb(key,"add")}]);
-    rows.push([{text:t.next,callback_data:cb(key,"next")}]);
+    if(stage==="EDIT") {
+      rows.push([{text:t.next,callback_data:cb(key,"next")}]);
+      rows.push([{text:t.add,callback_data:cb(key,"add")}]);
+    } else {
+      rows.push([{text:t.cartAdd,callback_data:cb(key,"more")}]);
+      rows.push([{text:t.checkout,callback_data:cb(key,"checkout")}]);
+      rows.push([{text:t.clearCart,callback_data:cb(key,"clear")}]);
+    }
     return {inline_keyboard: rows};
   }
+  if(stage==="CART_CLEAR_CONFIRM")return {inline_keyboard:[
+    [{text:t.clearYes,callback_data:cb(key,"clearok")}],
+    [{text:t.clearNo,callback_data:cb(key,"clearcancel")}],
+  ]};
   // Historic draft data must never render internal warehouse names or addresses.
   if (stage === "PICKUP") return {inline_keyboard:[
     [{text:t.back,callback_data:cb(key,"back")}],
@@ -143,8 +178,12 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
     for(const id of draft.orderIds||[]) lines.push("• "+t.order+" №<b>"+Number(id)+"</b>");
   } else if (stage==="PROCESSING") {
     lines.push(t.processing);
-  } else if (stage==="EDIT"||stage==="REVIEW") {
-    lines.push(stage==="REVIEW"?t.review:t.header);
+  } else if (stage==="CART_CLEAR_CONFIRM") {
+    lines.push(t.clearQuestion);
+  } else if (stage==="SEARCH_INPUT") {
+    lines.push(t.searchPrompt);
+  } else if (stage==="EDIT"||stage==="CART"||stage==="REVIEW") {
+    lines.push(stage==="REVIEW"?t.review:stage==="CART"?t.cartTitle:t.header);
     const compact=items.length>=12;
     items.forEach((i,n)=>{
       if(n>0) lines.push(""); // Visually separate individual positions.
@@ -168,6 +207,8 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
     });
     lines.push("");
     lines.push("<b>"+t.total+": "+money(total,locale)+"</b>");
+    if(stage==="CART"&&!items.length)lines.push(t.cartEmpty);
+    if(stage==="CART"&&draft.notice)lines.push(escapeTelegramHtml(draft.notice));
     if(stage==="REVIEW") {
       const d=draft.delivery||{}, contact=draft.contact||{};
       lines.push(t.customer+": "+esc([contact.firstName,contact.lastName,contact.phone].filter(Boolean).join(" ")));
@@ -194,7 +235,7 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   else if(stage==="POINT_INPUT")lines.push("🚚 "+t.point);
   else if(stage==="CONTACT_INPUT")lines.push("👤 "+t.contact);
   else lines.push(t.delivery);
-  const keyboard = stage==="EDIT"||stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE"||stage==="CONTACT_CONFIRM"||stage==="COMMENT_CHOICE"||stage==="COMMENT_INPUT"||stage==="REVIEW"||stage==="DONE"||stage==="PROCESSING"
+  const keyboard = stage==="EDIT"||stage==="CART"||stage==="CART_CLEAR_CONFIRM"||stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE"||stage==="CONTACT_CONFIRM"||stage==="COMMENT_CHOICE"||stage==="COMMENT_INPUT"||stage==="REVIEW"||stage==="DONE"||stage==="PROCESSING"
     ?orderKeyboard(sessionKey,stage,draft,locale)
     :{inline_keyboard:[
       [{text:t.back,callback_data:cb(sessionKey,"back")}],
