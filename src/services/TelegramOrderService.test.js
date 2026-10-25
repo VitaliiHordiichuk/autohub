@@ -36,12 +36,12 @@ test("One and many parts share the same keyboard and totals",()=>{
   const product={article:"A2711800109",name:"Масляний фільтр",quantity:2,selectedOffer:0,
     offers:[{offerId:10,sourceType:"OWN_STOCK",quantity:3,price:750}]};
   const one=renderTelegramOrder({stage:"EDIT",draft:{items:[product]},sessionKey:"aabbccdd11"});
-  assert.match(one.text,/1 500 грн/);
+  assert.match(one.text,/1\\s500 грн/);
   assert.match(one.text,/Доступно: 3 шт/);
   assert.equal(one.reply_markup.inline_keyboard[0][2].callback_data,"mo:aabbccdd11:p:0");
   const multi=renderTelegramOrder({stage:"EDIT",draft:{items:[product,product]},
     sessionKey:"aabbccdd11"});
-  assert.match(multi.text,/3 000 грн/);
+  assert.match(multi.text,/3\\s000 грн/);
   assert.equal(multi.reply_markup.inline_keyboard.length,4);
 });
 test("All user-provided product data is escaped and no price matrix leaks",()=>{
