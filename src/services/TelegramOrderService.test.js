@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { selectTelegramOffers, editTelegramItem, parseTelegramRecipient,
-  telegramInlineCheckoutEnabled, pickupSelection, sanitizeLegacyTelegramPickup } from "./TelegramOrderService.js";
+  telegramInlineCheckoutEnabled, pickupSelection, sanitizeLegacyTelegramPickup,
+  articlesStartingFreshTelegramSearch } from "./TelegramOrderService.js";
 import { renderTelegramOrder, deliveryKeyboard } from "./TelegramOrderView.js";
 
 const offers=[
@@ -210,4 +211,41 @@ test("The contact prompt explains natural whitespace format to Ukrainian and Eng
   assert.match(uk.text,/Ім’я Прізвище \+380XXXXXXXXX/);
   assert.match(en.text,/First Last \+380XXXXXXXXX/);
   assert.doesNotMatch(uk.text,/;/);
+});
+
+test("Part number typed on an old contact screen starts a completely new search",()=>{
+  for(const stage of ["CONTACT_INPUT","CONTACT_CONFIRM","REVIEW","DELIVERY"]) {
+    assert.deepEqual(articlesStartingFreshTelegramSearch(stage,"2711800109"),["2711800109"]);
+    assert.deepEqual(articlesStartingFreshTelegramSearch(stage,"A2711800109"),["A2711800109"]);
+    assert.deepEqual(articlesStartingFreshTelegramSearch(stage,"A2711800109\nA1673200603"),
+      ["A2711800109","A1673200603"]);
+  }
+});
+test("Contact details and optional comments do not accidentally reset checkout",()=>{
+  assert.equal(articlesStartingFreshTelegramSearch("CONTACT_INPUT",
+    "Іван Петренко +380501234567"),null);
+  assert.equal(articlesStartingFreshTelegramSearch("CONTACT_INPUT","+380501234567"),null);
+  assert.equal(articlesStartingFreshTelegramSearch("CONTACT_INPUT","0501234567"),null);
+  assert.equal(articlesStartingFreshTelegramSearch("CONTACT_INPUT","Іван"),null);
+  assert.equal(articlesStartingFreshTelegramSearch("COMMENT_INPUT","2711800109"),null);
+  assert.equal(articlesStartingFreshTelegramSearch("COMMENT_CHOICE","A2711800109"),null);
+  assert.equal(articlesStartingFreshTelegramSearch("PROCESSING","A2711800109"),null);
+});
+test("Checkout has a fresh-search escape hatch but approved basket controls stay unchanged",()=>{
+  for(const stage of ["CONTACT_INPUT","CONTACT_CONFIRM","COMMENT_CHOICE",
+    "COMMENT_INPUT","REVIEW","CITY_CHOICE","POINT_CHOICE"]) {
+    const v=renderTelegramOrder({stage,draft:{},sessionKey:"aabbccdd11"});
+    const controls=v.reply_markup.inline_keyboard.flat();
+    assert.ok(controls.some(x=>x.text==="🔍 Новий пошук"&&
+      x.callback_data==="mo:aabbccdd11:newsearch"),stage);
+  }
+  assert.ok(deliveryKeyboard("aabbccdd11").inline_keyboard.flat().some(x=>
+    x.callback_data==="mo:aabbccdd11:newsearch"));
+  const basket=renderTelegramOrder({stage:"EDIT",draft:{items:[{
+    article:"A2711800109",name:"Фільтр",quantity:1,
+    offers:[{offerId:42,quantity:5,price:150,sourceType:"OWN_STOCK"}],
+  }]},sessionKey:"aabbccdd11"});
+  assert.deepEqual(basket.reply_markup.inline_keyboard[0].map(x=>x.text),
+    ["№1","1 шт.","−","+","🗑"]);
+  assert.equal(basket.reply_markup.inline_keyboard.length,3);
 });
