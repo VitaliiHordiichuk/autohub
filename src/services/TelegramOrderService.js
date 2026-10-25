@@ -307,16 +307,12 @@ async function commitOrder(row,api,locale) {
   // The cart is created only after the final confirmation. A separate cart
   // prevents Telegram from changing the customer's current web cart.
   if(!row.draft.cartId) {
-    if(userId) {
-      const cart=await CartAccessRepository.createForUser(userId);
-      row.draft.cartId=Number(cart.id);
-    }else{
-      const token=randomBytes(32).toString("hex");
-      const cart=await CartAccessRepository.createForGuest(
-        createHash("sha256").update(token).digest("hex"));
-      row.draft.cartId=Number(cart.id);
-      row.draft.guestToken=token;
-    }
+    // Always use a private guest-token cart. Telegram cannot replace a web cart.
+    const token=randomBytes(32).toString("hex");
+    const cart=await CartAccessRepository.createForGuest(
+      createHash("sha256").update(token).digest("hex"));
+    row.draft.cartId=Number(cart.id);
+    row.draft.guestToken=token;
     row.draft.addedOffers=[];
     await save(row);
   }
@@ -324,7 +320,7 @@ async function commitOrder(row,api,locale) {
     const offer=item.offers[item.selectedOffer||0];
     if(row.draft.addedOffers.includes(offer.offerId))continue;
     await CartService.addProduct({
-      cartId:row.draft.cartId,userId,guestToken:row.draft.guestToken||null,
+      cartId:row.draft.cartId,userId:null,guestToken:row.draft.guestToken||null,
       productOfferId:offer.offerId,quantity:item.quantity,
     });
     row.draft.addedOffers.push(offer.offerId);
@@ -332,7 +328,8 @@ async function commitOrder(row,api,locale) {
   }
   if(!row.draft.checkoutId) {
     const result=await StartCheckout.execute({
-      cartId:row.draft.cartId,userId,guestToken:row.draft.guestToken||null,
+      cartId:row.draft.cartId,userId:null,guestToken:row.draft.guestToken||null,
+      pricingUserId:userId,
     });
     row.draft.checkoutId=result.checkoutId;
     await save(row);
@@ -348,7 +345,8 @@ async function commitOrder(row,api,locale) {
   }
   const placed=await SubmitOrder.execute({
     checkoutId:row.draft.checkoutId,idempotencyKey:row.draft.idempotencyKey,
-    userId,guestToken:row.draft.guestToken||null,
+    userId:null,guestToken:row.draft.guestToken||null,
+    trustedTelegramCustomerUserId:userId,
     delivery:row.draft.deliveryInput,saveDeliveryProfile:false,
     comment:"Замовлення оформлено через Telegram MAKAtron",
   });
