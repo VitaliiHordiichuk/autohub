@@ -1,7 +1,7 @@
 import { pool } from "../config/db.js";
 
 const MAX_CART_LINES = 20;
-const idOf = (item) => Number(item?.offers?.[item?.selectedOffer||0]?.offerId);
+const idOf = (item) => Number(item?.offers?.[item?.selectedOffer||0]?.offerId??item?.missingOfferId);
 export function mergeTelegramCartItems(existing,selected){
   const next=(existing||[]).map(item=>({...item,offers:(item.offers||[]).map(o=>({...o}))}));
   let added=0,updated=0,skipped=0;
@@ -16,8 +16,14 @@ export function mergeTelegramCartItems(existing,selected){
     const amount=Math.max(0,Math.floor(Number(item.quantity)));
     if(index>=0){
       const old=next[index];
+      const oldOffer=old.offers?.[old.selectedOffer||0];
+      // Previously unavailable offer is explicitly reselected in a NEW quote.
+      if(!oldOffer) {
+        next[index]={...item,quantity:Math.min(amount,limit),offers:[{...offer}],selectedOffer:0};
+        updated++;
+        continue;
+      }
       // Never silently mix offers or change selected price on merge.
-      const oldOffer=old.offers[old.selectedOffer||0];
       if(Math.round(Number(oldOffer.price)*100)!==Math.round(Number(offer.price)*100)){
         skipped++;continue;
       }
