@@ -11,6 +11,9 @@ on:
       - "src/use-cases/checkout/**"
       - "migrations/111_telegram_order_drafts.sql"
       - "migrations/112_explicit_public_pickup_locations.sql"
+      - "migrations/113_telegram_profile_and_optional_comment_stages.sql"
+      - "migrations/114_telegram_guest_order_recipients.sql"
+      - "src/repositories/TelegramGuestOrderRecipientRepository.js"
       - "src/repositories/WarehouseRepository.js"
       - "src/controllers/site-pickup-warehouse.controller.js"
       - "src/services/PublicPickupVisibility.test.js"
@@ -36,11 +39,16 @@ jobs:
             src/services/TelegramNotificationService.test.js \
             src/services/TelegramOrderService.test.js \
             src/services/PublicPickupVisibility.test.js \
+            src/services/TelegramOrderCustomerService.test.js \
+            src/services/TelegramGuestOrderNotifications.test.js \
             src/services/CheckoutSelection.test.js
       - name: Syntax checks
         run: |
           node --check src/services/TelegramOrderView.js
           node --check src/services/TelegramOrderService.js
+          node --check src/services/TelegramOrderCustomerService.js
+          node --check src/services/TelegramNotificationService.js
+          node --check src/repositories/TelegramGuestOrderRecipientRepository.js
           node --check src/services/TelegramBotService.js
           node --check scripts/test-makatron-checkout-staging.mjs
           node --check scripts/check-makatron-checkout-readiness.mjs
