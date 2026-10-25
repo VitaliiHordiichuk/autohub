@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TelegramGuestOrderRecipientRepository } from "../repositories/TelegramGuestOrderRecipientRepository.js";
-import { TelegramNotificationService } from "./TelegramNotificationService.js";
+import { sendPendingTelegramGuestOrderConfirmations } from "./TelegramGuestOrderNotificationService.js";
 
-test("Only explicit Telegram guest orders get a permanent recipient mapping",async()=>{
+test("Only actual Telegram guest orders persist an authorized private chat",async()=>{
   const calls=[];
   const db={query:async(sql,args)=>{calls.push({sql,args});return {rows:[]};}};
   const count=await TelegramGuestOrderRecipientRepository.saveOrders({
@@ -19,39 +19,60 @@ test("Only explicit Telegram guest orders get a permanent recipient mapping",asy
     },db),/private owned chat/);
 });
 
-test("A confirmed guest order receives Telegram status and no private account link",async()=>{
-  const seen=[];
+test("Manager-confirmed guest order is sent once and marked notified",async()=>{
+  const calls=[],sent=[];
   const db={query:async(sql,args)=>{
-    if(sql.includes("FROM telegram_guest_order_recipients")) {
-      assert.deepEqual(args,[100]);
-      return {rows:[{telegram_chat_id:953723985,preferred_locale:"uk"}]};
-    }
-    if(sql.includes("SELECT total_amount FROM orders"))
-      return {rows:[{total_amount:1234.50}]};
-    if(sql.includes("FROM order_items"))
-      return {rows:[{article:"A2711800109",name:"Фільтр",quantity:1}]};
-    throw Error("Unexpected query "+sql);
-  }};
-  await TelegramNotificationService.sendOrderStatusToUser(
-    {userId:null,orderId:100,status:"CONFIRMED"},db,
-    async(chatId,payload)=>seen.push({chatId,payload})
-  );
-  assert.equal(seen.length,1);
-  assert.equal(seen[0].chatId,953723985);
-  assert.match(seen[0].payload.text,/Ваше замовлення підтверджено/);
-  assert.match(seen[0].payload.text,/A2711800109/);
-  assert.equal(seen[0].payload.reply_markup,undefined);
-});
-test("Guest orders without the mapping do not notify arbitrary Telegram accounts",async()=>{
-  let calls=0;
-  const db={query:async(sql)=>{
-    if(sql.includes("FROM telegram_guest_order_recipients"))return {rows:[]};
-    if(sql.includes("SELECT total_amount FROM orders"))return {rows:[{total_amount:100}]};
-    if(sql.includes("FROM order_items"))return {rows:[]};
+    calls.push({sql,args});
+    if(sql.includes("WITH pending"))return {rows:[
+      {order_id:100,telegram_chat_id:953723985,total_amount:1234.5},
+    ]};
     return {rows:[]};
   }};
-  await TelegramNotificationService.sendOrderStatusToUser(
-    {userId:null,orderId:101,status:"CONFIRMED"},db,async()=>{calls++;}
+  const result=await sendPendingTelegramGuestOrderConfirmations(
+    async(method,payload)=>sent.push({method,payload}),
+    {db,getLocale:async()=> "uk",pilotChatId:"953723985"}
   );
-  assert.equal(calls,0);
+  assert.deepEqual(result,{claimed:1,sent:1,failed:0});
+  assert.deepEqual(calls[0].args,["953723985"]);
+  assert.match(calls[0].sql,/o.status='CONFIRMED'/);
+  assert.match(calls[0].sql,/confirmed_notified_at IS NULL/);
+  assert.match(calls[0].sql,/SKIP LOCKED/);
+  assert.match(sent[0].payload.text,/Ваше замовлення підтверджено/);
+  assert.match(sent[0].payload.text,/Замовлення №100/);
+  assert.equal(sent[0].payload.chat_id,953723985);
+  assert.ok(calls.some(x=>/SET confirmed_notified_at=CURRENT_TIMESTAMP/.test(x.sql)));
+});
+
+test("Failed Telegram delivery releases claim for retry without marking sent",async()=>{
+  const calls=[];
+  const db={query:async(sql,args)=>{
+    calls.push(sql);
+    if(sql.includes("WITH pending"))return {rows:[
+      {order_id:101,telegram_chat_id:953723985,total_amount:30},
+    ]};
+    return {rows:[]};
+  }};
+  const oldConsole=console.error;
+  console.error=()=>{};
+  try{
+    const result=await sendPendingTelegramGuestOrderConfirmations(
+      async()=>{throw Error("Temporary Telegram error");},
+      {db,getLocale:async()=> "en",pilotChatId:"953723985"}
+    );
+    assert.deepEqual(result,{claimed:1,sent:0,failed:1});
+    assert.ok(calls.some(x=>/SET confirmed_claimed_until=NULL/.test(x)));
+    assert.equal(calls.some(x=>/SET confirmed_notified_at=CURRENT_TIMESTAMP/.test(x)),false);
+  }finally{console.error=oldConsole;}
+});
+
+test("A pilot does not query or notify guest orders from other chats",async()=>{
+  const seen=[];
+  const db={query:async(sql,args)=>{
+    assert.equal(args[0],"953723985");
+    return {rows:[]};
+  }};
+  assert.deepEqual(await sendPendingTelegramGuestOrderConfirmations(
+    async()=>seen.push(true),{db,getLocale:async()=>"uk",pilotChatId:"953723985"}
+  ),{claimed:0,sent:0,failed:0});
+  assert.deepEqual(seen,[]);
 });
