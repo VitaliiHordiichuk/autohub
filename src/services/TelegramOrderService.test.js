@@ -64,7 +64,7 @@ test("All user-provided product data is escaped and no price matrix leaks",()=>{
 test("English checkout and inline callback labels are localized",()=>{
   const v=renderTelegramOrder({sessionKey:"aabbccdd11",stage:"EDIT",locale:"en",
     draft:{items:[]}});
-  assert.match(v.text,/Your parts list/);
+  assert.match(v.text,/Search results/);
   assert.match(v.text,/Total: 0 UAH/);
   assert.equal(deliveryKeyboard("aabbccdd11","en").inline_keyboard[1][0].text,"🚚 Nova Poshta");
 });
