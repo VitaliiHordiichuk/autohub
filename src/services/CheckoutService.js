@@ -54,6 +54,7 @@ export const CheckoutService = {
     itemIds = null,
     userId = null,
     guestToken = null,
+    pricingUserId = null, // Verified internal Telegram identity; never from a request body.
   }) {
     if (!cartId) {
       throw new Error("cartId є обов’язковим");
@@ -98,7 +99,7 @@ export const CheckoutService = {
       // Release only its cart hold; order-linked records belong to existing orders.
       await ReservationRepository.releaseActiveByCartId(cart.id, db);
       await CheckoutRepository.cancelActiveForCart(cart.id, db);
-      const pricingContext = await CustomerPricingService.getContext(userId, db);
+      const pricingContext = await CustomerPricingService.getContext(pricingUserId ?? userId, db);
       const checkoutItems = items.map((item) => {
         const pricing = CustomerPricingService.price({
           retailPrice: item.retail_price,
