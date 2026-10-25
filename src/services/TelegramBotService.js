@@ -3,11 +3,13 @@ import { searchTelegramCatalog } from "./TelegramCatalogService.js";
 import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLanguageService.js";
 import { handleTelegramOrderMessage, handleTelegramOrderCallback, telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
 import { sendPendingTelegramGuestOrderConfirmations } from "./TelegramGuestOrderNotificationService.js";
+import { telegramMainKeyboard } from "./TelegramOrderView.js";
 
 let timer = null;
 let offset = 0;
 let polling = false;
 const lastCatalogSearch = new Map();
+const menuShownInThisProcess = new Set();
 let lastGuestConfirmationCheck = 0;
 
 function catalogEnabled() {
@@ -184,7 +186,20 @@ async function poll() {
         try {
           if (await handleTelegramOrderMessage({
             text, chatId: message.chat.id, telegramUserId: message.from.id,
-          }, api)) continue;
+          }, api)) {
+            // Telegram reply keyboards remain visible across messages. Send it
+            // once per worker lifetime, not as a duplicate after each query.
+            if(!menuShownInThisProcess.has(String(message.chat.id))) {
+              menuShownInThisProcess.add(String(message.chat.id));
+              const locale=await TelegramLanguageService.get(message.chat.id);
+              await api("sendMessage",{
+                chat_id:message.chat.id,
+                text:locale==="en"?"MAKAtron navigation":"Меню MAKAtron",
+                reply_markup:telegramMainKeyboard(locale),
+              }).catch(error=>console.error("MAKAtron menu:",error.message));
+            }
+            continue;
+          }
         } catch(error) {
           console.error("MAKAtron order message:",error.message);
           await api("sendMessage",{chat_id:message.chat.id,
