@@ -11,6 +11,7 @@ import { CartAccessRepository } from "../repositories/CartAccessRepository.js";
 import { CartRepository } from "../repositories/CartRepository.js";
 import { CheckoutRepository } from "../repositories/CheckoutRepository.js";
 import { TelegramGuestOrderRecipientRepository } from "../repositories/TelegramGuestOrderRecipientRepository.js";
+import { TelegramShoppingCartRepository,mergeTelegramCartItems } from "../repositories/TelegramShoppingCartRepository.js";
 import { CartService } from "./CartService.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
@@ -19,7 +20,7 @@ import { SubmitOrder } from "../use-cases/checkout/SubmitOrder.js";
 import { normalizeOrderDelivery } from "./OrderDeliveryService.js";
 import { getLinkedTelegramRecipient,normalizeTelegramOrderComment,telegramOrderManagerComment } from "./TelegramOrderCustomerService.js";
 import { parseTelegramArticles, formatTelegramInputError } from "./TelegramCatalogFormatter.js";
-import { renderTelegramOrder, deliveryKeyboard, orderText, money } from "./TelegramOrderView.js";
+import { renderTelegramOrder, deliveryKeyboard, orderText, money,telegramMenuIntent } from "./TelegramOrderView.js";
 
 const SESSION_MAX_AGE_DAYS = 7;
 const MAX_ITEMS = 20;
@@ -162,6 +163,57 @@ async function lookupList(articles,chatId,userId,locale) {
     items.push(result);
   }
   return {items,viewerId};
+}
+// The saved shopping cart is independent of the current search preview.
+// Prices and stock are only indicative until final checkout confirmation.
+export async function refreshTelegramCartItems(saved,{resolveItem}) {
+  let changed=false;
+  const items=[];
+  for(const existing of saved||[]) {
+    const id=Number(existing.offers?.[existing.selectedOffer||0]?.offerId);
+    const quote=await resolveItem(existing.article);
+    const offer=quote.offers?.find(o=>Number(o.offerId)===id);
+    if(!offer) {
+      if(existing.offers?.length && Number(existing.quantity)>0)changed=true;
+      items.push({...existing,quantity:0,offers:[]});
+      continue;
+    }
+    const max=Math.max(0,Math.floor(Number(offer.quantity)||0));
+    const quantity=Math.min(max,Math.max(0,Math.floor(Number(existing.quantity)||0)));
+    const old=existing.offers?.[existing.selectedOffer||0];
+    if(quantity!==Number(existing.quantity) ||
+        !sameAmount(old?.price,offer.price))changed=true;
+    items.push({...existing,article:quote.article||existing.article,
+      name:quote.name||existing.name,quantity,offers:[offer],selectedOffer:0});
+  }
+  return {items,changed};
+}
+async function showSearch(chatId,userId,api,locale) {
+  const row=await create(chatId,userId,{items:[],awaitingAdd:false});
+  row.stage="SEARCH_INPUT";
+  await publish(await save(row),api,locale,{forceNew:true});
+}
+async function showCart(chatId,userId,api,locale,notice="") {
+  const raw=await TelegramShoppingCartRepository.get(chatId,userId);
+  const viewer=await resolveTelegramPricingIdentity({chatId,telegramUserId:userId});
+  const viewerId=viewer?.userId??null;
+  const pricing=await CustomerPricingService.getContext(viewerId);
+  const result=await refreshTelegramCartItems(raw,{
+    resolveItem:article=>locateArticle(article,locale,pricing,viewerId),
+  });
+  if(result.changed) {
+    await TelegramShoppingCartRepository.put(chatId,userId,result.items);
+    notice=orderText(locale).cartWarning;
+  }
+  const row=await create(chatId,userId,{
+    items:result.items,viewerId,awaitingAdd:false,notice,
+  });
+  row.stage="CART";
+  await publish(await save(row),api,locale,{forceNew:true});
+  return {row,changed:result.changed};
+}
+async function updateSavedCart(row) {
+  await TelegramShoppingCartRepository.put(row.chat_id,row.telegram_user_id,row.draft.items||[]);
 }
 // No MAKA warehouse or pickup address is ever exposed to a Telegram client.
 // Customer chooses generic collection; the manager coordinates it afterwards.
@@ -346,7 +398,18 @@ export async function handleTelegramOrderMessage({text,chatId,telegramUserId},ap
   if(!chatId||!telegramUserId||String(chatId)!==String(telegramUserId))return false;
   if(String(text||"").trim().startsWith("/"))return false;
   const locale=await TelegramLanguageService.get(chatId);
+  const intent=telegramMenuIntent(text);
   const row=await load(chatId,telegramUserId);
+  if(intent) {
+    if(row?.stage==="PROCESSING"){
+      await say(chatId,api,locale==="en"?"⏳ Your order is still being created.":
+        "⏳ Замовлення ще оформлюється.");
+      return true;
+    }
+    if(intent==="cart")await showCart(chatId,telegramUserId,api,locale);
+    else await showSearch(chatId,telegramUserId,api,locale);
+    return true;
+  }
   if(!row)return handleInput({chat_id:chatId,telegram_user_id:telegramUserId,
     stage:"EDIT",draft:{items:[],awaitingAdd:false}},text,api,locale);
   const freshArticles=articlesStartingFreshTelegramSearch(row.stage,text);
@@ -375,16 +438,15 @@ export async function handleTelegramOrderMessage({text,chatId,telegramUserId},ap
   return handleInput(row,text,api,locale);
 }
 async function markChanged(row,api,locale) {
-  row.stage="EDIT";
+  // Checkout failed due to a quote change. Keep the saved cart and make the
+  // customer explicitly review the updated quote before retrying.
   row.draft.checkoutId=null;
   row.draft.cartId=null;
   row.draft.guestToken=null;
   row.draft.addedOffers=[];
   row.draft.idempotencyKey=null;
-  await publish(await save(row),api,locale);
-  await say(row.chat_id,api,locale==="en"
-    ?"⚠️ Stock or price changed. Review the quantities and confirm again."
-    :"⚠️ Ціна або залишок змінилися. Перевірте кількість і підтвердьте ще раз.");
+  await updateSavedCart(row);
+  await showCart(row.chat_id,row.telegram_user_id,api,locale,orderText(locale).cartWarning);
 }
 async function commitOrder(row,api,locale) {
   const chatId=row.chat_id;
@@ -404,6 +466,8 @@ async function commitOrder(row,api,locale) {
         telegramUserId:row.telegram_user_id,
       });
       row.stage="DONE";
+      await TelegramShoppingCartRepository.clear(row.chat_id,row.telegram_user_id).catch(e=>
+        console.error("MAKAtron cart clear after recovered order:",e.message));
       await publish(await save(row),api,locale);
       return;
     }
@@ -528,6 +592,8 @@ async function commitOrder(row,api,locale) {
     telegramUserId:row.telegram_user_id,
   });
   row.stage="DONE";
+  await TelegramShoppingCartRepository.clear(row.chat_id,row.telegram_user_id).catch(e=>
+    console.error("MAKAtron cart clear after order:",e.message));
   await publish(await save(row),api,locale);
 }
 export async function handleTelegramOrderCallback(callback,api) {
@@ -558,13 +624,7 @@ export async function handleTelegramOrderCallback(callback,api) {
   await api("answerCallbackQuery",{callback_query_id:callback.id});
   if(action==="newsearch" && row.stage==="PROCESSING")return true;
   if(action==="newsearch" || (row.stage==="DONE"&&action==="reset")) {
-    // Never mutate or cancel an existing MAKA order. Only clear the bot's
-    // current draft. A fresh key makes old inline buttons harmless.
-    await create(chatId,telegramUserId,
-      {items:[],viewerId:null,awaitingAdd:false});
-    await say(chatId,api,locale==="en"
-      ?"🔍 Send a new part number or list."
-      :"🔍 Надішліть новий артикул або список артикулів.");
+    await showSearch(chatId,telegramUserId,api,locale);
     return true;
   }
   if(row.stage==="DONE")return true;
@@ -583,8 +643,13 @@ export async function handleTelegramOrderCallback(callback,api) {
     row.draft.page=Math.max(0,Math.min(maxPage,current+(action==="pgnext"?1:-1)));
   } else if(action==="pginfo") {
     return true;
-  } else if(row.stage==="EDIT"&&["p","m","x","s"].includes(action)&&items[idx]) {
+  } else if(["EDIT","CART"].includes(row.stage)&&["p","m","x","s"].includes(action)&&items[idx]) {
     items[idx]=editTelegramItem(items[idx],action);
+    if(row.stage==="CART"){
+      if(items[idx].quantity<=0||action==="x")items.splice(idx,1);
+      row.draft.notice="";
+      await updateSavedCart(row);
+    }
   } else if(action==="q") {
     return true;
   } else if(row.stage==="EDIT"&&action==="add") {
@@ -593,11 +658,46 @@ export async function handleTelegramOrderCallback(callback,api) {
     await say(chatId,api,locale==="en"?"➕ Send a part number or list.":"➕ Надішліть артикул або список артикулів.");
     return true;
   } else if(row.stage==="EDIT"&&action==="next") {
-    if(!items.some(i=>i.quantity>0&&i.offers?.length)) {
+    const selected=items.filter(i=>i.quantity>0&&i.offers?.length);
+    if(!selected.length) {
       await say(chatId,api,orderText(locale).empty);
       return true;
     }
-    row.stage="DELIVERY";
+    const original=await TelegramShoppingCartRepository.get(chatId,telegramUserId);
+    const merged=mergeTelegramCartItems(original,selected);
+    if(!merged.added&&!merged.updated) {
+      await say(chatId,api,locale==="en"
+        ?"No items added: cart limit, stock or changed price. Check the cart."
+        :"Нічого не додано: перевірте кількість, ціну або ліміт кошика.");
+      return true;
+    }
+    await TelegramShoppingCartRepository.put(chatId,telegramUserId,merged.items);
+    const message=orderText(locale).cartSaved+
+      (merged.skipped?" ("+merged.skipped+" не додано)":"");
+    await showCart(chatId,telegramUserId,api,locale,message);
+    return true;
+  } else if(row.stage==="CART"&&action==="more") {
+    await showSearch(chatId,telegramUserId,api,locale);
+    return true;
+  } else if(row.stage==="CART"&&action==="clear") {
+    row.stage="CART_CLEAR_CONFIRM";
+  } else if(row.stage==="CART_CLEAR_CONFIRM"&&action==="clearok") {
+    await TelegramShoppingCartRepository.clear(chatId,telegramUserId);
+    await showCart(chatId,telegramUserId,api,locale);
+    return true;
+  } else if(row.stage==="CART_CLEAR_CONFIRM"&&action==="clearcancel") {
+    await showCart(chatId,telegramUserId,api,locale);
+    return true;
+  } else if(row.stage==="CART"&&action==="checkout") {
+    if(!items.some(i=>i.quantity>0&&i.offers?.length)) {
+      await say(chatId,api,orderText(locale).cartEmpty);
+      return true;
+    }
+    const cart=await showCart(chatId,telegramUserId,api,locale);
+    if(cart.changed)return true;
+    cart.row.stage="DELIVERY";
+    await publish(await save(cart.row),api,locale);
+    return true;
   } else if(row.stage==="DELIVERY"&&action==="pickup") {
     row.draft.delivery=pickupSelection(locale);
     row.draft.deliveryInput=null;
@@ -656,8 +756,8 @@ export async function handleTelegramOrderCallback(callback,api) {
     }
     return true;
   } else if(action==="back") {
-    row.stage="EDIT";
-    row.draft.awaitingAdd=false;
+    await showCart(chatId,telegramUserId,api,locale);
+    return true;
   } else {
     return true;
   }
