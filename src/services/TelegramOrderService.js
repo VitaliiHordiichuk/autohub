@@ -10,6 +10,7 @@ import { NovaPoshtaService } from "./NovaPoshtaService.js";
 import { WarehouseRepository } from "../repositories/WarehouseRepository.js";
 import { CartAccessRepository } from "../repositories/CartAccessRepository.js";
 import { CartRepository } from "../repositories/CartRepository.js";
+import { CheckoutRepository } from "../repositories/CheckoutRepository.js";
 import { CartService } from "./CartService.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
@@ -270,6 +271,20 @@ async function markChanged(row,api,locale) {
 }
 async function commitOrder(row,api,locale) {
   const chatId=row.chat_id;
+  // Recover an already committed order before checking stock: committing a
+  // successful OWN_STOCK order reduces stock, so rechecking first would
+  // misleadingly claim "stock changed" after a Telegram send failure.
+  if(row.draft.checkoutId && row.draft.idempotencyKey) {
+    const checkout=await CheckoutRepository.findById(row.draft.checkoutId);
+    if(checkout?.status==="COMPLETED" &&
+       checkout.idempotency_key===row.draft.idempotencyKey) {
+      const linked=await CheckoutRepository.findLinkedOrders(checkout.id);
+      row.draft.orderIds=linked.map(o=>Number(o.id));
+      row.stage="DONE";
+      await publish(await save(row),api,locale);
+      return;
+    }
+  }
   const items=(row.draft.items||[]).filter(i=>i.quantity>0&&i.offers?.length);
   if(!items.length)throw Error(orderText(locale).empty);
   if(!row.draft.deliveryInput)throw Error("Delivery details missing");
