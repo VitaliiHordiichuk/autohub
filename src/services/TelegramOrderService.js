@@ -9,6 +9,7 @@ import { TelegramLanguageService } from "./TelegramLanguageService.js";
 import { NovaPoshtaService } from "./NovaPoshtaService.js";
 import { WarehouseRepository } from "../repositories/WarehouseRepository.js";
 import { CartAccessRepository } from "../repositories/CartAccessRepository.js";
+import { CartRepository } from "../repositories/CartRepository.js";
 import { CartService } from "./CartService.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
@@ -67,7 +68,7 @@ function sanitizedError(locale) {
 }
 function recoverableError(locale, message) {
   const prefix=locale==="en"?"⚠️ Please review your order: ":"⚠️ Перевірте замовлення: ";
-  return prefix+String(message||"").slice(0,160);
+  return prefix+(locale==="en"?"Check the details and try again.":String(message||"").slice(0,160));
 }
 function normalizeDraftRow(row) {
   if(!row)return null;
@@ -91,6 +92,8 @@ async function save(row) {
   return normalizeDraftRow(rows[0]);
 }
 async function create(chatId,userId,draft) {
+  // Retain order contact information for no more than a week after its last use.
+  await pool.query("DELETE FROM telegram_order_drafts WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '7 days'");
   const sessionKey=key();
   const {rows}=await pool.query(
     "INSERT INTO telegram_order_drafts(chat_id,telegram_user_id,session_key,stage,draft,message_id) "+
@@ -319,10 +322,23 @@ async function commitOrder(row,api,locale) {
   for(const item of items) {
     const offer=item.offers[item.selectedOffer||0];
     if(row.draft.addedOffers.includes(offer.offerId))continue;
-    await CartService.addProduct({
-      cartId:row.draft.cartId,userId:null,guestToken:row.draft.guestToken||null,
-      productOfferId:offer.offerId,quantity:item.quantity,
-    });
+    // A restart after the DB insert but before persisting addedOffers must
+    // never add the same quantity a second time.
+    const existing=await CartRepository.findItem(row.draft.cartId,offer.offerId);
+    if(existing) {
+      if(Number(existing.quantity)!==Number(item.quantity)) {
+        await CartService.updateItemQuantity({
+          cartId:row.draft.cartId,itemId:existing.id,
+          userId:null,guestToken:row.draft.guestToken||null,
+          quantity:item.quantity,
+        });
+      }
+    } else {
+      await CartService.addProduct({
+        cartId:row.draft.cartId,userId:null,guestToken:row.draft.guestToken||null,
+        productOfferId:offer.offerId,quantity:item.quantity,
+      });
+    }
     row.draft.addedOffers.push(offer.offerId);
     await save(row);
   }
@@ -334,13 +350,19 @@ async function commitOrder(row,api,locale) {
     row.draft.checkoutId=result.checkoutId;
     await save(row);
     const prices=result.items||[];
+    let changedAtCheckout=false;
     for(const item of items) {
       const offer=item.offers[item.selectedOffer||0];
       const snapshot=prices.find(i=>Number(i.product_offer_id)===offer.offerId);
       if(!snapshot||!sameAmount(snapshot.price_snapshot,offer.price)) {
-        // Keep checkout pending and require explicit acceptance of a fresh quote.
-        throw Error("PRICE_CHANGED");
+        if(snapshot)offer.price=Number(snapshot.price_snapshot);
+        changedAtCheckout=true;
       }
+    }
+    if(changedAtCheckout) {
+      // Never place an order silently if the accepted preview is stale.
+      await markChanged(row,api,locale);
+      return;
     }
   }
   const placed=await SubmitOrder.execute({
@@ -375,7 +397,14 @@ export async function handleTelegramOrderCallback(callback,api) {
   const action=match[2],idx=match[3]===undefined?-1:parseInt(match[3],36);
   await api("answerCallbackQuery",{callback_query_id:callback.id});
   if(row.stage==="DONE"&&action!=="reset")return true;
-  if(row.stage==="PROCESSING")return true;
+  if(row.stage==="PROCESSING") {
+    // Safe retry after a worker crash: reuse the persisted checkout and key.
+    if(action!=="retry")return true;
+    if(Date.now()-new Date(row.updated_at).getTime()<120_000)return true;
+    try { await commitOrder(row,api,locale); }
+    catch(error) { console.error("MAKAtron checkout recovery:",error.message); }
+    return true;
+  }
   const items=row.draft.items||[];
   if(row.stage==="EDIT"&&["p","m","x","s"].includes(action)&&items[idx]) {
     items[idx]=editTelegramItem(items[idx],action);
@@ -423,13 +452,18 @@ export async function handleTelegramOrderCallback(callback,api) {
       await commitOrder(row,api,locale);
     } catch(error) {
       console.error("MAKAtron checkout:",error.message);
+      const durable=await load(chatId,telegramUserId);
+      if(durable?.stage==="DONE") {
+        // The order committed even if Telegram failed to deliver its receipt.
+        await publish(durable,api,locale,{forceNew:true}).catch(()=>{});
+        return true;
+      }
+      if(durable?.stage==="EDIT")return true;
       row.stage="REVIEW";
       await publish(await save(row),api,locale);
       await say(chatId,api,recoverableError(locale,
-        error.code==="PRICE_CHANGED"
-          ?(locale==="en"?"Price changed; please review on the next attempt.":"Ціна змінилася. Потрібно оновити пропозицію.")
-          :error.statusCode===409
-          ?(locale==="en"?"Stock or price changed. Please start a new search.":"Ціна або залишок змінилися. Надішліть артикул повторно.")
+        error.statusCode===409
+          ?(locale==="en"?"Stock or price changed. Send the part list again.":"Залишок або ціна змінилися. Надішліть список повторно.")
           :sanitizedError(locale)));
     }
     return true;
