@@ -7,7 +7,6 @@ import { CustomerPricingService } from "./CustomerPricingService.js";
 import { resolveTelegramPricingIdentity } from "./TelegramCatalogService.js";
 import { TelegramLanguageService } from "./TelegramLanguageService.js";
 import { NovaPoshtaService } from "./NovaPoshtaService.js";
-import { WarehouseRepository } from "../repositories/WarehouseRepository.js";
 import { CartAccessRepository } from "../repositories/CartAccessRepository.js";
 import { CartRepository } from "../repositories/CartRepository.js";
 import { CheckoutRepository } from "../repositories/CheckoutRepository.js";
@@ -137,52 +136,47 @@ async function lookupList(articles,chatId,userId,locale) {
   }
   return {items,viewerId};
 }
-async function publish(row,api,locale,{forceNew=false}={}) {
-  // Previously saved drafts can contain internal warehouse selections.
-  // Never redisplay the old pickup label in a contact or order review.
-  if(["CONTACT_INPUT","REVIEW"].includes(row.stage) &&
-      row.draft.delivery?.method==="PICKUP") {
-    const approved=await WarehouseRepository.findPublicPickupById(
-      row.draft.delivery.warehouseId
-    );
-    if(!approved) {
-      row.stage="DELIVERY";
-      row.draft.delivery=null;
-      row.draft.deliveryInput=null;
-      row.draft.options=[];
-      await save(row);
-    }
-  }
-  if(row.stage==="DELIVERY") {
-    // Every delivery screen reflects the CURRENT allowlisted public points.
-    row.draft.pickupAvailable=(await WarehouseRepository.findPickupAvailable()).length>0;
-    await save(row);
-  }
-  // Never render cached internal warehouse names from drafts created
-  // before public pickup point whitelisting was introduced.
+// No MAKA warehouse or pickup address is ever exposed to a Telegram client.
+// Customer chooses generic collection; the manager coordinates it afterwards.
+export function pickupSelection(locale="uk") {
+  return {
+    method:"PICKUP",
+    label:orderText(locale).pickup.replace(/^🏬\\s*/, ""),
+  };
+}
+export function sanitizeLegacyTelegramPickup(row,locale="uk") {
+  if(!row?.draft)return false;
   if(row.stage==="PICKUP") {
-    const publicPoints=await WarehouseRepository.findPickupAvailable();
-    if(!publicPoints.length) {
-      row.stage="DELIVERY";
-      row.draft.pickupAvailable=false;
-      row.draft.options=[];
-      await save(row);
-    } else {
-      row.draft.options=publicPoints.slice(0,10).map(w=>({
-        id:Number(w.id),name:w.name,city:w.city||"",address:w.address||"",
-      }));
-      await save(row);
-    }
+    row.stage="DELIVERY";
+    row.draft.delivery=null;
+    row.draft.deliveryInput=null;
+    row.draft.options=[];
+    return true;
   }
+  if(row.draft.delivery?.method==="PICKUP") {
+    const safe=pickupSelection(locale);
+    const old=row.draft.delivery;
+    const hadPrivate=old.warehouseId!==undefined ||
+      old.label!==safe.label || Boolean(old.address);
+    if(hadPrivate){
+      row.draft.delivery=safe;
+      delete row.draft.options;
+      if(row.draft.deliveryInput?.deliveryMethod==="PICKUP"){
+        row.draft.deliveryInput={
+          ...row.draft.deliveryInput,
+          pickupWarehouseId:null,
+        };
+      }
+    }
+    return hadPrivate;
+  }
+  return false;
+}
+async function publish(row,api,locale,{forceNew=false}={}) {
+  if(sanitizeLegacyTelegramPickup(row,locale)) await save(row);
   const body=row.stage==="DELIVERY"
-    ? {text:orderText(locale).delivery +
-        (row.draft.pickupAvailable ? "" : "\n\n" +
-          (locale==="en"?"Collection is currently unavailable."
-            :"Самовивіз тимчасово недоступний.")),
-        parse_mode:"HTML",
-        reply_markup:deliveryKeyboard(row.session_key,locale,{
-          pickupAvailable:row.draft.pickupAvailable,
-        })}
+    ? {text:orderText(locale).delivery,parse_mode:"HTML",
+        reply_markup:deliveryKeyboard(row.session_key,locale)}
     : renderTelegramOrder({stage:row.stage,draft:row.draft,locale,sessionKey:row.session_key});
   if(row.message_id && !forceNew) {
     try {
@@ -235,7 +229,7 @@ async function handleInput(row,text,api,locale) {
     const delivery=row.draft.delivery||{};
     const payload={recipientFirstName:person.firstName,recipientLastName:person.lastName,
       recipientPhone:person.phone,deliveryMethod:delivery.method,
-      ...(delivery.method==="PICKUP"?{pickupWarehouseId:delivery.warehouseId}:{
+      ...(delivery.method==="PICKUP"?{}:{
         novaPoshta:{cityRef:delivery.city.ref,cityName:delivery.city.name,
           pointType:delivery.point.type,pointRef:delivery.point.ref,
           pointNumber:delivery.point.number,pointName:delivery.point.name,
@@ -331,22 +325,15 @@ async function commitOrder(row,api,locale) {
   const items=(row.draft.items||[]).filter(i=>i.quantity>0&&i.offers?.length);
   if(!items.length)throw Error(orderText(locale).empty);
   if(!row.draft.deliveryInput)throw Error("Delivery details missing");
-  if(row.draft.deliveryInput.deliveryMethod==="PICKUP") {
-    const approved=await WarehouseRepository.findPublicPickupById(
-      row.draft.deliveryInput.pickupWarehouseId
-    );
-    if(!approved) {
-      // Fail closed even if an old draft contains an internal warehouse ID.
-      row.stage="DELIVERY";
-      row.draft.delivery=null;
-      row.draft.deliveryInput=null;
-      row.draft.options=[];
-      await publish(await save(row),api,locale);
-      await say(chatId,api,locale==="en"
-        ?"The previous pickup point is unavailable. Choose an approved collection point or another delivery method."
-        :"Попередній пункт самовивозу недоступний. Оберіть доступний пункт або інший спосіб доставки.");
-      return;
-    }
+  // An old, pre-upgrade draft must never commit an internal pickup location.
+  if(row.draft.deliveryInput.deliveryMethod==="PICKUP" &&
+      row.draft.deliveryInput.pickupWarehouseId!=null) {
+    row.stage="DELIVERY";
+    row.draft.delivery=null;
+    row.draft.deliveryInput=null;
+    row.draft.options=[];
+    await publish(await save(row),api,locale);
+    return;
   }
   const viewer=await resolveTelegramPricingIdentity({
     chatId,telegramUserId:row.telegram_user_id,
@@ -511,38 +498,18 @@ export async function handleTelegramOrderCallback(callback,api) {
     }
     row.stage="DELIVERY";
   } else if(row.stage==="DELIVERY"&&action==="pickup") {
-    const pickupPoints=await WarehouseRepository.findPickupAvailable();
-    if(!pickupPoints.length) {
-      await say(chatId,api,locale==="en"
-        ?"Collection is not available yet. No public pickup point has been confirmed; choose another delivery method."
-        :"Самовивіз поки недоступний: публічний пункт видачі ще не підтверджено. Оберіть інший спосіб доставки.");
-      return true;
-    }
-    row.draft.options=pickupPoints.slice(0,10).map(w=>({
-      id:Number(w.id),name:w.name,city:w.city||"",address:w.address||"",
-    }));
-    row.stage="PICKUP";
+    row.draft.delivery=pickupSelection(locale);
+    row.draft.deliveryInput=null;
+    row.draft.options=[];
+    row.stage="CONTACT_INPUT";
   } else if(row.stage==="DELIVERY"&&action==="nova") {
     row.stage="CITY_INPUT";
   } else if(row.stage==="PICKUP"&&action==="warehouse") {
-    const stored=row.draft.options?.[idx];
-    if(!stored)return true;
-    const publicPoint=await WarehouseRepository.findPublicPickupById(stored.id);
-    if(!publicPoint) {
-      row.stage="DELIVERY";
-      row.draft.options=[];
-      await publish(await save(row),api,locale);
-      await say(chatId,api,locale==="en"
-        ?"This pickup point is no longer available. Select a new delivery method."
-        :"Цей пункт самовивозу більше недоступний. Оберіть інший спосіб доставки.");
-      return true;
-    }
-    row.draft.delivery={
-      method:"PICKUP",
-      warehouseId:Number(publicPoint.id),
-      label:[publicPoint.city,publicPoint.name,publicPoint.address].filter(Boolean).join(" · "),
-    };
-    row.stage="CONTACT_INPUT";
+    // Old inline keyboards from before the upgrade are not valid choices.
+    row.stage="DELIVERY";
+    row.draft.delivery=null;
+    row.draft.deliveryInput=null;
+    row.draft.options=[];
   } else if(row.stage==="CITY_CHOICE"&&action==="city") {
     const city=row.draft.options?.[idx];
     if(!city)return true;
