@@ -16,6 +16,9 @@ export async function sendPendingTelegramGuestOrderConfirmations(api,{
       FROM telegram_guest_order_recipients g
       JOIN orders o ON o.id=g.order_id
       WHERE o.status='CONFIRMED'
+        -- Registered account orders (created_by present) are notified by
+        -- the existing website backend, so the bot must not send twice.
+        AND o.created_by IS NULL
         AND g.confirmed_notified_at IS NULL
         AND (g.confirmed_claimed_until IS NULL
           OR g.confirmed_claimed_until<CURRENT_TIMESTAMP)
