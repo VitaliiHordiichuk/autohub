@@ -48,22 +48,18 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   if (stage === "EDIT") {
     const rows = [];
     const items = draft.items || [];
-    // Two rows per part: full-width article followed by quantity and actions.
-    // Paginate at 10 parts to keep keyboards compact and below API limits.
+    // One compact row per part, referenced by its number in the quote above.
+    // Paginate at 10 parts so keyboards stay within Telegram API limits.
     const pageSize = 10;
     const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
     const page = Math.min(pageCount - 1, Math.max(0, Number(draft.page) || 0));
     for (let i = page * pageSize; i < Math.min(items.length, (page + 1) * pageSize); i++) {
       const item = items[i];
       if (!item.offers?.length) continue;
-      const article = String(item.article || t.none);
-      // The article occupies an entire Telegram keyboard row, avoiding the
-      // width competition that turned A2711800109 into A2711… on iPhone.
-      // If there are multiple offers, tapping the article cycles between them.
+      // The full catalogue article is always printed in the numbered quote.
+      // The short position marker leaves room for all five buttons on iPhone.
       rows.push([
-        {text: article, callback_data: cb(key, item.offers.length > 1 ? "s" : "a", i)},
-      ]);
-      rows.push([
+        {text: "№" + (i + 1), callback_data: cb(key, item.offers.length > 1 ? "s" : "a", i)},
         {text: String(item.quantity || 0) + " " + t.pcs, callback_data: cb(key, "q", i)},
         {text: "−", callback_data: cb(key, "m", i)},
         {text: "+", callback_data: cb(key, "p", i)},
