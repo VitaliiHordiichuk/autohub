@@ -57,10 +57,19 @@ export function editTelegramItem(item, action) {
   return next;
 }
 export function parseTelegramRecipient(text) {
-  const pieces=String(text||"").split(";").map(s=>s.trim());
-  if(pieces.length!==3||pieces.some(s=>!s)||
-      pieces[0].length>100||pieces[1].length>100)return null;
-  return {firstName:pieces[0],lastName:pieces[1],phone:pieces[2]};
+  const raw=String(text||"").trim();
+  // Accept both "Ім’я; Прізвище; +380..." and the natural
+  // "Ім’я Прізвище +380..." without forcing customers to type semicolons.
+  const pieces=raw.includes(";")
+    ? raw.split(";").map(s=>s.trim())
+    : raw.split(/\s+/u);
+  if(pieces.length!==3 || pieces.some(s=>!s))return null;
+  const [firstName,lastName,phone]=pieces;
+  if(firstName.length>100||lastName.length>100||
+      !/^[\p{L}][\p{L}\p{M}'’.-]*$/u.test(firstName) ||
+      !/^[\p{L}][\p{L}\p{M}'’.-]*$/u.test(lastName) ||
+      !/^\+?[\d()\s-]{9,24}$/.test(phone))return null;
+  return {firstName,lastName,phone};
 }
 function sameAmount(a,b) { return Math.round(Number(a)*100) === Math.round(Number(b)*100); }
 function key() {return randomBytes(5).toString("hex");}
@@ -243,7 +252,9 @@ async function handleInput(row,text,api,locale) {
     }
     row.draft.contact=person;
     row.stage="REVIEW";
-    await publish(await save(row),api,locale);
+    // Review must arrive BELOW the customer's just-sent contact message.
+    // Editing an older quote makes it look as though the bot never replied.
+    await publish(await save(row),api,locale,{forceNew:true});
     return true;
   }
   const wantsAdd=row.stage==="EDIT" && row.draft.awaitingAdd===true;
