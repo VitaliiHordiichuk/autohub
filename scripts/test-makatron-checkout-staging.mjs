@@ -10,6 +10,7 @@ import { CartService } from "../src/services/CartService.js";
 import { StartCheckout } from "../src/use-cases/checkout/StartCheckout.js";
 import { SubmitOrder } from "../src/use-cases/checkout/SubmitOrder.js";
 import { TelegramGuestOrderRecipientRepository } from "../src/repositories/TelegramGuestOrderRecipientRepository.js";
+import { TelegramShoppingCartRepository } from "../src/repositories/TelegramShoppingCartRepository.js";
 import { OrderConfirmationService } from "../src/services/OrderConfirmationService.js";
 import { telegramOrderManagerComment } from "../src/services/TelegramOrderCustomerService.js";
 
@@ -21,6 +22,17 @@ async function run() {
   }
   const actual=(await pool.query("SELECT current_database() AS name")).rows[0].name;
   if(actual!==dbName)throw Error("REFUSED: connection points to unexpected database");
+
+  const demo=[
+    {article:"A2711800109",name:"Фільтр",quantity:2,selectedOffer:0,
+      offers:[{offerId:2143,sourceType:"OWN_STOCK",quantity:5,price:125}]},
+  ];
+  await TelegramShoppingCartRepository.put(953723985,953723985,demo);
+  assert.deepEqual(await TelegramShoppingCartRepository.get(953723985,953723985),demo);
+  assert.deepEqual(await TelegramShoppingCartRepository.get(953723986,953723986),[]);
+  await TelegramShoppingCartRepository.clear(953723985,953723985);
+  assert.deepEqual(await TelegramShoppingCartRepository.get(953723985,953723985),[]);
+  console.log("SUCCESS staging persistent-cart DB round trip: saved, identity-scoped, cleared");
 
   // Prefer a local owned stock item; no actual person or order data is modified
   // because this is a staging-only restored database.
