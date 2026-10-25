@@ -22,7 +22,7 @@ test("Linked active CLIENT can reuse name and phone without retyping",async()=>{
   assert.match(view.text,/Олена Петренко/);
   assert.match(view.text,/\+380501234567/);
   assert.deepEqual(view.reply_markup.inline_keyboard.map(row=>row[0].text),
-    ["✅ Дані правильні","✏️ Змінити дані","⬅️ До списку"]);
+    ["✅ Дані правильні","✏️ Змінити дані","⬅️ До списку","🔍 Новий пошук"]);
 });
 
 test("Telegram profile never resolves without matching UNIQUE account binding",async()=>{
@@ -57,7 +57,7 @@ test("Comment screen supports adding a note or skipping without any note",()=>{
   const choice=renderTelegramOrder({stage:"COMMENT_CHOICE",draft:{},sessionKey:"aabbccdd11"});
   assert.match(choice.text,/Коментарій до замовлення \(необов’язково\)/);
   assert.deepEqual(choice.reply_markup.inline_keyboard.map(row=>row[0].callback_data),
-    ["mo:aabbccdd11:commentadd","mo:aabbccdd11:commentskip","mo:aabbccdd11:back"]);
+    ["mo:aabbccdd11:commentadd","mo:aabbccdd11:commentskip","mo:aabbccdd11:back","mo:aabbccdd11:newsearch"]);
   const input=renderTelegramOrder({stage:"COMMENT_INPUT",draft:{},sessionKey:"aabbccdd11"});
   assert.match(input.text,/500 символів/);
   assert.ok(input.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="mo:aabbccdd11:commentskip"));
