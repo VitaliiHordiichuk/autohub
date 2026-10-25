@@ -5,7 +5,7 @@
 - One or up to 20 article numbers have the same editable Telegram message.
 - Displays the selected offer's **actual public available quantity** and the viewer's price.
 - `−`, `+`, remove, rotate supplier/MAKA offers, add another article.
-- Confirm items → choose pickup or Nova Poshta branch/locker → recipient → final order review → place order.
+- Confirm items → choose generic pickup (no address or internal warehouse) or Nova Poshta branch/locker → recipient → final order review → place order → manager-contact thank-you.
 - Default Ukrainian, optional English.
 - Existing checkout remains the source of truth: COMMIT_ON_SUBMIT stock deduction, supplier order reservations,
   price/quantity revalidation, status, staff notifications and idempotency.
@@ -31,7 +31,7 @@ HTTP backend. Only the dedicated PM2 worker needs the new feature branch.
 2. Apply additive migration `migrations/111_telegram_order_drafts.sql` (includes grants to `autohub_app`).
 3. Verify the dedicated worker has `NOVA_POSHTA_API_KEY` (do not print its value).
    If absent, NP delivery must not be tested until securely configured. Pickup still works.
-4. Ensure `WarehouseRepository.findPickupAvailable()` returns the actual public pickup points.
+4. Telegram pickup is manager-arranged. Never expose or require an internal warehouse ID or address; customer name and phone are required. No public pickup point setup or migration 112 is needed for the **Telegram-only worker**.
 5. Check the feature branch against the deployed site's active checkout / inventory migrations,
    especially 105 COMMIT_ON_SUBMIT. Site and polling worker should share a compatible DB schema.
 6. Use your own private Telegram chat ID in the pilot flag. Do not use a real customer chat.
@@ -63,6 +63,6 @@ and may deduct stock.
 - Up to 20 parts; a Telegram keyboard is limited so larger lists require pagination in a later version.
 - Nova Poshta: city and branch/locker lookup use existing MAKA NovaPoshtaService; no courier delivery yet.
 - Recipient enters `First name; Last name; +380XXXXXXXXX` in one message.
-- Top 10 pickup locations and first 8 city/branch results are shown; search query can be refined.
+- Generic Telegram pickup has no warehouse/address selection and stores `pickupWarehouseId: null`. Manager contacts the customer after successful order submission. Nova Poshta displays up to 8 city/branch results; search can be refined.
 - Backend API of the live site is unchanged until a separately reviewed backend rollout.
 - No fiscal receipt or Telegram payment capture is issued by this pilot.
