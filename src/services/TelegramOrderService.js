@@ -58,6 +58,22 @@ export function editTelegramItem(item, action) {
   if(action==="x")next.quantity=0;
   return next;
 }
+// In a paused checkout, a part number is a fresh search, not a malformed
+// recipient. Comments stay free text; do not interpret them as catalog input.
+export function articlesStartingFreshTelegramSearch(stage,text) {
+  if(!["CONTACT_INPUT","CONTACT_CONFIRM","REVIEW","DELIVERY"].includes(stage))
+    return null;
+  const input=String(text||"").trim();
+  if(!input || parseTelegramRecipient(input))return null;
+  // A standalone Ukrainian phone number should still receive the recipient
+  // prompt rather than discarding the customer's existing parts list.
+  if(/^\\+?380\\d{9}$/.test(input)||/^0\\d{9}$/.test(input))return null;
+  const parsed=parseTelegramArticles(input);
+  if(parsed.error||!parsed.articles.length)return null;
+  if(parsed.articles.some(v=>v.replace(/[^A-Za-z0-9]/g,"").length<6))
+    return null;
+  return parsed.articles;
+}
 export function parseTelegramRecipient(text) {
   const raw=String(text||"").trim();
   // Accept both "Ім’я; Прізвище; +380..." and the natural
@@ -333,6 +349,16 @@ export async function handleTelegramOrderMessage({text,chatId,telegramUserId},ap
   const row=await load(chatId,telegramUserId);
   if(!row)return handleInput({chat_id:chatId,telegram_user_id:telegramUserId,
     stage:"EDIT",draft:{items:[],awaitingAdd:false}},text,api,locale);
+  const freshArticles=articlesStartingFreshTelegramSearch(row.stage,text);
+  if(freshArticles) {
+    // Reuse normal lookup, but replace the session key to invalidate old
+    // checkout buttons and any pending contact/comment state.
+    const found=await lookupList(freshArticles,chatId,telegramUserId,locale);
+    const fresh=await create(chatId,telegramUserId,
+      {items:found.items,viewerId:found.viewerId,awaitingAdd:false});
+    await publish(fresh,api,locale,{forceNew:true});
+    return true;
+  }
   if(row.stage==="PROCESSING"||row.stage==="DONE") {
     const parsed=parseTelegramArticles(text);
     if(parsed.error)return false;
@@ -524,7 +550,17 @@ export async function handleTelegramOrderCallback(callback,api) {
     return true;
   }
   await api("answerCallbackQuery",{callback_query_id:callback.id});
-  if(row.stage==="DONE"&&action!=="reset")return true;
+  if(action==="newsearch" || (row.stage==="DONE"&&action==="reset")) {
+    // Never mutate or cancel an existing MAKA order. Only clear the bot's
+    // current draft. A fresh key makes old inline buttons harmless.
+    await create(chatId,telegramUserId,
+      {items:[],viewerId:null,awaitingAdd:false});
+    await say(chatId,api,locale==="en"
+      ?"🔍 Send a new part number or list."
+      :"🔍 Надішліть новий артикул або список артикулів.");
+    return true;
+  }
+  if(row.stage==="DONE")return true;
   if(row.stage==="PROCESSING") {
     // Safe retry after a worker crash: reuse the persisted checkout and key.
     if(action!=="retry")return true;
@@ -615,11 +651,6 @@ export async function handleTelegramOrderCallback(callback,api) {
   } else if(action==="back") {
     row.stage="EDIT";
     row.draft.awaitingAdd=false;
-  } else if(row.stage==="DONE"&&action==="reset") {
-    row.stage="EDIT";row.draft={items:[],viewerId:null,awaitingAdd:true};
-    await save(row);
-    await say(chatId,api,locale==="en"?"Send the next part number or list.":"Надішліть наступний артикул або список.");
-    return true;
   } else {
     return true;
   }
