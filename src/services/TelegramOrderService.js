@@ -141,7 +141,7 @@ async function lookupList(articles,chatId,userId,locale) {
 export function pickupSelection(locale="uk") {
   return {
     method:"PICKUP",
-    label:orderText(locale).pickup.replace(/^🏬\\s*/, ""),
+    label:orderText(locale).pickup.replace("🏬 ", ""),
   };
 }
 export function sanitizeLegacyTelegramPickup(row,locale="uk") {
