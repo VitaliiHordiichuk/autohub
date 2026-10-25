@@ -10,6 +10,10 @@ on:
       - "src/services/CheckoutService.js"
       - "src/use-cases/checkout/**"
       - "migrations/111_telegram_order_drafts.sql"
+      - "migrations/112_explicit_public_pickup_locations.sql"
+      - "src/repositories/WarehouseRepository.js"
+      - "src/controllers/site-pickup-warehouse.controller.js"
+      - "src/services/PublicPickupVisibility.test.js"
       - ".github/workflows/telegram-order-checks.yml"
 
 jobs:
@@ -31,6 +35,7 @@ jobs:
             src/services/TelegramLanguageService.test.js \
             src/services/TelegramNotificationService.test.js \
             src/services/TelegramOrderService.test.js \
+            src/services/PublicPickupVisibility.test.js \
             src/services/CheckoutSelection.test.js
       - name: Syntax checks
         run: |
