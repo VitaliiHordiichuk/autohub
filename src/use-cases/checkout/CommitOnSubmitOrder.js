@@ -123,6 +123,7 @@ export const CommitOnSubmitOrder = {
     vin = null,
     delivery = null,
     saveDeliveryProfile = false,
+    trustedTelegramCustomerUserId = null, // Server-side verified Telegram identity only.
   }) {
     const key = normalizeIdempotencyKey(idempotencyKey);
     const accepted = acceptedPriceMap(acceptedPrices);
@@ -184,7 +185,7 @@ export const CommitOnSubmitOrder = {
         }
       }
 
-      const pricingContext = await CustomerPricingService.getContext(userId, db);
+      const pricingContext = await CustomerPricingService.getContext(trustedTelegramCustomerUserId ?? userId, db);
       const validated = [];
       const issues = [];
 
@@ -268,8 +269,9 @@ export const CommitOnSubmitOrder = {
       }
 
       let customer = null;
-      if (userId) customer = await CustomerRepository.findActiveByUserId(userId, db);
-      const customerUserId = customer ? userId : null;
+      const effectiveCustomerUserId = trustedTelegramCustomerUserId ?? userId;
+      if (effectiveCustomerUserId) customer = await CustomerRepository.findActiveByUserId(effectiveCustomerUserId, db);
+      const customerUserId = customer ? effectiveCustomerUserId : null;
       const normalizedDelivery = await resolveDelivery({ delivery, userId, db });
 
       const groups = new Map();
@@ -389,7 +391,7 @@ export const CommitOnSubmitOrder = {
 
       if (customerUserId && saveDeliveryProfile && delivery) {
         await UserDeliveryProfileRepository.upsert({
-          userId,
+          userId: customerUserId,
           ...normalizedDelivery,
         }, db);
       }
