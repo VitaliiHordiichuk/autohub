@@ -1,0 +1,43 @@
+name: MAKAtron inline checkout checks
+
+on:
+  push:
+    branches:
+      - feat/makatron-inline-checkout-2026-10-25
+  pull_request:
+    paths:
+      - "src/services/Telegram*"
+      - "src/services/CheckoutService.js"
+      - "src/use-cases/checkout/**"
+      - "migrations/111_telegram_order_drafts.sql"
+      - ".github/workflows/telegram-order-checks.yml"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Existing Telegram and new order workflow tests
+        run: |
+          node --test \
+            src/services/TelegramCatalogFormatter.test.js \
+            src/services/TelegramCatalogService.test.js \
+            src/services/TelegramLanguageService.test.js \
+            src/services/TelegramNotificationService.test.js \
+            src/services/TelegramOrderService.test.js \
+            src/services/CheckoutSelection.test.js
+      - name: Syntax checks
+        run: |
+          node --check src/services/TelegramOrderView.js
+          node --check src/services/TelegramOrderService.js
+          node --check src/services/TelegramBotService.js
+          node --check src/services/CheckoutService.js
+          node --check src/use-cases/checkout/StartCheckout.js
+          node --check src/use-cases/checkout/SubmitOrder.js
+          node --check src/use-cases/checkout/CommitOnSubmitOrder.js
