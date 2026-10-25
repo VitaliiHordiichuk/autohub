@@ -97,15 +97,25 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
     lines.push(t.processing);
   } else if (stage==="EDIT"||stage==="REVIEW") {
     lines.push(stage==="REVIEW"?t.review:t.header);
+    const compact=items.length>=12;
     items.forEach((i,n)=>{
-      const name=esc(String(i.name||"").slice(0,64)),article=esc(i.article);
+      const name=esc(String(i.name||"").slice(0,compact?25:64));
+      const article=esc(String(i.article||"").slice(0,55));
       if (!i.offers?.length) {lines.push((n+1)+". <code>"+article+"</code> — "+t.none);return;}
       const offer=i.offers[i.selectedOffer||0];
-      lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:""));
-      lines.push("   "+(offer.sourceType==="OWN_STOCK"?"🏬 "+t.sourceOwn:"🚚 "+t.sourceSupplier)+
-        " · "+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
-        " · "+money(offer.price,locale)+"/"+t.pcs);
-      lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
+      const source=offer.sourceType==="OWN_STOCK"?"🏬":"🚚";
+      if(compact) {
+        // 20 parts must fit in one complete HTML message, without truncating tags.
+        lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:"")+
+          "\n   "+source+" "+t.count+": "+Math.max(0,Number(offer.quantity))+
+          " · "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(offer.price,locale)+"/"+t.pcs);
+      } else {
+        lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:""));
+        lines.push("   "+source+" "+(offer.sourceType==="OWN_STOCK"?t.sourceOwn:t.sourceSupplier)+
+          " · "+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
+          " · "+money(offer.price,locale)+"/"+t.pcs);
+        lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
+      }
     });
     lines.push("");
     lines.push("<b>"+t.total+": "+money(total,locale)+"</b>");
@@ -125,7 +135,7 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   const keyboard = stage==="EDIT"||stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE"||stage==="REVIEW"||stage==="DONE"||stage==="PROCESSING"
     ?orderKeyboard(sessionKey,stage,draft,locale)
     :{inline_keyboard:[[{text:t.back,callback_data:cb(sessionKey,"back")}]]};
-  return {text:lines.join("\n").slice(0,3900),parse_mode:"HTML",reply_markup:keyboard};
+  return {text:lines.join("\n"),parse_mode:"HTML",reply_markup:keyboard};
 }
 export function deliveryKeyboard(key,locale="uk") {
   const t=orderText(locale);
