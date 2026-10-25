@@ -82,7 +82,7 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   if (stage === "DONE") return {inline_keyboard:[[{
     text:t.newSearch,callback_data:cb(key,"reset"),
   }]]};
-  if (stage === "PROCESSING") return {inline_keyboard:[]};
+  if (stage === "PROCESSING") return {inline_keyboard:[[{text:locale==="en"?"🔄 Check order status":"🔄 Перевірити стан замовлення",callback_data:cb(key,"retry")}]]};
   return {inline_keyboard:[[{text:t.back,callback_data:cb(key,"back")}]]};
 }
 export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKey}) {
