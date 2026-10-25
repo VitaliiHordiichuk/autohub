@@ -37,6 +37,8 @@ jobs:
           node --check src/services/TelegramOrderView.js
           node --check src/services/TelegramOrderService.js
           node --check src/services/TelegramBotService.js
+          node --check scripts/test-makatron-checkout-staging.mjs
+          node --check scripts/check-makatron-checkout-readiness.mjs
           node --check src/services/CheckoutService.js
           node --check src/use-cases/checkout/StartCheckout.js
           node --check src/use-cases/checkout/SubmitOrder.js
