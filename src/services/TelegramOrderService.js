@@ -138,6 +138,11 @@ async function lookupList(articles,chatId,userId,locale) {
   return {items,viewerId};
 }
 async function publish(row,api,locale,{forceNew=false}={}) {
+  if(row.stage==="DELIVERY") {
+    // Every delivery screen reflects the CURRENT allowlisted public points.
+    row.draft.pickupAvailable=(await WarehouseRepository.findPickupAvailable()).length>0;
+    await save(row);
+  }
   // Never render cached internal warehouse names from drafts created
   // before public pickup point whitelisting was introduced.
   if(row.stage==="PICKUP") {
@@ -154,8 +159,14 @@ async function publish(row,api,locale,{forceNew=false}={}) {
     }
   }
   const body=row.stage==="DELIVERY"
-    ? {text:orderText(locale).delivery,parse_mode:"HTML",
-        reply_markup:deliveryKeyboard(row.session_key,locale)}
+    ? {text:orderText(locale).delivery +
+        (row.draft.pickupAvailable ? "" : "\n\n" +
+          (locale==="en"?"Collection is currently unavailable."
+            :"Самовивіз тимчасово недоступний.")),
+        parse_mode:"HTML",
+        reply_markup:deliveryKeyboard(row.session_key,locale,{
+          pickupAvailable:row.draft.pickupAvailable,
+        })}
     : renderTelegramOrder({stage:row.stage,draft:row.draft,locale,sessionKey:row.session_key});
   if(row.message_id && !forceNew) {
     try {
