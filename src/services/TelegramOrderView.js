@@ -47,22 +47,32 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   const t = orderText(locale);
   if (stage === "EDIT") {
     const rows = [];
-    (draft.items || []).forEach((item,i) => {
-      if (!item.offers?.length) return;
-      const offer = item.offers[item.selectedOffer || 0];
-      const buttons = [
-        {text:(i+1)+" −",callback_data:cb(key,"m",i)},
-        {text:(i+1)+": "+item.quantity+" "+t.pcs,callback_data:cb(key,"q",i)},
-        {text:(i+1)+" +",callback_data:cb(key,"p",i)},
-        {text:"🗑",callback_data:cb(key,"x",i)},
-      ];
-      if (item.offers.length > 1) {
-        // Keep the complete keyboard below Telegram's 100-button limit.
-        if ((draft.items || []).length >= 16) buttons[3]={text:"🔄",callback_data:cb(key,"s",i)};
-        else buttons.push({text:"🔄",callback_data:cb(key,"s",i)});
-      }
-      rows.push(buttons);
-    });
+    const items = draft.items || [];
+    // Five controls per position; paginate for 11–20 positions so Telegram's
+    // inline keyboard never exceeds the 100-button limit.
+    const pageSize = 10;
+    const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+    const page = Math.min(pageCount - 1, Math.max(0, Number(draft.page) || 0));
+    for (let i = page * pageSize; i < Math.min(items.length, (page + 1) * pageSize); i++) {
+      const item = items[i];
+      if (!item.offers?.length) continue;
+      const article = String(item.article || t.none);
+      rows.push([
+        // A second offer can be selected by tapping its article number.
+        {text: article, callback_data: cb(key, item.offers.length > 1 ? "s" : "a", i)},
+        {text: String(item.quantity || 0) + " " + t.pcs, callback_data: cb(key, "q", i)},
+        {text: "−", callback_data: cb(key, "m", i)},
+        {text: "+", callback_data: cb(key, "p", i)},
+        {text: "🗑", callback_data: cb(key, "x", i)},
+      ]);
+    }
+    if (pageCount > 1) {
+      const navigation = [];
+      if (page > 0) navigation.push({text: "◀", callback_data: cb(key, "pgprev")});
+      navigation.push({text: (page + 1) + "/" + pageCount, callback_data: cb(key, "pginfo")});
+      if (page < pageCount - 1) navigation.push({text: "▶", callback_data: cb(key, "pgnext")});
+      rows.push(navigation);
+    }
     rows.push([{text:t.add,callback_data:cb(key,"add")}]);
     rows.push([{text:t.next,callback_data:cb(key,"next")}]);
     return {inline_keyboard: rows};
@@ -99,20 +109,21 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
     lines.push(stage==="REVIEW"?t.review:t.header);
     const compact=items.length>=12;
     items.forEach((i,n)=>{
+      if(n>0) lines.push(""); // Visually separate individual positions.
       const name=esc(String(i.name||"").slice(0,compact?25:64));
       const article=esc(String(i.article||"").slice(0,55));
       if (!i.offers?.length) {lines.push((n+1)+". <code>"+article+"</code> — "+t.none);return;}
       const offer=i.offers[i.selectedOffer||0];
-      const source=offer.sourceType==="OWN_STOCK"?"🏬":"🚚";
+      // MAKA is the default selling warehouse; label only supplier offers.
+      const source=offer.sourceType==="OWN_STOCK"?"":"🚚 "+t.sourceSupplier+" · ";
       if(compact) {
         // 20 parts must fit in one complete HTML message, without truncating tags.
         lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:"")+
-          "\n   "+source+" "+t.count+": "+Math.max(0,Number(offer.quantity))+
+          "\n   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+
           " · "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(offer.price,locale)+"/"+t.pcs);
       } else {
         lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:""));
-        lines.push("   "+source+" "+(offer.sourceType==="OWN_STOCK"?t.sourceOwn:t.sourceSupplier)+
-          " · "+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
+        lines.push("   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
           " · "+money(offer.price,locale)+"/"+t.pcs);
         lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
       }
