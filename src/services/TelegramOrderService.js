@@ -149,6 +149,7 @@ async function publish(row,api,locale,{forceNew=false}={}) {
     const publicPoints=await WarehouseRepository.findPickupAvailable();
     if(!publicPoints.length) {
       row.stage="DELIVERY";
+      row.draft.pickupAvailable=false;
       row.draft.options=[];
       await save(row);
     } else {
