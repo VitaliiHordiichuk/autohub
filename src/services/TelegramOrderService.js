@@ -16,6 +16,7 @@ import { ReservationRepository } from "../repositories/ReservationRepository.js"
 import { StartCheckout } from "../use-cases/checkout/StartCheckout.js";
 import { SubmitOrder } from "../use-cases/checkout/SubmitOrder.js";
 import { normalizeOrderDelivery } from "./OrderDeliveryService.js";
+import { getLinkedTelegramRecipient,normalizeTelegramOrderComment,telegramOrderManagerComment } from "./TelegramOrderCustomerService.js";
 import { parseTelegramArticles, formatTelegramInputError } from "./TelegramCatalogFormatter.js";
 import { renderTelegramOrder, deliveryKeyboard, orderText, money } from "./TelegramOrderView.js";
 
@@ -203,6 +204,39 @@ async function publish(row,api,locale,{forceNew=false}={}) {
 async function say(chatId,api,text) {
   return api("sendMessage",{chat_id:chatId,text,parse_mode:"HTML"});
 }
+function setTelegramRecipient(row,person) {
+  const delivery=row.draft.delivery||{};
+  const payload={recipientFirstName:person.firstName,recipientLastName:person.lastName,
+    recipientPhone:person.phone,deliveryMethod:delivery.method,
+    ...(delivery.method==="PICKUP"?{}:{
+      novaPoshta:{cityRef:delivery.city.ref,cityName:delivery.city.name,
+        pointType:delivery.point.type,pointRef:delivery.point.ref,
+        pointNumber:delivery.point.number,pointName:delivery.point.name,
+        pointAddress:delivery.point.address},
+    })};
+  row.draft.deliveryInput=normalizeOrderDelivery(payload);
+  row.draft.contact={
+    firstName:row.draft.deliveryInput.recipientFirstName,
+    lastName:row.draft.deliveryInput.recipientLastName,
+    phone:row.draft.deliveryInput.recipientPhone,
+  };
+}
+async function beginTelegramContact(row,locale) {
+  const linked=await getLinkedTelegramRecipient({
+    chatId:row.chat_id,telegramUserId:row.telegram_user_id,
+    expectedUserId:row.draft.viewerId,
+  });
+  if(linked){
+    try {
+      setTelegramRecipient(row,linked);
+      row.stage="CONTACT_CONFIRM";
+      return;
+    }catch(error){
+      console.error("MAKAtron linked contact invalid:",error.message);
+    }
+  }
+  row.stage="CONTACT_INPUT";
+}
 async function handleInput(row,text,api,locale) {
   const chatId=row.chat_id;
   if(row.stage==="CITY_INPUT"||row.stage==="CITY_CHOICE") {
@@ -235,25 +269,27 @@ async function handleInput(row,text,api,locale) {
       await say(chatId,api,orderText(locale).contact);
       return true;
     }
-    const delivery=row.draft.delivery||{};
-    const payload={recipientFirstName:person.firstName,recipientLastName:person.lastName,
-      recipientPhone:person.phone,deliveryMethod:delivery.method,
-      ...(delivery.method==="PICKUP"?{}:{
-        novaPoshta:{cityRef:delivery.city.ref,cityName:delivery.city.name,
-          pointType:delivery.point.type,pointRef:delivery.point.ref,
-          pointNumber:delivery.point.number,pointName:delivery.point.name,
-          pointAddress:delivery.point.address},
-      })};
     try {
-      row.draft.deliveryInput=normalizeOrderDelivery(payload);
+      setTelegramRecipient(row,person);
     } catch(error) {
       await say(chatId,api,recoverableError(locale,error.message)+"\n"+orderText(locale).contact);
       return true;
     }
-    row.draft.contact=person;
+    row.stage="COMMENT_CHOICE";
+    // A fresh message below the customer's input shows the next step.
+    await publish(await save(row),api,locale,{forceNew:true});
+    return true;
+  }
+  if(row.stage==="COMMENT_INPUT"||row.stage==="COMMENT_CHOICE") {
+    try {
+      row.draft.comment=normalizeTelegramOrderComment(text);
+    }catch {
+      await say(chatId,api,locale==="en"
+        ?"⚠️ Comment must be 500 characters or fewer. Please send a shorter comment."
+        :"⚠️ Коментарій має містити не більше 500 символів. Скоротіть повідомлення.");
+      return true;
+    }
     row.stage="REVIEW";
-    // Review must arrive BELOW the customer's just-sent contact message.
-    // Editing an older quote makes it look as though the bot never replied.
     await publish(await save(row),api,locale,{forceNew:true});
     return true;
   }
@@ -445,7 +481,7 @@ async function commitOrder(row,api,locale) {
     userId:null,guestToken:row.draft.guestToken||null,
     trustedTelegramCustomerUserId:userId,
     delivery:row.draft.deliveryInput,saveDeliveryProfile:false,
-    comment:"Замовлення оформлено через Telegram MAKAtron",
+    comment:telegramOrderManagerComment(row.draft.comment),
   });
   row.draft.orderIds=(placed.orders||[placed.order]).filter(Boolean).map(o=>Number(o.id));
   row.stage="DONE";
@@ -512,7 +548,7 @@ export async function handleTelegramOrderCallback(callback,api) {
     row.draft.delivery=pickupSelection(locale);
     row.draft.deliveryInput=null;
     row.draft.options=[];
-    row.stage="CONTACT_INPUT";
+    await beginTelegramContact(row,locale);
   } else if(row.stage==="DELIVERY"&&action==="nova") {
     row.stage="CITY_INPUT";
   } else if(row.stage==="PICKUP"&&action==="warehouse") {
@@ -532,7 +568,16 @@ export async function handleTelegramOrderCallback(callback,api) {
     if(!point)return true;
     row.draft.delivery.point=point;
     row.draft.delivery.label="Нова пошта · "+row.draft.delivery.city.name+" · "+point.name;
+    await beginTelegramContact(row,locale);
+  } else if(row.stage==="CONTACT_CONFIRM"&&action==="contactok") {
+    row.stage="COMMENT_CHOICE";
+  } else if(["CONTACT_CONFIRM","REVIEW"].includes(row.stage)&&action==="contactedit") {
     row.stage="CONTACT_INPUT";
+  } else if(["COMMENT_CHOICE","REVIEW"].includes(row.stage)&&action==="commentadd") {
+    row.stage="COMMENT_INPUT";
+  } else if(["COMMENT_CHOICE","COMMENT_INPUT"].includes(row.stage)&&action==="commentskip") {
+    row.draft.comment=null;
+    row.stage="REVIEW";
   } else if(row.stage==="REVIEW"&&action==="submit") {
     row.stage="PROCESSING";
     row.draft.idempotencyKey=row.draft.idempotencyKey||randomUUID();
