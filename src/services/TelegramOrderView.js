@@ -15,7 +15,7 @@ const TXT = {
     review:"<b>Перевірте замовлення перед оформленням</b>", customer:"Отримувач",
     deliveryLabel:"Доставка", submit:"✅ Оформити замовлення", newSearch:"🔍 Новий пошук",
     empty:"У списку немає вибраних товарів.", onlyOne:"Кількість не може перевищувати залишок.",
-    done:"✅ <b>Замовлення оформлено!</b>", order:"Номер", orders:"Замовлення",
+    done:"✅ <b>Дякуємо за замовлення!</b>\nМенеджер зв’яжеться з вами.", order:"Номер", orders:"Замовлення",
     processing:"⏳ Перевіряємо залишки та створюємо замовлення…",
     split:"Товари зі складу MAKA та від постачальників оформлюються окремими замовленнями.",
   },
@@ -32,7 +32,7 @@ const TXT = {
     review:"<b>Review your order before placing it</b>",customer:"Recipient",
     deliveryLabel:"Delivery",submit:"✅ Place order",newSearch:"🔍 New search",
     empty:"No items selected.",onlyOne:"Quantity cannot exceed available stock.",
-    done:"✅ <b>Order placed!</b>",order:"Number",orders:"Orders",
+    done:"✅ <b>Thank you for your order!</b>\nOur manager will contact you.",order:"Number",orders:"Orders",
     processing:"⏳ Checking stock and creating your order…",
     split:"MAKA warehouse and supplier items are placed as separate orders.",
   },
@@ -77,11 +77,8 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     rows.push([{text:t.next,callback_data:cb(key,"next")}]);
     return {inline_keyboard: rows};
   }
-  if (stage === "PICKUP") return {inline_keyboard: [
-    ...(draft.options || []).slice(0,10).map((w,i) => [{
-      text: [w.city,w.name,w.address].filter(Boolean).join(" · ").slice(0,110),
-      callback_data:cb(key,"warehouse",i),
-    }]),
+  // Historic draft data must never render internal warehouse names or addresses.
+  if (stage === "PICKUP") return {inline_keyboard:[
     [{text:t.back,callback_data:cb(key,"back")}],
   ]};
   if (stage === "CITY_CHOICE" || stage === "POINT_CHOICE") return {inline_keyboard:[
@@ -140,8 +137,8 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       if(new Set(selected.map(i=>i.offers[i.selectedOffer||0].sourceType)).size>1)lines.push("ℹ️ "+t.split);
     }
   } else if(stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE") {
-    lines.push(stage==="PICKUP"?t.pickup:stage==="CITY_CHOICE"?t.cities:t.points);
-    if(stage==="PICKUP"&&!(draft.options||[]).length) lines.push(locale==="en"?"No collection points available.":"Пункти самовивозу недоступні.");
+    lines.push(stage==="PICKUP"?t.delivery:stage==="CITY_CHOICE"?t.cities:t.points);
+
   } else if(stage==="CITY_INPUT") lines.push("🚚 "+t.city);
   else if(stage==="POINT_INPUT")lines.push("🚚 "+t.point);
   else if(stage==="CONTACT_INPUT")lines.push("👤 "+t.contact);
