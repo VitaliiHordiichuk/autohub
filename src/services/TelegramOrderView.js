@@ -56,7 +56,11 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
         {text:(i+1)+" +",callback_data:cb(key,"p",i)},
         {text:"🗑",callback_data:cb(key,"x",i)},
       ];
-      if (item.offers.length > 1) buttons.push({text:"🔄",callback_data:cb(key,"s",i)});
+      if (item.offers.length > 1) {
+        // Keep the complete keyboard below Telegram's 100-button limit.
+        if ((draft.items || []).length >= 16) buttons[3]={text:"🔄",callback_data:cb(key,"s",i)};
+        else buttons.push({text:"🔄",callback_data:cb(key,"s",i)});
+      }
       rows.push(buttons);
     });
     rows.push([{text:t.add,callback_data:cb(key,"add")}]);
