@@ -12,6 +12,12 @@ const TXT = {
     cities:"<b>Оберіть місто</b>", point:"Введіть номер або назву відділення / поштомата повідомленням.",
     points:"<b>Оберіть відділення або поштомат</b>",
     contact:"Надішліть ім’я, прізвище та телефон одним повідомленням: <b>Ім’я Прізвище +380XXXXXXXXX</b>",
+    contactConfirm:"<b>Перевірте контактні дані з вашого профілю MAKA</b>",
+    contactAccept:"✅ Дані правильні",contactEdit:"✏️ Змінити дані",
+    commentPrompt:"💬 <b>Коментарій до замовлення (необов’язково)</b>\nМожете додати побажання для менеджера.",
+    commentInput:"💬 Надішліть коментарій одним повідомленням (до 500 символів).",
+    commentAdd:"✏️ Додати коментарій",commentSkip:"➡️ Пропустити",
+    commentLabel:"Коментарій",
     review:"<b>Перевірте замовлення перед оформленням</b>", customer:"Отримувач",
     deliveryLabel:"Доставка", submit:"✅ Оформити замовлення", newSearch:"🔍 Новий пошук",
     empty:"У списку немає вибраних товарів.", onlyOne:"Кількість не може перевищувати залишок.",
@@ -29,6 +35,12 @@ const TXT = {
     cities:"<b>Select city</b>",point:"Send a branch or parcel locker number/name.",
     points:"<b>Select branch or locker</b>",
     contact:"Send your first name, last name and phone in one message: <b>First Last +380XXXXXXXXX</b>",
+    contactConfirm:"<b>Check the contact information from your MAKA account</b>",
+    contactAccept:"✅ Details are correct",contactEdit:"✏️ Change details",
+    commentPrompt:"💬 <b>Order comment (optional)</b>\nYou can add a note for the manager.",
+    commentInput:"💬 Send your comment in one message (up to 500 characters).",
+    commentAdd:"✏️ Add a comment",commentSkip:"➡️ Skip",
+    commentLabel:"Comment",
     review:"<b>Review your order before placing it</b>",customer:"Recipient",
     deliveryLabel:"Delivery",submit:"✅ Place order",newSearch:"🔍 New search",
     empty:"No items selected.",onlyOne:"Quantity cannot exceed available stock.",
@@ -85,8 +97,24 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     ...(draft.options || []).slice(0,8).map((o,i) => [{text:String(o.displayName||o.name).slice(0,55),callback_data:cb(key,stage==="CITY_CHOICE"?"city":"point",i)}]),
     [{text:t.back,callback_data:cb(key,"back")}],
   ]};
+  if (stage === "CONTACT_CONFIRM") return {inline_keyboard:[
+    [{text:t.contactAccept,callback_data:cb(key,"contactok")}],
+    [{text:t.contactEdit,callback_data:cb(key,"contactedit")}],
+    [{text:t.back,callback_data:cb(key,"back")}],
+  ]};
+  if (stage === "COMMENT_CHOICE") return {inline_keyboard:[
+    [{text:t.commentAdd,callback_data:cb(key,"commentadd")}],
+    [{text:t.commentSkip,callback_data:cb(key,"commentskip")}],
+    [{text:t.back,callback_data:cb(key,"back")}],
+  ]};
+  if (stage === "COMMENT_INPUT") return {inline_keyboard:[
+    [{text:t.commentSkip,callback_data:cb(key,"commentskip")}],
+    [{text:t.back,callback_data:cb(key,"back")}],
+  ]};
   if (stage === "REVIEW") return {inline_keyboard:[
     [{text:t.submit,callback_data:cb(key,"submit")}],
+    [{text:t.contactEdit,callback_data:cb(key,"contactedit")}],
+    [{text:t.commentAdd,callback_data:cb(key,"commentadd")}],
     [{text:t.back,callback_data:cb(key,"back")}],
   ]};
   if (stage === "DONE") return {inline_keyboard:[[{
@@ -134,8 +162,21 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       const d=draft.delivery||{}, contact=draft.contact||{};
       lines.push(t.customer+": "+esc([contact.firstName,contact.lastName,contact.phone].filter(Boolean).join(" ")));
       lines.push(t.deliveryLabel+": "+esc(d.label||""));
+      if(draft.comment) lines.push("💬 "+t.commentLabel+": "+esc(draft.comment));
       if(new Set(selected.map(i=>i.offers[i.selectedOffer||0].sourceType)).size>1)lines.push("ℹ️ "+t.split);
     }
+  } else if(stage==="CONTACT_CONFIRM") {
+    const contact=draft.contact||{};
+    lines.push(t.contactConfirm);
+    lines.push("");
+    lines.push("👤 "+esc([contact.firstName,contact.lastName].filter(Boolean).join(" ")));
+    lines.push("📱 "+esc(contact.phone||""));
+  } else if(stage==="COMMENT_CHOICE") {
+    lines.push(t.commentPrompt);
+    if(draft.comment)lines.push("\n💬 "+t.commentLabel+": "+esc(draft.comment));
+  } else if(stage==="COMMENT_INPUT") {
+    lines.push(t.commentInput);
+    if(draft.comment)lines.push("\n💬 "+t.commentLabel+": "+esc(draft.comment));
   } else if(stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE") {
     lines.push(stage==="PICKUP"?t.delivery:stage==="CITY_CHOICE"?t.cities:t.points);
 
@@ -143,7 +184,7 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   else if(stage==="POINT_INPUT")lines.push("🚚 "+t.point);
   else if(stage==="CONTACT_INPUT")lines.push("👤 "+t.contact);
   else lines.push(t.delivery);
-  const keyboard = stage==="EDIT"||stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE"||stage==="REVIEW"||stage==="DONE"||stage==="PROCESSING"
+  const keyboard = stage==="EDIT"||stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE"||stage==="CONTACT_CONFIRM"||stage==="COMMENT_CHOICE"||stage==="COMMENT_INPUT"||stage==="REVIEW"||stage==="DONE"||stage==="PROCESSING"
     ?orderKeyboard(sessionKey,stage,draft,locale)
     :{inline_keyboard:[[{text:t.back,callback_data:cb(sessionKey,"back")}]]};
   return {text:lines.join("\n"),parse_mode:"HTML",reply_markup:keyboard};
