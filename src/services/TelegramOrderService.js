@@ -138,6 +138,21 @@ async function lookupList(articles,chatId,userId,locale) {
   return {items,viewerId};
 }
 async function publish(row,api,locale,{forceNew=false}={}) {
+  // Never render cached internal warehouse names from drafts created
+  // before public pickup point whitelisting was introduced.
+  if(row.stage==="PICKUP") {
+    const publicPoints=await WarehouseRepository.findPickupAvailable();
+    if(!publicPoints.length) {
+      row.stage="DELIVERY";
+      row.draft.options=[];
+      await save(row);
+    } else {
+      row.draft.options=publicPoints.slice(0,10).map(w=>({
+        id:Number(w.id),name:w.name,city:w.city||"",address:w.address||"",
+      }));
+      await save(row);
+    }
+  }
   const body=row.stage==="DELIVERY"
     ? {text:orderText(locale).delivery,parse_mode:"HTML",
         reply_markup:deliveryKeyboard(row.session_key,locale)}
@@ -289,6 +304,23 @@ async function commitOrder(row,api,locale) {
   const items=(row.draft.items||[]).filter(i=>i.quantity>0&&i.offers?.length);
   if(!items.length)throw Error(orderText(locale).empty);
   if(!row.draft.deliveryInput)throw Error("Delivery details missing");
+  if(row.draft.deliveryInput.deliveryMethod==="PICKUP") {
+    const approved=await WarehouseRepository.findPublicPickupById(
+      row.draft.deliveryInput.pickupWarehouseId
+    );
+    if(!approved) {
+      // Fail closed even if an old draft contains an internal warehouse ID.
+      row.stage="DELIVERY";
+      row.draft.delivery=null;
+      row.draft.deliveryInput=null;
+      row.draft.options=[];
+      await publish(await save(row),api,locale);
+      await say(chatId,api,locale==="en"
+        ?"The previous pickup point is unavailable. Choose an approved collection point or another delivery method."
+        :"Попередній пункт самовивозу недоступний. Оберіть доступний пункт або інший спосіб доставки.");
+      return;
+    }
+  }
   const viewer=await resolveTelegramPricingIdentity({
     chatId,telegramUserId:row.telegram_user_id,
   });
@@ -452,15 +484,37 @@ export async function handleTelegramOrderCallback(callback,api) {
     }
     row.stage="DELIVERY";
   } else if(row.stage==="DELIVERY"&&action==="pickup") {
-    const warehouses=await WarehouseRepository.findPickupAvailable();
-    row.draft.options=warehouses.slice(0,10).map(w=>({id:Number(w.id),name:w.name,city:w.city||""}));
+    const pickupPoints=await WarehouseRepository.findPickupAvailable();
+    if(!pickupPoints.length) {
+      await say(chatId,api,locale==="en"
+        ?"Collection is not available yet. No public pickup point has been confirmed; choose another delivery method."
+        :"Самовивіз поки недоступний: публічний пункт видачі ще не підтверджено. Оберіть інший спосіб доставки.");
+      return true;
+    }
+    row.draft.options=pickupPoints.slice(0,10).map(w=>({
+      id:Number(w.id),name:w.name,city:w.city||"",address:w.address||"",
+    }));
     row.stage="PICKUP";
   } else if(row.stage==="DELIVERY"&&action==="nova") {
     row.stage="CITY_INPUT";
   } else if(row.stage==="PICKUP"&&action==="warehouse") {
-    const w=row.draft.options?.[idx];
-    if(!w)return true;
-    row.draft.delivery={method:"PICKUP",warehouseId:w.id,label:[w.city,w.name].filter(Boolean).join(", ")};
+    const stored=row.draft.options?.[idx];
+    if(!stored)return true;
+    const publicPoint=await WarehouseRepository.findPublicPickupById(stored.id);
+    if(!publicPoint) {
+      row.stage="DELIVERY";
+      row.draft.options=[];
+      await publish(await save(row),api,locale);
+      await say(chatId,api,locale==="en"
+        ?"This pickup point is no longer available. Select a new delivery method."
+        :"Цей пункт самовивозу більше недоступний. Оберіть інший спосіб доставки.");
+      return true;
+    }
+    row.draft.delivery={
+      method:"PICKUP",
+      warehouseId:Number(publicPoint.id),
+      label:[publicPoint.city,publicPoint.name,publicPoint.address].filter(Boolean).join(" · "),
+    };
     row.stage="CONTACT_INPUT";
   } else if(row.stage==="CITY_CHOICE"&&action==="city") {
     const city=row.draft.options?.[idx];
