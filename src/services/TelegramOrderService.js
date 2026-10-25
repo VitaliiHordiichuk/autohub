@@ -67,7 +67,7 @@ export function articlesStartingFreshTelegramSearch(stage,text) {
   if(!input || parseTelegramRecipient(input))return null;
   // A standalone Ukrainian phone number should still receive the recipient
   // prompt rather than discarding the customer's existing parts list.
-  if(/^\\+?380\\d{9}$/.test(input)||/^0\\d{9}$/.test(input))return null;
+  if(/^\+?380\d{9}$/.test(input)||/^0\d{9}$/.test(input))return null;
   const parsed=parseTelegramArticles(input);
   if(parsed.error||!parsed.articles.length)return null;
   if(parsed.articles.some(v=>v.replace(/[^A-Za-z0-9]/g,"").length<6))
