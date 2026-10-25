@@ -41,13 +41,6 @@ async function run() {
   `);
   if(!candidates.rows.length) throw Error("No owned-stock offers to test in staging DB");
 
-  const pickupResult=await pool.query(`
-    SELECT id FROM warehouses
-    WHERE is_active=TRUE AND (pickup_available=TRUE OR type='OWN')
-    ORDER BY CASE WHEN type='OWN' THEN 0 ELSE 1 END, id LIMIT 1
-  `);
-  if(!pickupResult.rows.length)throw Error("No active pickup location in staging");
-
   let chosen=null,cart=null,token=null;
   for(const offer of candidates.rows) {
     token=randomBytes(32).toString("hex");
@@ -76,7 +69,6 @@ async function run() {
   const delivery={
     recipientFirstName:"MAKAtron",recipientLastName:"Тест",
     recipientPhone:"+380501234567",deliveryMethod:"PICKUP",
-    pickupWarehouseId:Number(pickupResult.rows[0].id),
   };
   const first=await SubmitOrder.execute({
     checkoutId:checkout.checkoutId,idempotencyKey:key,
@@ -98,7 +90,14 @@ async function run() {
   assert.equal(afterReplay,after,"replay must not deduct stock twice");
   const saved=(await pool.query("SELECT status,inventory_model FROM orders WHERE id=$1",[ids[0]])).rows[0];
   assert.equal(saved.inventory_model,"COMMIT_ON_SUBMIT");
-  console.log("SUCCESS staging checkout: order created with PICKUP, OWN_STOCK committed once, identical retry returned the same order");
+  const shipping=(await pool.query(
+    "SELECT delivery_method,pickup_warehouse_id FROM order_delivery_details WHERE order_id=$1",
+    [ids[0]]
+  )).rows[0];
+  assert.equal(shipping.delivery_method,"PICKUP");
+  assert.equal(shipping.pickup_warehouse_id,null,
+    "manager-arranged pickup must never bind an internal warehouse ID");
+  console.log("SUCCESS staging checkout: manager-arranged PICKUP without warehouse ID; OWN_STOCK committed once, identical retry returned the same order");
   console.log("Offer id: "+chosen.offer_id+", stock: "+before.quantity+" -> "+after);
   console.log("No changes made to live MAKA database or bot.");
 }
