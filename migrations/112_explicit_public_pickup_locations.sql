@@ -19,9 +19,7 @@ BEGIN
     CHECK (
       public_pickup_enabled IS NOT TRUE
       OR (
-        is_active=TRUE
-        AND pickup_available=TRUE
-        AND NULLIF(BTRIM(public_pickup_name),'') IS NOT NULL
+        NULLIF(BTRIM(public_pickup_name),'') IS NOT NULL
         AND NULLIF(BTRIM(public_pickup_city),'') IS NOT NULL
         AND NULLIF(BTRIM(public_pickup_address),'') IS NOT NULL
       )
