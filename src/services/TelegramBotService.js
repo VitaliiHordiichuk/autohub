@@ -2,11 +2,13 @@ import { TelegramConnectionService } from "./TelegramConnectionService.js";
 import { searchTelegramCatalog } from "./TelegramCatalogService.js";
 import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLanguageService.js";
 import { handleTelegramOrderMessage, handleTelegramOrderCallback, telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
+import { sendPendingTelegramGuestOrderConfirmations } from "./TelegramGuestOrderNotificationService.js";
 
 let timer = null;
 let offset = 0;
 let polling = false;
 const lastCatalogSearch = new Map();
+let lastGuestConfirmationCheck = 0;
 
 function catalogEnabled() {
   return /^(1|true|yes|on)$/i.test(String(process.env.TELEGRAM_CATALOG_SEARCH_ENABLED || "false"));
@@ -215,6 +217,17 @@ async function poll() {
   } catch (error) {
     console.error("Помилка Telegram-бота:", error.message);
   } finally {
+    // This process already owns the MAKAtron Telegram token. Guest
+    // confirmations are driven by the manager's order status in the database,
+    // without needing to redeploy the public website backend.
+    const now=Date.now();
+    if (telegramInlineCheckoutEnabled(
+      process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID||null
+    ) && now-lastGuestConfirmationCheck>=15000) {
+      lastGuestConfirmationCheck=now;
+      try { await sendPendingTelegramGuestOrderConfirmations(api); }
+      catch(error) { console.error("MAKAtron guest status checks:",error.message); }
+    }
     polling = false;
   }
 }
