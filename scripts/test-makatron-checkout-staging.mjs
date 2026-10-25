@@ -9,6 +9,9 @@ import { CartAccessRepository } from "../src/repositories/CartAccessRepository.j
 import { CartService } from "../src/services/CartService.js";
 import { StartCheckout } from "../src/use-cases/checkout/StartCheckout.js";
 import { SubmitOrder } from "../src/use-cases/checkout/SubmitOrder.js";
+import { TelegramGuestOrderRecipientRepository } from "../src/repositories/TelegramGuestOrderRecipientRepository.js";
+import { OrderConfirmationService } from "../src/services/OrderConfirmationService.js";
+import { telegramOrderManagerComment } from "../src/services/TelegramOrderCustomerService.js";
 
 async function run() {
   const dbName=String(process.env.DB_NAME||"");
@@ -73,6 +76,7 @@ async function run() {
   const first=await SubmitOrder.execute({
     checkoutId:checkout.checkoutId,idempotencyKey:key,
     userId:null,guestToken:token,delivery,saveDeliveryProfile:false,
+    comment:telegramOrderManagerComment("Перетелефонуйте перед видачею"),
   });
   const ids=first.orders.map(order=>Number(order.id));
   assert.equal(ids.length,1);
@@ -97,7 +101,18 @@ async function run() {
   assert.equal(shipping.delivery_method,"PICKUP");
   assert.equal(shipping.pickup_warehouse_id,null,
     "manager-arranged pickup must never bind an internal warehouse ID");
-  console.log("SUCCESS staging checkout: manager-arranged PICKUP without warehouse ID; OWN_STOCK committed once, identical retry returned the same order");
+  const note=(await pool.query("SELECT comment FROM orders WHERE id=$1",[ids[0]])).rows[0].comment;
+  assert.match(note,/Коментарій клієнта: Перетелефонуйте перед видачею/);
+  await TelegramGuestOrderRecipientRepository.saveOrders({
+    orderIds:ids,chatId:953723985,telegramUserId:953723985,
+  });
+  const guest=(await pool.query(
+    "SELECT telegram_chat_id FROM telegram_guest_order_recipients WHERE order_id=$1",
+    [ids[0]])).rows[0];
+  assert.equal(String(guest.telegram_chat_id),"953723985");
+  const confirmed=await OrderConfirmationService.confirmOrder({orderId:ids[0]});
+  assert.equal(confirmed.order.status,"CONFIRMED");
+  console.log("SUCCESS staging checkout: generic PICKUP, optional comment saved, guest recipient retained, manager confirmed order, stock committed once and retry idempotent");
   console.log("Offer id: "+chosen.offer_id+", stock: "+before.quantity+" -> "+after);
   console.log("No changes made to live MAKA database or bot.");
 }
