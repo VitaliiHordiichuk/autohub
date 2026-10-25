@@ -94,7 +94,13 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     const page = Math.min(pageCount - 1, Math.max(0, Number(draft.page) || 0));
     for (let i = page * pageSize; i < Math.min(items.length, (page + 1) * pageSize); i++) {
       const item = items[i];
-      if (!item.offers?.length) continue;
+      if (!item.offers?.length) {
+        if(stage==="CART")rows.push([
+          {text:"№"+(i+1),callback_data:cb(key,"a",i)},
+          {text:"🗑",callback_data:cb(key,"x",i)},
+        ]);
+        continue;
+      }
       // The full catalogue article is always printed in the numbered quote.
       // The short position marker leaves room for all five buttons on iPhone.
       rows.push([
