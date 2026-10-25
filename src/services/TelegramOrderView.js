@@ -89,7 +89,6 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     }
     rows.push([{text:t.add,callback_data:cb(key,"add")}]);
     rows.push([{text:t.next,callback_data:cb(key,"next")}]);
-    rows.push([{text:t.freshSearch,callback_data:cb(key,"newsearch")}]);
     return {inline_keyboard: rows};
   }
   // Historic draft data must never render internal warehouse names or addresses.
@@ -99,6 +98,7 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   if (stage === "CITY_CHOICE" || stage === "POINT_CHOICE") return {inline_keyboard:[
     ...(draft.options || []).slice(0,8).map((o,i) => [{text:String(o.displayName||o.name).slice(0,55),callback_data:cb(key,stage==="CITY_CHOICE"?"city":"point",i)}]),
     [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
   ]};
   if (stage === "CONTACT_CONFIRM") return {inline_keyboard:[
     [{text:t.contactAccept,callback_data:cb(key,"contactok")}],
