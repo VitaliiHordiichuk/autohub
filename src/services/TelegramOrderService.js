@@ -230,6 +230,7 @@ async function handleInput(row,text,api,locale) {
       return true;
     }
     row.draft.items.push(...found.items);
+    row.draft.page=Math.floor(Math.max(0,row.draft.items.length-1)/10);
     row.draft.awaitingAdd=false;
     await publish(await save(row),api,locale);
     return true;
@@ -412,6 +413,12 @@ export async function handleTelegramOrderCallback(callback,api) {
     return true;
   }
   const action=match[2],idx=match[3]===undefined?-1:parseInt(match[3],36);
+  if(action==="a" && row.stage==="EDIT") {
+    const article=String(row.draft.items?.[idx]?.article || "");
+    await api("answerCallbackQuery",{callback_query_id:callback.id,
+      text:article ? "Артикул: "+article : ""});
+    return true;
+  }
   await api("answerCallbackQuery",{callback_query_id:callback.id});
   if(row.stage==="DONE"&&action!=="reset")return true;
   if(row.stage==="PROCESSING") {
@@ -423,7 +430,13 @@ export async function handleTelegramOrderCallback(callback,api) {
     return true;
   }
   const items=row.draft.items||[];
-  if(row.stage==="EDIT"&&["p","m","x","s"].includes(action)&&items[idx]) {
+  if(row.stage==="EDIT" && ["pgprev","pgnext"].includes(action)) {
+    const maxPage=Math.max(0,Math.ceil(items.length/10)-1);
+    const current=Math.max(0,Math.min(maxPage,Number(row.draft.page)||0));
+    row.draft.page=Math.max(0,Math.min(maxPage,current+(action==="pgnext"?1:-1)));
+  } else if(action==="pginfo") {
+    return true;
+  } else if(row.stage==="EDIT"&&["p","m","x","s"].includes(action)&&items[idx]) {
     items[idx]=editTelegramItem(items[idx],action);
   } else if(action==="q") {
     return true;
