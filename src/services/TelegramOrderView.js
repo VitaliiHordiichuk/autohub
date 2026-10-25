@@ -17,6 +17,7 @@ const TXT = {
     commentPrompt:"💬 <b>Коментарій до замовлення (необов’язково)</b>\nМожете додати побажання для менеджера.",
     commentInput:"💬 Надішліть коментарій одним повідомленням (до 500 символів).",
     commentAdd:"✏️ Додати коментарій",commentSkip:"➡️ Пропустити",
+    freshSearch:"🔍 Новий пошук",
     commentLabel:"Коментарій",
     review:"<b>Перевірте замовлення перед оформленням</b>", customer:"Отримувач",
     deliveryLabel:"Доставка", submit:"✅ Оформити замовлення", newSearch:"🔍 Новий пошук",
@@ -40,6 +41,7 @@ const TXT = {
     commentPrompt:"💬 <b>Order comment (optional)</b>\nYou can add a note for the manager.",
     commentInput:"💬 Send your comment in one message (up to 500 characters).",
     commentAdd:"✏️ Add a comment",commentSkip:"➡️ Skip",
+    freshSearch:"🔍 New search",
     commentLabel:"Comment",
     review:"<b>Review your order before placing it</b>",customer:"Recipient",
     deliveryLabel:"Delivery",submit:"✅ Place order",newSearch:"🔍 New search",
@@ -87,6 +89,7 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     }
     rows.push([{text:t.add,callback_data:cb(key,"add")}]);
     rows.push([{text:t.next,callback_data:cb(key,"next")}]);
+    rows.push([{text:t.freshSearch,callback_data:cb(key,"newsearch")}]);
     return {inline_keyboard: rows};
   }
   // Historic draft data must never render internal warehouse names or addresses.
@@ -101,27 +104,34 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     [{text:t.contactAccept,callback_data:cb(key,"contactok")}],
     [{text:t.contactEdit,callback_data:cb(key,"contactedit")}],
     [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
   ]};
   if (stage === "COMMENT_CHOICE") return {inline_keyboard:[
     [{text:t.commentAdd,callback_data:cb(key,"commentadd")}],
     [{text:t.commentSkip,callback_data:cb(key,"commentskip")}],
     [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
   ]};
   if (stage === "COMMENT_INPUT") return {inline_keyboard:[
     [{text:t.commentSkip,callback_data:cb(key,"commentskip")}],
     [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
   ]};
   if (stage === "REVIEW") return {inline_keyboard:[
     [{text:t.submit,callback_data:cb(key,"submit")}],
     [{text:t.contactEdit,callback_data:cb(key,"contactedit")}],
     [{text:t.commentAdd,callback_data:cb(key,"commentadd")}],
     [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
   ]};
   if (stage === "DONE") return {inline_keyboard:[[{
     text:t.newSearch,callback_data:cb(key,"reset"),
   }]]};
   if (stage === "PROCESSING") return {inline_keyboard:[[{text:locale==="en"?"🔄 Check order status":"🔄 Перевірити стан замовлення",callback_data:cb(key,"retry")}]]};
-  return {inline_keyboard:[[{text:t.back,callback_data:cb(key,"back")}]]};
+  return {inline_keyboard:[
+    [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
+  ]};
 }
 export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKey}) {
   const t=orderText(locale), esc=escapeTelegramHtml,items=draft.items||[];
@@ -186,7 +196,10 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   else lines.push(t.delivery);
   const keyboard = stage==="EDIT"||stage==="PICKUP"||stage==="CITY_CHOICE"||stage==="POINT_CHOICE"||stage==="CONTACT_CONFIRM"||stage==="COMMENT_CHOICE"||stage==="COMMENT_INPUT"||stage==="REVIEW"||stage==="DONE"||stage==="PROCESSING"
     ?orderKeyboard(sessionKey,stage,draft,locale)
-    :{inline_keyboard:[[{text:t.back,callback_data:cb(sessionKey,"back")}]]};
+    :{inline_keyboard:[
+      [{text:t.back,callback_data:cb(sessionKey,"back")}],
+      [{text:t.freshSearch,callback_data:cb(sessionKey,"newsearch")}],
+    ]};
   return {text:lines.join("\n"),parse_mode:"HTML",reply_markup:keyboard};
 }
 export function deliveryKeyboard(key,locale="uk",{pickupAvailable=true}={}) {
@@ -195,5 +208,6 @@ export function deliveryKeyboard(key,locale="uk",{pickupAvailable=true}={}) {
     ...(pickupAvailable?[ [{text:t.pickup,callback_data:cb(key,"pickup")}] ]:[]),
     [{text:t.shipping,callback_data:cb(key,"nova")}],
     [{text:t.back,callback_data:cb(key,"back")}],
+    [{text:t.freshSearch,callback_data:cb(key,"newsearch")}],
   ]};
 }
