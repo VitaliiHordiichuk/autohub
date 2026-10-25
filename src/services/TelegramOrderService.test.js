@@ -75,3 +75,20 @@ test("Checkout stays disabled unless its dedicated feature flag is enabled",()=>
   if(previous===undefined)delete process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED;
   else process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED=previous;
 });
+
+test("Optional pilot allowlist does not expose checkout to other chats",()=>{
+  const oldFlag=process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED;
+  const oldPilot=process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID;
+  process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED="true";
+  process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID="123456789";
+  try {
+    assert.equal(telegramInlineCheckoutEnabled(),false);
+    assert.equal(telegramInlineCheckoutEnabled(123456789),true);
+    assert.equal(telegramInlineCheckoutEnabled(2),false);
+  } finally {
+    if(oldFlag===undefined)delete process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED;
+    else process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED=oldFlag;
+    if(oldPilot===undefined)delete process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID;
+    else process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID=oldPilot;
+  }
+});
