@@ -138,6 +138,21 @@ async function lookupList(articles,chatId,userId,locale) {
   return {items,viewerId};
 }
 async function publish(row,api,locale,{forceNew=false}={}) {
+  // Previously saved drafts can contain internal warehouse selections.
+  // Never redisplay the old pickup label in a contact or order review.
+  if(["CONTACT_INPUT","REVIEW"].includes(row.stage) &&
+      row.draft.delivery?.method==="PICKUP") {
+    const approved=await WarehouseRepository.findPublicPickupById(
+      row.draft.delivery.warehouseId
+    );
+    if(!approved) {
+      row.stage="DELIVERY";
+      row.draft.delivery=null;
+      row.draft.deliveryInput=null;
+      row.draft.options=[];
+      await save(row);
+    }
+  }
   if(row.stage==="DELIVERY") {
     // Every delivery screen reflects the CURRENT allowlisted public points.
     row.draft.pickupAvailable=(await WarehouseRepository.findPickupAvailable()).length>0;
