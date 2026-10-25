@@ -170,12 +170,12 @@ export async function refreshTelegramCartItems(saved,{resolveItem}) {
   let changed=false;
   const items=[];
   for(const existing of saved||[]) {
-    const id=Number(existing.offers?.[existing.selectedOffer||0]?.offerId);
+    const id=Number(existing.offers?.[existing.selectedOffer||0]?.offerId??existing.missingOfferId);
     const quote=await resolveItem(existing.article);
     const offer=quote.offers?.find(o=>Number(o.offerId)===id);
     if(!offer) {
       if(existing.offers?.length && Number(existing.quantity)>0)changed=true;
-      items.push({...existing,quantity:0,offers:[]});
+      items.push({...existing,quantity:0,offers:[],missingOfferId:Number.isSafeInteger(id)?id:null});
       continue;
     }
     const max=Math.max(0,Math.floor(Number(offer.quantity)||0));
@@ -184,7 +184,8 @@ export async function refreshTelegramCartItems(saved,{resolveItem}) {
     if(quantity!==Number(existing.quantity) ||
         !sameAmount(old?.price,offer.price))changed=true;
     items.push({...existing,article:quote.article||existing.article,
-      name:quote.name||existing.name,quantity,offers:[offer],selectedOffer:0});
+      name:quote.name||existing.name,quantity,offers:[offer],selectedOffer:0,
+      missingOfferId:null});
   }
   return {items,changed};
 }
