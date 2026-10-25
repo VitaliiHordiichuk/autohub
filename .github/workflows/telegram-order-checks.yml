@@ -13,6 +13,8 @@ on:
       - "migrations/112_explicit_public_pickup_locations.sql"
       - "migrations/113_telegram_profile_and_optional_comment_stages.sql"
       - "migrations/114_telegram_guest_order_recipients.sql"
+      - "migrations/115_telegram_persistent_shopping_cart.sql"
+      - "src/repositories/TelegramShoppingCartRepository.js"
       - "src/repositories/TelegramGuestOrderRecipientRepository.js"
       - "src/services/TelegramGuestOrderNotificationService.js"
       - "src/repositories/WarehouseRepository.js"
@@ -39,6 +41,7 @@ jobs:
             src/services/TelegramLanguageService.test.js \
             src/services/TelegramNotificationService.test.js \
             src/services/TelegramOrderService.test.js \
+            src/services/TelegramShoppingCart.test.js \
             src/services/PublicPickupVisibility.test.js \
             src/services/TelegramOrderCustomerService.test.js \
             src/services/TelegramGuestOrderNotifications.test.js \
@@ -51,6 +54,7 @@ jobs:
           node --check src/services/TelegramNotificationService.js
           node --check src/services/TelegramGuestOrderNotificationService.js
           node --check src/repositories/TelegramGuestOrderRecipientRepository.js
+          node --check src/repositories/TelegramShoppingCartRepository.js
           node --check src/services/TelegramBotService.js
           node --check scripts/test-makatron-checkout-staging.mjs
           node --check scripts/check-makatron-checkout-readiness.mjs
