@@ -16,7 +16,7 @@ export async function listPickupWarehouses(
         id: Number(row.id),
         name: row.name,
         city: row.city ?? null,
-        type: row.type ?? null,
+        address: row.address ?? null,
         deliveryDays:
           Number(row.delivery_days || 0),
       }));
