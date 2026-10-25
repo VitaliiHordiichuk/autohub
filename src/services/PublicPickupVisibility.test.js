@@ -31,15 +31,14 @@ test("Old / private pickup ID cannot bypass the public allowlist",async()=>{
   assert.match(statement,/public_pickup_enabled\s*=\s*TRUE/);
   assert.match(statement,/\bid\s*=\s*\$1/);
 });
-test("Telegram pickup keyboard displays public name and address, never internal warehouse",()=>{
+test("Legacy pickup stage never reveals even previously public warehouse names",()=>{
   const v=renderTelegramOrder({stage:"PICKUP",sessionKey:"aabbccdd11",
     draft:{options:[{
-      id:23,name:"Пункт видачі MAKA",city:"Харків",address:"Тестова адреса 5",
+      id:23,name:"Паша",city:"Харків",address:"Внутрішня адреса",
     }]}});
-  const btn=v.reply_markup.inline_keyboard[0][0];
-  assert.match(btn.text,/Харків.*Пункт видачі MAKA.*Тестова адреса 5/);
-  assert.equal(btn.callback_data,"mo:aabbccdd11:warehouse:0");
-  assert.doesNotMatch(v.text+btn.text,/Основний склад Mercedes|Наш склад Renault|Паша/);
+  const shown=v.text+" "+v.reply_markup.inline_keyboard.flat().map(x=>x.text).join(" ");
+  assert.doesNotMatch(shown,/Паша|Внутрішня адреса|Харків/);
+  assert.equal(v.reply_markup.inline_keyboard.length,1);
 });
 test("No public pickup locations means the customer does not get a pickup button",()=>{
   const keyboard=deliveryKeyboard("aabbccdd11","uk",{pickupAvailable:false});
