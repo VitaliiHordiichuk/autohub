@@ -67,11 +67,18 @@ test("English checkout and inline callback labels are localized",()=>{
   assert.match(v.text,/Total: 0 UAH/);
   assert.equal(deliveryKeyboard("aabbccdd11","en").inline_keyboard[1][0].text,"🚚 Nova Poshta");
 });
-test("Recipient is parsed only from explicit three semicolon-delimited fields",()=>{
-  assert.deepEqual(parseTelegramRecipient("Іван; Петренко; +380501234567"),
-    {firstName:"Іван",lastName:"Петренко",phone:"+380501234567"});
+test("Recipient accepts both normal space-separated contact and legacy semicolons",()=>{
+  const expected={firstName:"Іван",lastName:"Петренко",phone:"+380501234567"};
+  assert.deepEqual(parseTelegramRecipient("Іван; Петренко; +380501234567"),expected);
+  assert.deepEqual(parseTelegramRecipient("Іван Петренко +380501234567"),expected);
+  assert.deepEqual(parseTelegramRecipient(" Іван  Петренко   +380501234567  "),expected);
+  assert.deepEqual(parseTelegramRecipient("Ivan Petrenko +380501234567"),
+    {firstName:"Ivan",lastName:"Petrenko",phone:"+380501234567"});
   assert.equal(parseTelegramRecipient("John 123"),null);
   assert.equal(parseTelegramRecipient(";;"),null);
+  assert.equal(parseTelegramRecipient("Іван +380501234567"),null);
+  assert.equal(parseTelegramRecipient("Іван Петренко notaphone"),null);
+  assert.equal(parseTelegramRecipient("Іван Петренко +380501234567; extra"),null);
 });
 test("Checkout stays disabled unless its dedicated feature flag is enabled",()=>{
   const previous=process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED;
@@ -193,4 +200,14 @@ test("Thank-you message appears only after a committed order, with no address",(
   assert.doesNotMatch(done.text,/адрес|склад|Паша/i);
   const review=renderTelegramOrder({stage:"REVIEW",draft:{items:[]},sessionKey:"aabbccdd11"});
   assert.doesNotMatch(review.text,/Дякуємо за замовлення!/);
+});
+
+test("The contact prompt explains natural whitespace format to Ukrainian and English customers",()=>{
+  const uk=renderTelegramOrder({stage:"CONTACT_INPUT",draft:{},
+    locale:"uk",sessionKey:"aabbccdd11"});
+  const en=renderTelegramOrder({stage:"CONTACT_INPUT",draft:{},
+    locale:"en",sessionKey:"aabbccdd11"});
+  assert.match(uk.text,/Ім’я Прізвище \+380XXXXXXXXX/);
+  assert.match(en.text,/First Last \+380XXXXXXXXX/);
+  assert.doesNotMatch(uk.text,/;/);
 });
