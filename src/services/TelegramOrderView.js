@@ -151,10 +151,10 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
     :{inline_keyboard:[[{text:t.back,callback_data:cb(sessionKey,"back")}]]};
   return {text:lines.join("\n"),parse_mode:"HTML",reply_markup:keyboard};
 }
-export function deliveryKeyboard(key,locale="uk") {
+export function deliveryKeyboard(key,locale="uk",{pickupAvailable=true}={}) {
   const t=orderText(locale);
   return {inline_keyboard:[
-    [{text:t.pickup,callback_data:cb(key,"pickup")}],
+    ...(pickupAvailable?[ [{text:t.pickup,callback_data:cb(key,"pickup")}] ]:[]),
     [{text:t.shipping,callback_data:cb(key,"nova")}],
     [{text:t.back,callback_data:cb(key,"back")}],
   ]};
