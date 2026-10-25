@@ -38,11 +38,17 @@ test("One and many parts share the same keyboard and totals",()=>{
   const one=renderTelegramOrder({stage:"EDIT",draft:{items:[product]},sessionKey:"aabbccdd11"});
   assert.match(one.text,/1.500 грн/);
   assert.match(one.text,/Доступно: 3 шт/);
-  assert.equal(one.reply_markup.inline_keyboard[0][2].callback_data,"mo:aabbccdd11:p:0");
+  assert.deepEqual(one.reply_markup.inline_keyboard[0].map(b=>b.text),
+    ["A2711800109","2 шт.","−","+","🗑"]);
+  assert.deepEqual(one.reply_markup.inline_keyboard[0].map(b=>b.callback_data),
+    ["mo:aabbccdd11:a:0","mo:aabbccdd11:q:0","mo:aabbccdd11:m:0",
+      "mo:aabbccdd11:p:0","mo:aabbccdd11:x:0"]);
+  assert.doesNotMatch(one.text,/Склад MAKA|🏬/);
   const multi=renderTelegramOrder({stage:"EDIT",draft:{items:[product,product]},
     sessionKey:"aabbccdd11"});
   assert.match(multi.text,/3.000 грн/);
   assert.equal(multi.reply_markup.inline_keyboard.length,4);
+  assert.match(multi.text,/Обрано: <b>2<\/b>[^]*\n\n2\. <b>A2711800109<\/b>/);
 });
 test("All user-provided product data is escaped and no price matrix leaks",()=>{
   const view=renderTelegramOrder({sessionKey:"aabbccdd11",stage:"EDIT",draft:{items:[{
@@ -103,5 +109,37 @@ test("20 positions stay within Telegram message and inline-button bounds",()=>{
   const v=renderTelegramOrder({stage:"EDIT",draft:{items},sessionKey:"aabbccdd11"});
   assert.ok(v.text.length<4096);
   assert.ok(v.reply_markup.inline_keyboard.flat().length<=100);
+  assert.equal(v.reply_markup.inline_keyboard[0].length,5);
   assert.ok(v.reply_markup.inline_keyboard.some(row=>row.some(b=>b.callback_data.includes(":s:"))));
+  assert.ok(v.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="mo:aabbccdd11:pgnext"));
+  assert.ok(v.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="mo:aabbccdd11:pginfo"));
+  assert.equal(v.reply_markup.inline_keyboard.filter(row=>row.length===5).length,10);
+  const nextPage=renderTelegramOrder({stage:"EDIT",draft:{items,page:1},sessionKey:"aabbccdd11"});
+  assert.equal(nextPage.reply_markup.inline_keyboard[0][0].text,items[10].article);
+  assert.equal(nextPage.reply_markup.inline_keyboard[0][0].callback_data,"mo:aabbccdd11:s:a");
+  assert.ok(nextPage.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="mo:aabbccdd11:pgprev"));
+});
+
+test("Unavailable parts have no controls but remain visible between available ones",()=>{
+  const items=[
+    {article:"A2711800109",name:"Масляний фільтр",quantity:1,selectedOffer:0,
+      offers:[{offerId:1,sourceType:"OWN_STOCK",quantity:4,price:900}]},
+    {article:"A1673200503",name:"",quantity:0,selectedOffer:0,offers:[]},
+    {article:"A167320050380",name:"Стійка амортизаційна",quantity:1,selectedOffer:0,
+      offers:[{offerId:2,sourceType:"OWN_STOCK",quantity:1,price:1500}]},
+  ];
+  const v=renderTelegramOrder({stage:"EDIT",draft:{items},sessionKey:"aabbccdd11"});
+  assert.match(v.text,/Масляний фільтр[^]*\n\n2\. <code>A1673200503<\/code> — Не знайдено\n\n3\./);
+  assert.equal(v.reply_markup.inline_keyboard.length,4);
+  assert.equal(v.reply_markup.inline_keyboard[1][0].text,"A167320050380");
+  assert.equal(v.reply_markup.inline_keyboard[1][0].callback_data,"mo:aabbccdd11:a:2");
+});
+test("Each part has one keyboard row with part number then units, minus, plus and remove",()=>{
+  const item={article:"A1673200603",name:"Стійка амортизаційна",quantity:1,selectedOffer:0,
+    offers:[{offerId:2143,sourceType:"OWN_STOCK",quantity:2,price:104353.47}]};
+  const response=renderTelegramOrder({stage:"EDIT",draft:{items:[item]},sessionKey:"fedcba9876"});
+  assert.deepEqual(response.reply_markup.inline_keyboard[0].map(x=>x.text),
+    ["A1673200603","1 шт.","−","+","🗑"]);
+  assert.match(response.text,/Доступно: 2 шт/);
+  assert.doesNotMatch(response.text,/Склад MAKA/);
 });
