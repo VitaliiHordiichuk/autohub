@@ -71,7 +71,7 @@ async function poll() {
       // Never expose contact details, customer records or a bot token.
       if (message?.chat?.type === "private" &&
           String(message.chat.id) === String(message.from?.id) &&
-          /^\\/myid(?:@maka_com_ua_bot)?$/.test(command)) {
+          (command === "/myid" || command === "/myid@maka_com_ua_bot")) {
         const locale = await TelegramLanguageService.get(message.chat.id);
         await api("sendMessage", { chat_id: message.chat.id,
           text: locale === "en"
