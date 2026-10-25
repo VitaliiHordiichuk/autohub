@@ -78,7 +78,10 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     return {inline_keyboard: rows};
   }
   if (stage === "PICKUP") return {inline_keyboard: [
-    ...(draft.options || []).slice(0,10).map((w,i) => [{text:(w.city ? w.city+" · ":"")+w.name.slice(0,42),callback_data:cb(key,"warehouse",i)}]),
+    ...(draft.options || []).slice(0,10).map((w,i) => [{
+      text: [w.city,w.name,w.address].filter(Boolean).join(" · ").slice(0,110),
+      callback_data:cb(key,"warehouse",i),
+    }]),
     [{text:t.back,callback_data:cb(key,"back")}],
   ]};
   if (stage === "CITY_CHOICE" || stage === "POINT_CHOICE") return {inline_keyboard:[
