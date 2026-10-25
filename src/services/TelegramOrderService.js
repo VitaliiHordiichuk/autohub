@@ -365,12 +365,12 @@ async function commitOrder(row,api,locale) {
        checkout.idempotency_key===row.draft.idempotencyKey) {
       const linked=await CheckoutRepository.findLinkedOrders(checkout.id);
       row.draft.orderIds=linked.map(o=>Number(o.id));
-      if(!row.draft.viewerId) {
-        await TelegramGuestOrderRecipientRepository.saveOrders({
-          orderIds:row.draft.orderIds,chatId:row.chat_id,
-          telegramUserId:row.telegram_user_id,
-        });
-      }
+      // Persist the chat for cases where no customer record was created,
+      // even if the Telegram user has an otherwise linked website profile.
+      await TelegramGuestOrderRecipientRepository.saveOrders({
+        orderIds:row.draft.orderIds,chatId:row.chat_id,
+        telegramUserId:row.telegram_user_id,
+      });
       row.stage="DONE";
       await publish(await save(row),api,locale);
       return;
@@ -491,12 +491,10 @@ async function commitOrder(row,api,locale) {
     comment:telegramOrderManagerComment(row.draft.comment),
   });
   row.draft.orderIds=(placed.orders||[placed.order]).filter(Boolean).map(o=>Number(o.id));
-  if(!userId) {
-    await TelegramGuestOrderRecipientRepository.saveOrders({
-      orderIds:row.draft.orderIds,chatId:row.chat_id,
-      telegramUserId:row.telegram_user_id,
-    });
-  }
+  await TelegramGuestOrderRecipientRepository.saveOrders({
+    orderIds:row.draft.orderIds,chatId:row.chat_id,
+    telegramUserId:row.telegram_user_id,
+  });
   row.stage="DONE";
   await publish(await save(row),api,locale);
 }
