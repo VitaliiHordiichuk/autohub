@@ -92,3 +92,16 @@ test("Optional pilot allowlist does not expose checkout to other chats",()=>{
     else process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID=oldPilot;
   }
 });
+
+test("20 positions stay within Telegram message and inline-button bounds",()=>{
+  const items=Array.from({length:20},(_,i)=>({
+    article:"A"+String(i).padStart(10,"0"),name:"Масляний фільтр Mercedes-Benz",
+    quantity:1,selectedOffer:0,
+    offers:[{offerId:i*2+1,sourceType:"OWN_STOCK",quantity:3,price:1234},
+      {offerId:i*2+2,sourceType:"SUPPLIER",quantity:4,price:1111}],
+  }));
+  const v=renderTelegramOrder({stage:"EDIT",draft:{items},sessionKey:"aabbccdd11"});
+  assert.ok(v.text.length<4096);
+  assert.ok(v.reply_markup.inline_keyboard.flat().length<=100);
+  assert.ok(v.reply_markup.inline_keyboard.some(row=>row.some(b=>b.callback_data.includes(":s:"))));
+});
