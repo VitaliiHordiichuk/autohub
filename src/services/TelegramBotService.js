@@ -178,17 +178,8 @@ async function poll() {
       const text = String(message?.text || "").trim();
       if (!catalogEnabled() || message?.chat?.type !== "private" ||
           !message?.chat?.id || !message?.from?.id || !text) continue;
-      const key = String(message.from.id);
-      const now = Date.now();
-      if (now - (lastCatalogSearch.get(key) || 0) < 3000) {
-        await api("sendMessage", { chat_id: message.chat.id,
-          text: (await TelegramLanguageService.get(message.chat.id)) === "en"
-            ? "⏳ Please try again in a few seconds." : "⏳ Спробуйте ще раз за кілька секунд." });
-        continue;
-      }
-      lastCatalogSearch.set(key, now);
-      // Bound in-memory throttling entries; no permanent client history.
-      if (lastCatalogSearch.size > 1000) lastCatalogSearch.clear();
+      // Checkout inputs (recipient, optional comment) should never be
+      // blocked by the catalogue-search 3-second throttle.
       if (telegramInlineCheckoutEnabled(message.chat.id) && !text.startsWith("/")) {
         try {
           if (await handleTelegramOrderMessage({
@@ -203,6 +194,17 @@ async function poll() {
           continue;
         }
       }
+      const key = String(message.from.id);
+      const now = Date.now();
+      if (now - (lastCatalogSearch.get(key) || 0) < 3000) {
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: (await TelegramLanguageService.get(message.chat.id)) === "en"
+            ? "⏳ Please try again in a few seconds." : "⏳ Спробуйте ще раз за кілька секунд." });
+        continue;
+      }
+      lastCatalogSearch.set(key, now);
+      // Bound in-memory throttling entries; no permanent client history.
+      if (lastCatalogSearch.size > 1000) lastCatalogSearch.clear();
       const replies = await searchTelegramCatalog({
         text, chatId: message.chat.id, telegramUserId: message.from.id,
       });
