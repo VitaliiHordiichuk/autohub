@@ -359,7 +359,13 @@ export async function handleTelegramOrderMessage({text,chatId,telegramUserId},ap
     await publish(fresh,api,locale,{forceNew:true});
     return true;
   }
-  if(row.stage==="PROCESSING"||row.stage==="DONE") {
+  if(row.stage==="PROCESSING") {
+    await say(chatId,api,locale==="en"
+      ?"⏳ The previous order is still processing. Check its status before starting a new one."
+      :"⏳ Попереднє замовлення ще оформлюється. Перевірте його стан перед новим пошуком.");
+    return true;
+  }
+  if(row.stage==="DONE") {
     const parsed=parseTelegramArticles(text);
     if(parsed.error)return false;
     const found=await lookupList(parsed.articles,chatId,telegramUserId,locale);
@@ -550,6 +556,7 @@ export async function handleTelegramOrderCallback(callback,api) {
     return true;
   }
   await api("answerCallbackQuery",{callback_query_id:callback.id});
+  if(action==="newsearch" && row.stage==="PROCESSING")return true;
   if(action==="newsearch" || (row.stage==="DONE"&&action==="reset")) {
     // Never mutate or cancel an existing MAKA order. Only clear the bot's
     // current draft. A fresh key makes old inline buttons harmless.
