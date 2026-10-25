@@ -23,8 +23,10 @@ const SESSION_MAX_AGE_DAYS = 7;
 const MAX_ITEMS = 20;
 const MAX_OFFERS = 5;
 const bool = (v) => /^(true|1|yes|on)$/i.test(String(v || "").trim());
-export function telegramInlineCheckoutEnabled() {
-  return bool(process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED);
+export function telegramInlineCheckoutEnabled(chatId = null) {
+  if (!bool(process.env.TELEGRAM_INLINE_CHECKOUT_ENABLED)) return false;
+  const onlyChat = String(process.env.TELEGRAM_INLINE_CHECKOUT_TEST_CHAT_ID || "").trim();
+  return !onlyChat || (chatId !== null && String(chatId) === onlyChat);
 }
 export function selectTelegramOffers(offers) {
   return (offers || []).filter((o) =>
@@ -238,7 +240,7 @@ async function handleInput(row,text,api,locale) {
   return true;
 }
 export async function handleTelegramOrderMessage({text,chatId,telegramUserId},api) {
-  if(!telegramInlineCheckoutEnabled())return false;
+  if(!telegramInlineCheckoutEnabled(chatId))return false;
   if(!chatId||!telegramUserId||String(chatId)!==String(telegramUserId))return false;
   if(String(text||"").trim().startsWith("/"))return false;
   const locale=await TelegramLanguageService.get(chatId);
@@ -377,7 +379,7 @@ async function commitOrder(row,api,locale) {
   await publish(await save(row),api,locale);
 }
 export async function handleTelegramOrderCallback(callback,api) {
-  if(!telegramInlineCheckoutEnabled())return false;
+  if(!telegramInlineCheckoutEnabled(callback?.message?.chat?.id))return false;
   const data=String(callback?.data||"");
   const match=/^mo:([a-f0-9]{10}):([a-z]+)(?::([0-9a-z]+))?$/.exec(data);
   if(!match)return false;
