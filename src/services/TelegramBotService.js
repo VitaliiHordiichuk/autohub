@@ -67,6 +67,18 @@ async function poll() {
       }
       const message = update.message;
       const command = String(message?.text || "").trim().toLowerCase();
+      // Private-only command to discover the exact pilot chat ID.
+      // Never expose contact details, customer records or a bot token.
+      if (message?.chat?.type === "private" &&
+          String(message.chat.id) === String(message.from?.id) &&
+          /^\\/myid(?:@maka_com_ua_bot)?$/.test(command)) {
+        const locale = await TelegramLanguageService.get(message.chat.id);
+        await api("sendMessage", { chat_id: message.chat.id,
+          text: locale === "en"
+            ? "Your Telegram ID: " + message.from.id
+            : "Ваш Telegram ID: " + message.from.id });
+        continue;
+      }
       if (message?.chat?.type === "private" &&
           String(message.chat.id) === String(message.from?.id) &&
           /^\/(?:language|lang|uk|en)(?:@maka_com_ua_bot)?$/.test(command)) {
