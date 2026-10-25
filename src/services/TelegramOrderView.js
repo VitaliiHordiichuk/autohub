@@ -48,8 +48,8 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   if (stage === "EDIT") {
     const rows = [];
     const items = draft.items || [];
-    // Five controls per position; paginate for 11–20 positions so Telegram's
-    // inline keyboard never exceeds the 100-button limit.
+    // Two rows per part: full-width article followed by quantity and actions.
+    // Paginate at 10 parts to keep keyboards compact and below API limits.
     const pageSize = 10;
     const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
     const page = Math.min(pageCount - 1, Math.max(0, Number(draft.page) || 0));
@@ -57,9 +57,13 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
       const item = items[i];
       if (!item.offers?.length) continue;
       const article = String(item.article || t.none);
+      // The article occupies an entire Telegram keyboard row, avoiding the
+      // width competition that turned A2711800109 into A2711… on iPhone.
+      // If there are multiple offers, tapping the article cycles between them.
       rows.push([
-        // A second offer can be selected by tapping its article number.
         {text: article, callback_data: cb(key, item.offers.length > 1 ? "s" : "a", i)},
+      ]);
+      rows.push([
         {text: String(item.quantity || 0) + " " + t.pcs, callback_data: cb(key, "q", i)},
         {text: "−", callback_data: cb(key, "m", i)},
         {text: "+", callback_data: cb(key, "p", i)},
