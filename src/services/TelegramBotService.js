@@ -1,6 +1,7 @@
 import { TelegramConnectionService } from "./TelegramConnectionService.js";
 import { searchTelegramCatalog } from "./TelegramCatalogService.js";
 import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLanguageService.js";
+import { handleTelegramOrderMessage, handleTelegramOrderCallback, telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
 
 let timer = null;
 let offset = 0;
@@ -36,6 +37,16 @@ async function poll() {
     for (const update of updates) {
       offset = Math.max(offset, Number(update.update_id) + 1);
       const callback = update.callback_query;
+      if (callback && telegramInlineCheckoutEnabled() && String(callback.data || "").startsWith("mo:")) {
+        try {
+          if (await handleTelegramOrderCallback(callback, api)) continue;
+        } catch (error) {
+          console.error("MAKAtron order callback:", error.message);
+          await api("answerCallbackQuery", { callback_query_id: callback.id,
+            text: "⚠️ Не вдалося оновити замовлення. Спробуйте ще раз." }).catch(() => {});
+        }
+        continue;
+      }
       if (callback && /^lang:(uk|en)$/.test(String(callback.data || ""))) {
         const chat = callback.message?.chat;
         if (chat?.type === "private" && String(chat.id) === String(callback.from?.id)) {
@@ -164,6 +175,20 @@ async function poll() {
       lastCatalogSearch.set(key, now);
       // Bound in-memory throttling entries; no permanent client history.
       if (lastCatalogSearch.size > 1000) lastCatalogSearch.clear();
+      if (telegramInlineCheckoutEnabled() && !text.startsWith("/")) {
+        try {
+          if (await handleTelegramOrderMessage({
+            text, chatId: message.chat.id, telegramUserId: message.from.id,
+          }, api)) continue;
+        } catch(error) {
+          console.error("MAKAtron order message:",error.message);
+          await api("sendMessage",{chat_id:message.chat.id,
+            text:(await TelegramLanguageService.get(message.chat.id))==="en"
+              ?"⚠️ Could not update your order. Please try again."
+              :"⚠️ Не вдалося оновити замовлення. Спробуйте ще раз."});
+          continue;
+        }
+      }
       const replies = await searchTelegramCatalog({
         text, chatId: message.chat.id, telegramUserId: message.from.id,
       });
