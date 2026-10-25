@@ -35,6 +35,7 @@ test("Manager-confirmed guest order is sent once and marked notified",async()=>{
   assert.deepEqual(result,{claimed:1,sent:1,failed:0});
   assert.deepEqual(calls[0].args,["953723985"]);
   assert.match(calls[0].sql,/o.status='CONFIRMED'/);
+  assert.match(calls[0].sql,/o.created_by IS NULL/);
   assert.match(calls[0].sql,/confirmed_notified_at IS NULL/);
   assert.match(calls[0].sql,/SKIP LOCKED/);
   assert.match(sent[0].payload.text,/Ваше замовлення підтверджено/);
