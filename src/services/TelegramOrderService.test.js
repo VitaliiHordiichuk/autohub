@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { selectTelegramOffers, editTelegramItem, parseTelegramRecipient,
-  telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
+  telegramInlineCheckoutEnabled, pickupSelection, sanitizeLegacyTelegramPickup } from "./TelegramOrderService.js";
 import { renderTelegramOrder, deliveryKeyboard } from "./TelegramOrderView.js";
 
 const offers=[
@@ -160,4 +160,37 @@ test("Long Mercedes article stays in full quote, short position stays in one key
   assert.equal(v.reply_markup.inline_keyboard[0][0].text,"№1");
   assert.match(v.text,/1\. <b>A167320050380<\/b>/);
   assert.ok(v.reply_markup.inline_keyboard.flat().every(row=>row.callback_data.length<=64));
+});
+test("Generic self-pickup needs no warehouse, address or internal selection",()=>{
+  assert.deepEqual(pickupSelection("uk"),{method:"PICKUP",label:"Самовивіз"});
+  assert.deepEqual(pickupSelection("en"),{method:"PICKUP",label:"Collection"});
+  const d=pickupSelection("uk");
+  assert.equal(Object.hasOwn(d,"warehouseId"),false);
+});
+test("Old internal warehouse draft is sanitized before it can be shown again",()=>{
+  const row={stage:"REVIEW",draft:{delivery:{method:"PICKUP",warehouseId:21,label:"Харків · Паша"},
+    deliveryInput:{deliveryMethod:"PICKUP",pickupWarehouseId:21,recipientPhone:"+380501234567"},
+    options:[{name:"Наш склад Renault"}]}};
+  assert.equal(sanitizeLegacyTelegramPickup(row),true);
+  assert.deepEqual(row.draft.delivery,pickupSelection("uk"));
+  assert.equal(row.draft.deliveryInput.pickupWarehouseId,null);
+  assert.equal(row.draft.options,undefined);
+  const review=renderTelegramOrder({stage:row.stage,draft:row.draft,sessionKey:"aabbccdd11"});
+  assert.match(review.text,/Самовивіз/);
+  assert.doesNotMatch(review.text,/Паша|Renault|Mercedes|склад/);
+});
+test("Old PICKUP stage resets to method selection instead of exposing old warehouse list",()=>{
+  const row={stage:"PICKUP",draft:{options:[{name:"Основний склад Mercedes"}]}};
+  assert.equal(sanitizeLegacyTelegramPickup(row),true);
+  assert.equal(row.stage,"DELIVERY");
+  assert.deepEqual(row.draft.options,[]);
+});
+test("Thank-you message appears only after a committed order, with no address",()=>{
+  const done=renderTelegramOrder({stage:"DONE",draft:{orderIds:[12345]},sessionKey:"aabbccdd11"});
+  assert.match(done.text,/Дякуємо за замовлення!/);
+  assert.match(done.text,/Менеджер зв’яжеться з вами/);
+  assert.match(done.text,/12345/);
+  assert.doesNotMatch(done.text,/адрес|склад|Паша/i);
+  const review=renderTelegramOrder({stage:"REVIEW",draft:{items:[]},sessionKey:"aabbccdd11"});
+  assert.doesNotMatch(review.text,/Дякуємо за замовлення!/);
 });
