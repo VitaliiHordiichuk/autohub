@@ -107,6 +107,7 @@ function normalizeImportedRow(row, settings, rowNumber) {
 
   return {
     rowNumber,
+    rawData:row,
     brand: brand || null,
     article,
     name,
