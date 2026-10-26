@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { pool } from "../config/db.js";
 import { SearchService } from "./SearchService.js";
-import { resolveTelegramExtendedArticle } from "./TelegramExtendedArticleService.js";
+import { resolveTelegramExtendedArticle,switchTelegramArticleAlternative } from "./TelegramExtendedArticleService.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
@@ -656,6 +656,10 @@ export async function handleTelegramOrderCallback(callback,api) {
     row.draft.page=Math.max(0,Math.min(maxPage,current+(action==="pgnext"?1:-1)));
   } else if(action==="pginfo") {
     return true;
+  } else if(row.stage==="EDIT"&&action==="v"&&items[idx]) {
+    // A SAME extension is a choice within this search position, not another
+    // line item. The selected article/offer/price are switched atomically.
+    items[idx]=switchTelegramArticleAlternative(items[idx]);
   } else if(["EDIT","CART"].includes(row.stage)&&["p","m","x","s"].includes(action)&&items[idx]) {
     items[idx]=editTelegramItem(items[idx],action);
     if(row.stage==="CART"){
@@ -671,7 +675,8 @@ export async function handleTelegramOrderCallback(callback,api) {
     await say(chatId,api,locale==="en"?"➕ Send a part number or list.":"➕ Надішліть артикул або список артикулів.");
     return true;
   } else if(row.stage==="EDIT"&&action==="next") {
-    const selected=items.filter(i=>i.quantity>0&&i.offers?.length);
+    const selected=items.filter(i=>i.quantity>0&&i.offers?.length)
+      .map(({alternatives,searchArticle,...item})=>item);
     if(!selected.length) {
       await say(chatId,api,orderText(locale).empty);
       return true;
