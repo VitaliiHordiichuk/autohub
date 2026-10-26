@@ -34,6 +34,7 @@ test("guest cannot impersonate staff, and normal client receives no incoming cos
     assert.equal(args.article,"A2966808206");
     assert.equal(args.userId,42,"Use the currently verified client ID");
     assert.equal(args.includeSourceDetails,false);
+    assert.deepEqual(args.availabilityContext,{userId:42,cartId:null});
     return {found:true,response:{success:true,productCard:{product:{id:1},offers:[]}}};
   },
   staffPrices:async()=>{throw Error("client cannot invoke staff prices")}
