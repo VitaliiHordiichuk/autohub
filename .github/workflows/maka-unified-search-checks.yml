@@ -27,4 +27,4 @@ jobs:
           node --check src/controllers/search.controller.js
       - name: Unit and regression tests
         run: |
-          node --test src/services/WebsiteArticleSearchService.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/MakatronSharedSiteSearchClient.test.js src/services/MakatronWebsiteStaffFormatter.test.js src/services/TelegramOrderService.test.js src/services/TelegramCatalogService.test.js src/services/MakatronStaffBotService.test.js src/controllers/search.controller.test.js
+          node --test src/services/WebsiteArticleSearchService.test.js src/services/WebsiteStaffPricingService.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/MakatronSharedSiteSearchClient.test.js src/services/MakatronWebsiteStaffFormatter.test.js src/services/TelegramOrderService.test.js src/services/TelegramCatalogService.test.js src/services/MakatronStaffBotService.test.js src/controllers/search.controller.test.js
