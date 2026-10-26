@@ -258,7 +258,10 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
         if(altOffer) {
           const altArticle=esc(String(alternative.article||"").slice(0,55));
           const altUrl=telegramProductUrl(alternative.article,locale);
-          const altLink=altUrl?'<a href="'+esc(altUrl)+'">'+altArticle+'</a>':altArticle;
+          // In 12-20 line searches a second URL for every row can exceed
+          // Telegram's 4096-char limit. Display its number plainly there;
+          // choosing it makes it the primary clickable article.
+          const altLink=!compact&&altUrl?'<a href="'+esc(altUrl)+'">'+altArticle+'</a>':altArticle;
           lines.push("   ↳ "+(compact?"":t.alternative+": ")+altLink+
             " · "+Math.max(0,Number(altOffer.quantity))+" "+t.pcs+
             " · "+money(altOffer.price,locale)+"/"+t.pcs);
