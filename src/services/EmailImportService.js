@@ -10,6 +10,7 @@ import { ImportFileParserService } from "./ImportFileParserService.js";
 import {
   parseImportNumber,
 } from "./ImportNumericService.js";
+import { assertPrivateCostColumn,parseRowPrivateCost,privateCostSettings } from "./PrivateCostImportService.js";
 
 import { EmailImportFileRepository } from "../repositories/EmailImportFileRepository.js";
 import { EmailImportRuleRepository } from "../repositories/EmailImportRuleRepository.js";
@@ -106,12 +107,14 @@ function normalizeImportedRow(row, settings, rowNumber) {
 
   return {
     rowNumber,
+    rawData:row,
     brand: brand || null,
     article,
     name,
     quantity,
     price,
     retailPrice,
+    internalUnitCost:parseRowPrivateCost(row,settings,rowNumber,article),
   };
 }
 
@@ -133,6 +136,10 @@ function buildImportErrorRow(row, settings, error, rowNumber) {
 
 
 function normalizeRows(parsedRows, settings) {
+  // Scheduled EMAIL/CSV stays on the original five public price columns.
+  // It neither requires nor overwrites the private XLSX-only cost.
+  settings=privateCostSettings(settings,{fileType:settings.file_type,importMethod:"EMAIL"});
+  assertPrivateCostColumn(parsedRows,settings);
   const rows = [];
   const importErrors = [];
   const startRow = Number(settings.start_row) || 1;
