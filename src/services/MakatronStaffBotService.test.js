@@ -69,15 +69,17 @@ test("staff pricing shows six-decimal real cost and official client group prices
 test("client-ready quotation never selects or includes private unit cost",async()=>{
  const db={query:async(sql)=>{
   assert.doesNotMatch(sql,/internal_costs|unit_cost|purchase_price/i);
-  return {rows:[{id:9,quantity:3,is_available:true,is_hidden:false,
+  return {rows:[{id:9,product_id:7,quantity:3,is_available:true,is_hidden:false,
    minimum_sale_price:150,retail_price:200,article:"A1234567890",name:"Колодки",
    warehouse_name:"MAKA",warehouse_active:true,supplier_active:true}]}},
  };
- const overrides={db,getContext:async()=>({showAllPrices:true,priceGroups:[
+ const overrides={db,findOffers:async()=>[{id:9,product_id:7,quantity:2,retail_price:200,minimum_sale_price:150}],
+ getContext:async()=>({showAllPrices:true,priceGroups:[
   {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"}
  ]})};
  const result=await buildMakatronClientQuote({offerId:9,priceGroupId:3,staffUserId:5},overrides);
  assert.match(result.text,/150/);
+ assert.match(result.text,/Кількість: 2/);
  assert.doesNotMatch(result.text,/Вхідна|себестоимость|закуп/i);
  await assert.rejects(buildMakatronClientQuote({offerId:9,priceGroupId:99,staffUserId:5},overrides),/Price group/);
 });
