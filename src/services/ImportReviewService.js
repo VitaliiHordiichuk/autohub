@@ -258,7 +258,10 @@ async function approveLockedRow(
   if (row.latest_import_row_id) {
     const privateCostResult=await db.query(`
       SELECT ir.raw_data,
-        wsi.internal_purchase_price_column AS cost_column
+        CASE WHEN imp.warehouse_id=1
+          AND imp.file_type='XLSX' AND imp.import_method='MANUAL'
+          THEN wsi.internal_purchase_price_column ELSE NULL
+        END AS cost_column
       FROM import_rows ir
       JOIN imports imp ON imp.id=ir.import_id
       LEFT JOIN warehouse_supplier_imports wsi
