@@ -30,3 +30,17 @@ export function parseRowPrivateCost(row,settings,rowNumber,article) {
   if(!col)return null;
   return parsePrivateUnitCost(row[col-1],{article,rowNumber});
 }
+
+// First rollout: true cost is imported from a MANUAL XLSX on warehouse 1.
+// The existing scheduled EMAIL/CSV feed must continue exactly as before.
+export function privateCostEnabled(settings,{fileType,importMethod}={}) {
+  return Number(settings?.warehouse_id)===1 &&
+    Number(settings?.internal_purchase_price_column)===6 &&
+    String(fileType||"").toUpperCase()==="XLSX" &&
+    String(importMethod||"").toUpperCase()==="MANUAL";
+}
+export function privateCostSettings(settings,context) {
+  return privateCostEnabled(settings,context)?settings:{
+    ...settings,internal_purchase_price_column:null,
+  };
+}
