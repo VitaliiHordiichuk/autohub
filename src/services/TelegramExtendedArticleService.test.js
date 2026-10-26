@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveTelegramExtendedArticle } from "./TelegramExtendedArticleService.js";
+import { resolveTelegramExtendedArticle,switchTelegramArticleAlternative } from "./TelegramExtendedArticleService.js";
 import { renderTelegramOrder } from "./TelegramOrderView.js";
 import { mergeTelegramCartItems } from "../repositories/TelegramShoppingCartRepository.js";
 
@@ -45,7 +45,7 @@ test("Exact stocked base wins; SAME fallback never hides its real offer",async()
     found:{found:true,rule:"MERCEDES",exactProduct:base,family:[base,same]},
     quoteProduct:async p=>{queried.push(p.article);return {...quote(p),offers:[{offerId:801,quantity:2,price:100,sourceType:"OWN_STOCK"}]};},
   });
-  assert.deepEqual(queried,["A1673200503"]);
+  assert.deepEqual(queried,["A1673200503","A167320050380"]);
   assert.equal(out.article,"A1673200503");
   assert.equal(out.requestedArticle,undefined);
 });
@@ -150,4 +150,70 @@ test("A batch of twenty Mercedes extensions remains inside Telegram limits",()=>
   assert.ok(output.reply_markup.inline_keyboard.flat().length<=100);
   assert.deepEqual(output.link_preview_options,{is_disabled:true});
   assert.equal((output.text.match(/ → /g)||[]).length,20);
+});
+
+test("Base quote with stock also shows the stocked 80 extension inside SAME item",async()=>{
+  const product60=product("A1673200603",201);
+  const extension60=product("A167320060380",202);
+  const offersById=new Map([
+    [201,[{offerId:1101,sourceType:"OWN_STOCK",quantity:2,price:104353.47}]],
+    [202,[{offerId:1102,sourceType:"OWN_STOCK",quantity:1,price:94638.65}]],
+  ]);
+  const result=await resolveTelegramExtendedArticle({
+    article:"1673200603",
+    found:{found:true,rule:"MERCEDES",exactProduct:product60,
+      family:[product60,extension60,variant]},
+    quoteProduct:async p=>({
+      article:p.article,name:"Стійка амортизаційна",selectedOffer:0,
+      quantity:0,offers:offersById.get(p.id)||[],
+    }),
+  });
+  assert.equal(result.article,"A1673200603");
+  assert.equal(result.offers[0].offerId,1101);
+  assert.deepEqual(result.alternatives.map(p=>p.article),["A167320060380"]);
+  const current={...result,quantity:2};
+  const before=renderTelegramOrder({stage:"EDIT",draft:{items:[current]},sessionKey:"aabbccdd11"});
+  assert.match(before.text,/↳ Інший номер: <a href="https:\/\/maka\.com\.ua\/uk\/product\/A167320060380">A167320060380<\/a> · 1 шт\. · 94.638,65 грн\/шт\./);
+  assert.match(before.text,/Разом: 208.706,94 грн/);
+  assert.equal(before.reply_markup.inline_keyboard[1][0].callback_data,"mo:aabbccdd11:v:0");
+  const chosen=switchTelegramArticleAlternative(current);
+  assert.equal(chosen.article,"A167320060380");
+  assert.equal(chosen.quantity,1,"max available stock of selected alternative");
+  assert.equal(chosen.offers[0].offerId,1102);
+  assert.equal(chosen.alternatives[0].article,"A1673200603");
+  const after=renderTelegramOrder({stage:"EDIT",draft:{items:[chosen]},sessionKey:"aabbccdd11"});
+  assert.match(after.text,/Разом: 94.638,65 грн/);
+  assert.match(after.text,/↳ Інший номер: <a href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603"/);
+  const cart=mergeTelegramCartItems([], [chosen]).items;
+  assert.equal(cart.length,1,"one searched position adds only the chosen product");
+  assert.equal(cart[0].offers[0].offerId,1102);
+  const restored=switchTelegramArticleAlternative(chosen);
+  assert.equal(restored.article,"A1673200603");
+  assert.equal(restored.offers[0].offerId,1101);
+  assert.equal(restored.quantity,1);
+});
+
+test("Batch result keeps related 80 extension under item 2, without another item or extra total",async()=>{
+  const base60=product("A1673200603",301),extra60=product("A167320060380",302);
+  const r=await resolveTelegramExtendedArticle({
+    article:"1673200603",found:{found:true,rule:"MERCEDES",
+      exactProduct:base60,family:[base60,extra60]},
+    quoteProduct:async p=>({
+      article:p.article,name:"Стійка амортизаційна",
+      offers:[{offerId:p.id,quantity:p.id===301?2:1,
+        price:p.id===301?104353.47:94638.65,sourceType:"OWN_STOCK"}],
+      selectedOffer:0,quantity:0,
+    }),
+  });
+  const first={article:"A2711800109",name:"Масляний фільтр",
+    quantity:1,selectedOffer:0,
+    offers:[{offerId:990,quantity:4,price:1311.91,sourceType:"OWN_STOCK"}]};
+  const multi=renderTelegramOrder({
+    stage:"EDIT",draft:{items:[first,{...r,quantity:1}]},sessionKey:"aabbccdd11",
+  });
+  assert.match(multi.text,/2\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603">/);
+  assert.match(multi.text,/↳ Інший номер: <a href="https:\/\/maka\.com\.ua\/uk\/product\/A167320060380">/);
+  assert.match(multi.text,/Разом: 105.665,38 грн/);
+  assert.deepEqual(multi.link_preview_options,{is_disabled:true});
+  assert.equal(multi.reply_markup.inline_keyboard.filter(row=>row[0]?.callback_data?.endsWith(":v:1")).length,1);
 });
