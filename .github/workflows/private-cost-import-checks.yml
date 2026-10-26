@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feat/mercedes-private-cost-import-2026-10-26
+      - feat/mercedes-private-cost-only-2026-10-26
     paths:
       - "migrations/116_add_private_offer_cost_import.sql"
       - "src/services/PrivateCostImportService*"
@@ -12,6 +13,7 @@ on:
       - "src/services/ImportService.js"
       - "src/services/ImportReviewService.js"
       - "src/services/WarehouseImportProfileService.js"
+      - "scripts/test-mercedes-private-cost-staging.mjs"
       - ".github/workflows/private-cost-import-checks.yml"
   workflow_dispatch:
 jobs:
@@ -26,6 +28,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Node syntax
         run: |
+          node --check scripts/test-mercedes-private-cost-staging.mjs
           node --check src/services/PrivateCostImportService.js
           node --check src/repositories/PrivateCostRepository.js
           node --check src/services/EmailImportService.js
