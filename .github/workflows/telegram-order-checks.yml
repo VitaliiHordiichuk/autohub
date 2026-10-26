@@ -15,6 +15,8 @@ on:
       - "migrations/114_telegram_guest_order_recipients.sql"
       - "migrations/115_telegram_persistent_shopping_cart.sql"
       - "src/repositories/TelegramShoppingCartRepository.js"
+      - "src/services/TelegramExtendedArticleService.js"
+      - "src/services/TelegramExtendedArticleService.test.js"
       - "src/repositories/TelegramGuestOrderRecipientRepository.js"
       - "src/services/TelegramGuestOrderNotificationService.js"
       - "src/repositories/WarehouseRepository.js"
@@ -42,6 +44,7 @@ jobs:
             src/services/TelegramNotificationService.test.js \
             src/services/TelegramOrderService.test.js \
             src/services/TelegramShoppingCart.test.js \
+            src/services/TelegramExtendedArticleService.test.js \
             src/services/PublicPickupVisibility.test.js \
             src/services/TelegramOrderCustomerService.test.js \
             src/services/TelegramGuestOrderNotifications.test.js \
@@ -50,6 +53,7 @@ jobs:
         run: |
           node --check src/services/TelegramOrderView.js
           node --check src/services/TelegramOrderService.js
+          node --check src/services/TelegramExtendedArticleService.js
           node --check src/services/TelegramOrderCustomerService.js
           node --check src/services/TelegramNotificationService.js
           node --check src/services/TelegramGuestOrderNotificationService.js
