@@ -264,7 +264,7 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
           const altLink=!compact&&altUrl?'<a href="'+esc(altUrl)+'">'+altArticle+'</a>':altArticle;
           lines.push("   ↳ "+(compact?"":t.alternative+": ")+altLink+
             " · "+Math.max(0,Number(altOffer.quantity))+" "+t.pcs+
-            " · "+money(altOffer.price,locale)+"/"+t.pcs);
+            " · "+money(altOffer.price,locale)+(compact?"":"/"+t.pcs));
         }
       }
     });
