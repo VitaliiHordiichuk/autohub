@@ -4,8 +4,9 @@ import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { TelegramLanguageService } from "./TelegramLanguageService.js";
+import { siteSearchEnabled,searchWebsiteArticle,websiteSearchCards } from "./MakatronSharedSiteSearchClient.js";
 import {
-  parseTelegramArticles, formatTelegramProduct, formatTelegramNotFound,
+  parseTelegramArticles, escapeTelegramHtml, formatTelegramProduct, formatTelegramNotFound,
   formatTelegramInputError, formatTelegramBatch, formatTelegramHelp,
 } from "./TelegramCatalogFormatter.js";
 
@@ -57,6 +58,47 @@ export async function searchTelegramCatalog({ text, chatId, telegramUserId }, ov
   if (parsed.error) return [formatTelegramInputError(parsed.error, locale)];
   const viewer = await services.resolveViewer({ chatId, telegramUserId });
 
+  if(siteSearchEnabled()){
+    const searchSite=overrides.searchWebsite||searchWebsiteArticle;
+    const results=[];
+    for(const article of parsed.articles){
+      try {
+        const answer=await searchSite({
+          article,locale,mode:viewer?"client":"guest",userId:viewer?.userId??null
+        });
+        if(!answer.success){
+          results.push(formatTelegramNotFound(article,locale));
+          continue;
+        }
+        const cards=websiteSearchCards(answer);
+        const card=cards.find(item=>item.offers?.some(o=>
+          o.isAvailable===true&&Number(o.quantity)>0&&Number(o.retailPrice)>0))
+          ||cards[0];
+        if(!card){
+          results.push(formatTelegramNotFound(article,locale));
+          continue;
+        }
+        const formatted=formatTelegramProduct({
+          query:article,card,locale:answer.locale||locale,
+          replacementArticle:answer.replacement?.targetArticle||null,
+          compact:parsed.articles.length>1
+        });
+        const variants=cards.filter(row=>row.product.id!==card.product.id)
+          .slice(0,3).map(row=>row.product.article);
+        if(variants.length)formatted.text+="\nІнші номери: "+
+          variants.map(escapeTelegramHtml).join(", ");
+        results.push(formatted);
+      }catch(error){
+        console.error("MAKAtron website catalog lookup:",error.message);
+        results.push({text:"⚠️ "+escapeTelegramHtml(article)+
+          (locale==="en"?" — search temporarily unavailable":
+            " — пошук тимчасово недоступний")});
+      }
+    }
+    return results.length===1?[{parse_mode:"HTML",...results[0]}]:
+      formatTelegramBatch(results,locale);
+  }
+  // Legacy path is dormant after cutover and will be removed separately.
   // Never use a staff account ID for CustomerPricingService: it can produce
   // a priceMatrix containing other customers' prices.
   const pricingContext = await services.pricing(viewer?.userId ?? null);

@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { pool } from "../config/db.js";
 import { SearchService } from "./SearchService.js";
 import { resolveTelegramExtendedArticle,switchTelegramArticleAlternative } from "./TelegramExtendedArticleService.js";
+import { siteSearchEnabled,searchWebsiteArticle,websiteOrderItem } from "./MakatronSharedSiteSearchClient.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
@@ -136,6 +137,12 @@ async function create(chatId,userId,draft) {
 }
 async function locateArticle(article,locale,pricingContext,viewerId) {
   try {
+    if(siteSearchEnabled()){
+      const answer=await searchWebsiteArticle({
+        article,locale,mode:viewerId?"client":"guest",userId:viewerId??null
+      });
+      return websiteOrderItem(answer,article,selectTelegramOffers);
+    }
     const found=await SearchService.searchByArticle(article);
     return await resolveTelegramExtendedArticle({
       article,found,
@@ -153,13 +160,15 @@ async function locateArticle(article,locale,pricingContext,viewerId) {
     });
   } catch(error) {
     console.error("MAKAtron order lookup:",error.message);
+    if(siteSearchEnabled())throw error;
     return {article,name:"",quantity:0,selectedOffer:0,offers:[]};
   }
 }
 async function lookupList(articles,chatId,userId,locale) {
   const viewer=await resolveTelegramPricingIdentity({chatId,telegramUserId:userId});
   const viewerId=viewer?.userId??null;
-  const pricing=await CustomerPricingService.getContext(viewerId);
+  const pricing=siteSearchEnabled()?null:
+    await CustomerPricingService.getContext(viewerId);
   const items=[];
   for(const article of articles) {
     const result=await locateArticle(article,locale,pricing,viewerId);
@@ -202,7 +211,8 @@ async function showCart(chatId,userId,api,locale,notice="") {
   const raw=await TelegramShoppingCartRepository.get(chatId,userId);
   const viewer=await resolveTelegramPricingIdentity({chatId,telegramUserId:userId});
   const viewerId=viewer?.userId??null;
-  const pricing=await CustomerPricingService.getContext(viewerId);
+  const pricing=siteSearchEnabled()?null:
+    await CustomerPricingService.getContext(viewerId);
   const result=await refreshTelegramCartItems(raw,{
     resolveItem:article=>locateArticle(article,locale,pricing,viewerId),
   });
