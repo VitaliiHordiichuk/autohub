@@ -96,7 +96,7 @@ export async function handleMakatronStaffCallback(callback,api,deps={}) {
       const quote=deps.buildQuote||buildMakatronClientQuote;
       const response=await quote({offerId:id,priceGroupId:groupId,staffUserId:staff.userId});
       await ack("Пропозиція без закупівельної ціни");
-      await reply(api,chatId,response.text,{parse_mode:"HTML"});
+      await reply(api,chatId,response.text);
       return true;
     }
     if(action==="c"||action==="x"){

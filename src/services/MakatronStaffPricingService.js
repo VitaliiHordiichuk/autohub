@@ -103,7 +103,7 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
     "SELECT po.id,po.product_id,po.quantity,po.is_available,po.is_hidden,po.minimum_sale_price,"+
     "CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL "+
     "THEN po.manual_retail_price ELSE po.retail_price END AS retail_price,"+
-    "p.article,p.name,w.name AS warehouse_name,w.is_active AS warehouse_active,"+
+    "p.article,w.is_active AS warehouse_active,"+
     "s.is_active AS supplier_active "+
     "FROM product_offers po JOIN products p ON p.id=po.product_id "+
     "JOIN warehouses w ON w.id=po.warehouse_id "+
@@ -126,15 +126,9 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
   },group?{discountPercent:group.discountPercent,isVip:group.pricingMode==="MINIMUM"}:
     {discountPercent:0,isVip:false});
   if(!price)throw new Error("Price is unavailable");
-  return {
-    text:"📄 <b>Пропозиція MAKA</b>\n"+
-      "<code>"+escapeTelegramHtml(data.article)+"</code> — "+
-      escapeTelegramHtml(String(data.name||"Запчастина").slice(0,160))+"\n"+
-      "На складі: "+escapeTelegramHtml(data.warehouse_name)+"\n"+
-      "Кількість: "+Number(current.quantity)+"\n"+
-      "Ціна: <b>"+cash(price.customerPrice)+"</b>\n"+
-      (group?"Група: VIP\n":"")+
-      "\nhttps://maka.com.ua/uk/product/"+encodeURIComponent(data.article),
-    parse_mode:"HTML"
-  };
+  // Copy-ready for any messenger: catalogue number and selected price only.
+  // No HTML, URLs, names, warehouses, price group labels or incoming costs.
+  const article=String(data.article||"").replace(/[\r\n\t]+/g," ").trim();
+  if(!article)throw new Error("Article is missing");
+  return { text:article+" — "+cash(price.customerPrice) };
 }

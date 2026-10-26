@@ -38,8 +38,9 @@ safe customer offer). Other group prices are not offered by MAKAtron. No VIN req
    old-bot linking is reused.
 6. A manager may type an article, or use `/price A1679068510` to get
    real-time offers, incoming cost, retail and exact VIP prices. Only
-   retail/VIP quote buttons send cost-free client-ready text. Other group
-   prices (including VIP+) and old group callbacks are rejected.
+   retail/VIP quote buttons send one plain-text line: catalogue number — price
+   in UAH. No links, names, quantities, warehouses, group labels or HTML.
+   Other group prices (including VIP+) and old group callbacks are rejected.
 7. New orders are notified via the isolated worker's Telegram token; the
    notification includes item list, amount, recipient and delivery.
    Confirm/cancel callbacks ALWAYS recheck role and require a second tap.

@@ -88,7 +88,7 @@ test("absent VIP does not fall back to VIP+ or other groups",async()=>{
   ["st:g:9:0"]);
 });
 
-test("client-ready quotation never selects or includes private unit cost",async()=>{
+test("client-ready quotation is one plain article-and-price line only",async()=>{
  const db={query:async(sql)=>{
   assert.doesNotMatch(sql,/internal_costs|unit_cost|purchase_price/i);
   return {rows:[{id:9,product_id:7,quantity:3,is_available:true,is_hidden:false,
@@ -102,18 +102,34 @@ test("client-ready quotation never selects or includes private unit cost",async(
   {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"}
  ]})};
  const result=await buildMakatronClientQuote({offerId:9,priceGroupId:3,staffUserId:5},overrides);
- assert.match(result.text,/150/);
- assert.match(result.text,/Кількість: 2/);
- assert.doesNotMatch(result.text,/Вхідна|себестоимость|закуп/i);
+ assert.equal(result.text,"A1234567890 — 150 грн");
+ assert.deepEqual(Object.keys(result),["text"]);
  const retail=await buildMakatronClientQuote({offerId:9,priceGroupId:0,staffUserId:5},overrides);
- assert.match(retail.text,/Ціна: <b>200 грн<\/b>/);
- assert.doesNotMatch(retail.text,/Група:/);
+ assert.equal(retail.text,"A1234567890 — 200 грн");
  for(const oldGroupId of [2,4,99]){
   await assert.rejects(
    buildMakatronClientQuote({offerId:9,priceGroupId:oldGroupId,staffUserId:5},overrides),
    /Only retail or VIP quotes allowed/
   );
  }
+});
+
+test("quote button sends plain text with no Telegram link preview or HTML",async()=>{
+ envStaff(true);
+ const sent=[];
+ const api=async(method,payload)=>{sent.push({method,payload});};
+ const handled=await handleMakatronStaffCallback({
+  id:"cb-quote",data:"st:g:9:3",
+  message:{chat:{id:8,type:"private"}},from:{id:8}
+ },api,{
+  resolve:async()=>({userId:2,role:"ADMIN"}),
+  buildQuote:async()=>({text:"A0009953033 — 1 732,43 грн"})
+ });
+ assert.equal(handled,true);
+ assert.deepEqual(
+  sent.filter(x=>x.method==="sendMessage").map(x=>x.payload),
+  [{chat_id:8,text:"A0009953033 — 1 732,43 грн"}]
+ );
 });
 
 test("unknown Telegram user cannot confirm orders or see staff quotes",async()=>{
