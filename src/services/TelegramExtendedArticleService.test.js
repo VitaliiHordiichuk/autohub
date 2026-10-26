@@ -217,3 +217,20 @@ test("Batch result keeps related 80 extension under item 2, without another item
   assert.deepEqual(multi.link_preview_options,{is_disabled:true});
   assert.equal(multi.reply_markup.inline_keyboard.filter(row=>row[0]?.callback_data?.endsWith(":v:1")).length,1);
 });
+
+test("Twenty part quotes with one SAME alternative each fit Telegram's message and button limits",()=>{
+  const base=Array.from({length:20},(_,i)=>{
+    const code="A"+String(1673200500+i);
+    return {
+      article:code,name:"Стійка амортизаційна Mercedes-Benz",quantity:1,selectedOffer:0,
+      offers:[{offerId:3300+i,quantity:5,price:104353.47,sourceType:"OWN_STOCK"}],
+      alternatives:[{article:code+"80",name:"Стійка амортизаційна Mercedes-Benz",
+        selectedOffer:0,offers:[{offerId:4400+i,quantity:2,price:94638.65,sourceType:"OWN_STOCK"}]}],
+      searchArticle:String(1673200500+i),
+    };
+  });
+  const v=renderTelegramOrder({stage:"EDIT",draft:{items:base},sessionKey:"aabbccdd11"});
+  assert.ok(v.text.length<4096,"20 alternate quotes must not overflow Telegram HTML text: "+v.text.length);
+  assert.ok(v.reply_markup.inline_keyboard.flat().length<=100);
+  assert.deepEqual(v.link_preview_options,{is_disabled:true});
+});
