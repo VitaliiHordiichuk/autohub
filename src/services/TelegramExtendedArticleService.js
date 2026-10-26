@@ -42,9 +42,18 @@ export async function resolveTelegramExtendedArticle({
   // and never use this fallback for non-Mercedes numbers.
   const fallbackAllowed=Boolean(queriedBase&&
     (found.rule==="MERCEDES"||family.some(mercedesProduct)||mercedesProduct(primary)));
-  const candidates=[primary];
+  const primaryArticle=normalizeArticle(primary.article_normalized??primary.article);
+  const explicit=String(found.numberResolution||"").startsWith("EXPLICIT") ||
+    (found.replacementPath||[]).length>0;
+  const primaryIsExact=!queriedBase || primaryArticle===queriedBase ||
+    primaryArticle===queriedBase.slice(1);
+  // SearchService's generic prefix search can return an unrelated, long
+  // Mercedes VARIANT first. NEVER sell that as a compatible base extension.
+  const safePrimary=primaryIsExact||explicit||
+    (fallbackAllowed&&sameExtension(queriedBase,primary));
+  const candidates=safePrimary?[primary]:[];
   if(fallbackAllowed) {
-    const seen=new Set([String(primary.id??primary.article_normalized??primary.article)]);
+    const seen=new Set(candidates.map(p=>String(p.id??p.article_normalized??p.article)));
     const relatives=family.filter(p=>sameExtension(queriedBase,p))
       .sort((a,b)=>String(a.article).localeCompare(String(b.article)));
     for(const p of relatives) {
