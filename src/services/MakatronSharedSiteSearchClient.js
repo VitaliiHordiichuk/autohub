@@ -70,19 +70,31 @@ export function websiteSearchCards(data) {
 }
 
 export function websiteOrderItem(data,requestedArticle,selectOffers) {
+  const original=data?.productCard||null;
   const cards=websiteSearchCards(data);
-  const rows=cards.map(card=>({
+  const options=cards.map(card=>({
     article:String(card.product.article||"").slice(0,60),
     name:String(card.product.name||"").slice(0,90),
     quantity:0,selectedOffer:0,offers:selectOffers(card.offers),
-  })).filter(row=>row.offers.length>0);
-  const chosen=rows[0];
-  if(!chosen)return {article:requestedArticle,name:"",quantity:0,selectedOffer:0,offers:[]};
-  const alternatives=rows.slice(1,4);
-  const different=String(chosen.article).toUpperCase()!==String(requestedArticle).toUpperCase();
+    productId:Number(card.product.id),
+  }));
+  const primary=original
+    ? options.find(row=>row.productId===Number(original.product.id))
+    : null;
+  // Never automatically replace the requested product with the first stocked
+  // family/colour/variant/analog when the exact item is unavailable.
+  const selected=primary||{
+    article:requestedArticle,name:"",quantity:0,selectedOffer:0,offers:[]
+  };
+  const alternatives=options.filter(row=>
+    row.offers.length>0&&row.productId!==primary?.productId
+  ).slice(0,3).map(({productId,...row})=>row);
+  const {productId,...publicSelected}=selected;
   return {
-    ...chosen,
-    ...(different?{requestedArticle}:{}),
-    ...(alternatives.length?{alternatives,searchArticle:requestedArticle}:{}),
+    ...publicSelected,
+    ...(primary&&String(primary.article).toUpperCase()!==String(requestedArticle).toUpperCase()
+      ?{requestedArticle}:{}),
+    ...(alternatives.length
+      ?{alternatives,searchArticle:requestedArticle}:{}),
   };
 }
