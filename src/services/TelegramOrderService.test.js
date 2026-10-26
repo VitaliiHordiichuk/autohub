@@ -324,3 +324,22 @@ test("Single search preview is above pricing while multi-item lists hide preview
   assert.deepEqual(many.link_preview_options,{is_disabled:true});
   assert.equal((many.text.match(/href="https:\/\/maka\.com\.ua/g)||[]).length,2);
 });
+
+test("unavailable Mercedes base offers explicit variant choice but no automatic cart sale",()=>{
+ const item={article:"A2966808206",name:"Килимки",quantity:0,selectedOffer:0,
+  offers:[],alternatives:[{article:"A29668082069051",name:"Килимки сірі",
+   quantity:0,selectedOffer:0,offers:[{
+    offerId:47,sourceType:"OWN_STOCK",quantity:1,price:1200
+   }]}]};
+ const output=renderTelegramOrder({stage:"EDIT",draft:{items:[item]},sessionKey:"aabbccdd11"});
+ assert.match(output.text,/A2966808206/);
+ assert.match(output.text,/A29668082069051/);
+ assert.match(output.text,/Не знайдено/);
+ assert.match(output.text,/Разом: 0 грн/);
+ assert.ok(output.reply_markup.inline_keyboard.some(row=>row.some(button=>
+  button.callback_data==="mo:aabbccdd11:v:0"
+ )));
+ assert.ok(output.reply_markup.inline_keyboard.every(row=>row.every(button=>
+  !button.callback_data?.includes(":p:")
+ )));
+});
