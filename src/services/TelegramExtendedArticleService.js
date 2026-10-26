@@ -64,16 +64,47 @@ export async function resolveTelegramExtendedArticle({
       if(candidates.length>=Math.max(1,maxCandidates))break;
     }
   }
-  let primaryQuote=null;
-  for(let i=0;i<candidates.length;i++) {
-    const product=candidates[i];
+  // Quote the exact/base and compatible SAME alternatives (bounded to 8).
+  // The selected item is the only one counted in price and checkout. Other
+  // real, available product numbers are just optional alternatives.
+  let preferred=null;
+  const sellable=[];
+  for(const product of candidates) {
     const quote=await quoteProduct(product);
-    if(i===0)primaryQuote=quote;
-    if(!hasOffers(quote))continue;
-    const actual=quote.article||product.article;
-    return {...quote,quantity:0,selectedOffer:0,
-      ...(extendedLabel(article,actual)?{requestedArticle:extendedLabel(article,actual)}:{})};
+    if(hasOffers(quote))sellable.push(quote);
+    if(!preferred&&hasOffers(quote))preferred=quote;
   }
-  // Keep the searched number when nothing in a compatible family has stock.
-  return primaryQuote?{...missing,article}:missing;
+  if(!preferred)return missing;
+  // Existing preference: first available exact article, else first stocked
+  // two-digit SAME extension; never silently prefer the cheapest one.
+  const other=sellable.filter(q=>normalizeArticle(q.article)!==
+    normalizeArticle(preferred.article)).slice(0,3).map(q=>({
+      article:q.article,name:q.name,
+      offers:q.offers,selectedOffer:q.selectedOffer||0,
+    }));
+  const actual=preferred.article;
+  return {...preferred,quantity:0,selectedOffer:0,
+    ...(extendedLabel(article,actual)?{requestedArticle:extendedLabel(article,actual)}:{}),
+    ...(other.length?{alternatives:other,searchArticle:String(article).trim().slice(0,60)}:{}),
+  };
+}
+
+export function switchTelegramArticleAlternative(item) {
+  const alternatives=Array.isArray(item?.alternatives)?item.alternatives:[];
+  if(!alternatives.length)return item;
+  const [other,...rest]=alternatives;
+  const selected=other.offers?.[other.selectedOffer||0];
+  if(!selected||Number(selected.quantity)<=0||Number(selected.price)<=0)return item;
+  const previous={article:item.article,name:item.name,
+    offers:item.offers,selectedOffer:item.selectedOffer||0};
+  const query=item.searchArticle||item.requestedArticle||item.article;
+  const article=other.article;
+  return {
+    ...item,article,name:other.name,offers:other.offers,
+    selectedOffer:other.selectedOffer||0,
+    quantity:Math.min(Math.max(1,Number(item.quantity)||1),Number(selected.quantity)),
+    alternatives:[...rest,previous],
+    searchArticle:query,
+    requestedArticle:extendedLabel(query,article)||undefined,
+  };
 }
