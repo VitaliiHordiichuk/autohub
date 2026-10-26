@@ -97,7 +97,7 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
   const db=deps.db||pool;
   const getContext=deps.getContext||CustomerPricingService.getContext;
   const data=(await db.query(
-    "SELECT po.id,po.quantity,po.is_available,po.is_hidden,po.minimum_sale_price,"+
+    "SELECT po.id,po.product_id,po.quantity,po.is_available,po.is_hidden,po.minimum_sale_price,"+
     "CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL "+
     "THEN po.manual_retail_price ELSE po.retail_price END AS retail_price,"+
     "p.article,p.name,w.name AS warehouse_name,w.is_active AS warehouse_active,"+
@@ -110,12 +110,15 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
   if(!data||data.is_available!==true||data.is_hidden===true||
       Number(data.quantity)<=0||data.warehouse_active!==true||
       data.supplier_active===false)throw new Error("Offer unavailable");
+  const eligible=await (deps.findOffers||ProductRepository.findOffersByProductIds)([Number(data.product_id)]);
+  const current=eligible.find((offer)=>Number(offer.id)===id);
+  if(!current)throw new Error("Offer no longer available");
   const context=await getContext(Number(staffUserId));
   if(context.showAllPrices!==true)throw new Error("Staff access not available");
   const group=groupId===0?null:context.priceGroups?.find((row)=>row.id===groupId);
   if(groupId!==0&&!group)throw new Error("Price group not found");
   const price=CustomerPricingService.price({
-    retailPrice:data.retail_price,minimumSalePrice:data.minimum_sale_price
+    retailPrice:current.retail_price,minimumSalePrice:current.minimum_sale_price
   },group?{discountPercent:group.discountPercent,isVip:group.pricingMode==="MINIMUM"}:
     {discountPercent:0,isVip:false});
   if(!price)throw new Error("Price is unavailable");
@@ -124,7 +127,7 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
       "<code>"+escapeTelegramHtml(data.article)+"</code> — "+
       escapeTelegramHtml(String(data.name||"Запчастина").slice(0,160))+"\n"+
       "На складі: "+escapeTelegramHtml(data.warehouse_name)+"\n"+
-      "Кількість: "+Number(data.quantity)+"\n"+
+      "Кількість: "+Number(current.quantity)+"\n"+
       "Ціна: <b>"+cash(price.customerPrice)+"</b>\n"+
       (group?"Група: "+escapeTelegramHtml(group.name)+"\n":"")+
       "\nhttps://maka.com.ua/uk/product/"+encodeURIComponent(data.article),
