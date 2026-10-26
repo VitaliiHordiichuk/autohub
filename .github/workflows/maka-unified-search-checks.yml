@@ -1,0 +1,30 @@
+name: Unified MAKA site and Telegram search
+on:
+  push:
+    branches:
+      - feat/maka-unified-search-site-telegram-2026-10-27
+  workflow_dispatch:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Check syntax of modified runtime sources
+        run: |
+          node --check src/services/WebsiteArticleSearchService.js
+          node --check src/controllers/makatron-search-bridge.controller.js
+          node --check src/services/WebsiteStaffPricingService.js
+          node --check src/services/MakatronSharedSiteSearchClient.js
+          node --check src/services/MakatronWebsiteStaffFormatter.js
+          node --check src/services/MakatronStaffPricingService.js
+          node --check src/services/TelegramCatalogService.js
+          node --check src/services/TelegramOrderService.js
+          node --check src/controllers/search.controller.js
+      - name: Unit and regression tests
+        run: |
+          node --test src/services/WebsiteArticleSearchService.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/MakatronSharedSiteSearchClient.test.js src/services/MakatronWebsiteStaffFormatter.test.js src/services/TelegramOrderService.test.js src/services/TelegramCatalogService.test.js src/services/MakatronStaffBotService.test.js src/controllers/search.controller.test.js
