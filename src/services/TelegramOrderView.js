@@ -278,7 +278,12 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   // link into a large card, obscuring the remaining search results.
   // Explicitly set this on both new messages and edits (publish forwards it).
   const link_preview_options=(stage==="EDIT"||stage==="CART")
-    ? {is_disabled:items.length!==1}
+    ? {
+        is_disabled:items.length!==1,
+        // Put the product photo/link card before the price and availability
+        // only for a single-part search; leave cart presentation unchanged.
+        ...(stage==="EDIT"&&items.length===1?{show_above_text:true}:{}),
+      }
     : {is_disabled:true};
   return {text:lines.join("\n"),parse_mode:"HTML",
     link_preview_options,reply_markup:keyboard};
