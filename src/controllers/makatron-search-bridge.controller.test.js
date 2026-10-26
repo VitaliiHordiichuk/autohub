@@ -30,7 +30,12 @@ test("guest cannot impersonate staff, and normal client receives no incoming cos
  assert.equal(unauthorized.statusCode,403);
  const client=makeRes();
  await searchForMakatron(req(secret,{article:"A2966808206",mode:"client",userId:42}),client,{
-  db,read:async args=>({found:true,response:{success:true,productCard:{product:{id:1},offers:[]}}}),
+  db,read:async args=>{
+    assert.equal(args.article,"A2966808206");
+    assert.equal(args.userId,42,"Use the currently verified client ID");
+    assert.equal(args.includeSourceDetails,false);
+    return {found:true,response:{success:true,productCard:{product:{id:1},offers:[]}}};
+  },
   staffPrices:async()=>{throw Error("client cannot invoke staff prices")}
  });
  assert.equal(client.statusCode,200);
