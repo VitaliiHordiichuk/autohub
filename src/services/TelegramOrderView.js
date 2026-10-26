@@ -105,6 +105,13 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
           ...(!singleItem?[{text:"№"+(i+1),callback_data:cb(key,"a",i)}]:[]),
           {text:"🗑",callback_data:cb(key,"x",i)},
         ]);
+        // The site may list other colour/fitment variants. The customer must
+        // explicitly choose one; never auto-sell it as the unavailable base.
+        if(stage==="EDIT"&&item.alternatives?.length)rows.push([{
+          text:"🔁 "+(singleItem?"":("№"+(i+1)+" · "))+t.pickAlternative+" "+
+            String(item.alternatives[0].article).slice(0,28),
+          callback_data:cb(key,"v",i),
+        }]);
         continue;
       }
       // One result needs no №1 in search or in the saved cart.
@@ -227,7 +234,20 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       const name=esc(String(i.name||"").slice(0,compact?25:64));
       const article=esc(String(i.article||"").slice(0,55));
       const prefix=singleItem?"":(n+1)+". ";
-      if (!i.offers?.length) {lines.push(prefix+"<code>"+article+"</code> — "+t.none);return;}
+      if (!i.offers?.length) {
+        lines.push(prefix+"<code>"+article+"</code> — "+t.none);
+        if(stage==="EDIT"&&i.alternatives?.length){
+          const alternative=i.alternatives[0];
+          const offer=alternative.offers?.[alternative.selectedOffer||0];
+          if(offer){
+            lines.push("   ↳ "+t.alternative+": <code>"+
+              esc(String(alternative.article||"").slice(0,55))+"</code>"+
+              " · "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
+              " · "+money(offer.price,locale)+"/"+t.pcs);
+          }
+        }
+        return;
+      }
       const productUrl=(stage==="EDIT"||stage==="CART")
         ?telegramProductUrl(i.article,locale):null;
       const articleLabel=productUrl
