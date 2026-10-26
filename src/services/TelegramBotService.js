@@ -4,6 +4,8 @@ import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLan
 import { handleTelegramOrderMessage, handleTelegramOrderCallback, telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
 import { sendPendingTelegramGuestOrderConfirmations } from "./TelegramGuestOrderNotificationService.js";
 import { telegramMainKeyboard } from "./TelegramOrderView.js";
+import { handleMakatronStaffMessage,handleMakatronStaffCallback } from "./MakatronStaffBotService.js";
+import { sendPendingStaffOrderNotifications,staffBotEnabled } from "./MakatronStaffService.js";
 
 let timer = null;
 let offset = 0;
@@ -11,6 +13,7 @@ let polling = false;
 const lastCatalogSearch = new Map();
 const menuShownInThisProcess = new Set();
 let lastGuestConfirmationCheck = 0;
+let lastStaffOrderCheck = 0;
 
 function catalogEnabled() {
   return /^(1|true|yes|on)$/i.test(String(process.env.TELEGRAM_CATALOG_SEARCH_ENABLED || "false"));
@@ -41,6 +44,16 @@ async function poll() {
     for (const update of updates) {
       offset = Math.max(offset, Number(update.update_id) + 1);
       const callback = update.callback_query;
+      if (callback && String(callback.data || "").startsWith("st:")) {
+        try {
+          await handleMakatronStaffCallback(callback,api);
+        } catch(error) {
+          console.error("MAKAtron staff callback:",error.message);
+          await api("answerCallbackQuery",{callback_query_id:callback.id,
+            text:"⚠️ Не вдалося виконати дію",show_alert:true}).catch(()=>{});
+        }
+        continue;
+      }
       if (callback && telegramInlineCheckoutEnabled(callback.message?.chat?.id) && String(callback.data || "").startsWith("mo:")) {
         try {
           if (await handleTelegramOrderCallback(callback, api)) continue;
@@ -97,6 +110,18 @@ async function poll() {
           reply_markup: telegramLanguageKeyboard(locale),
         });
         continue;
+      }
+      // Dedicated staff credentials are checked before public catalog and checkout.
+      // A guest or old-bot connection never inherits staff purchasing data.
+      if (message?.chat?.type === "private" && message?.chat?.id && message?.from?.id) {
+        try {
+          if (await handleMakatronStaffMessage(message,api)) continue;
+        } catch(error) {
+          console.error("MAKAtron staff message:",error.message);
+          await api("sendMessage",{chat_id:message.chat.id,
+            text:"⚠️ Службова операція недоступна. Спробуйте пізніше."}).catch(()=>{});
+          continue;
+        }
       }
       // Isolated MAKAtron guest preview must not modify legacy phone verification.
       if (!linkingEnabled() && message?.contact && message?.chat?.id) {
@@ -248,6 +273,11 @@ async function poll() {
       lastGuestConfirmationCheck=now;
       try { await sendPendingTelegramGuestOrderConfirmations(api); }
       catch(error) { console.error("MAKAtron guest status checks:",error.message); }
+    }
+    if (staffBotEnabled() && now-lastStaffOrderCheck>=15000) {
+      lastStaffOrderCheck=now;
+      try { await sendPendingStaffOrderNotifications(api); }
+      catch(error) { console.error("MAKAtron staff order notification:",error.message); }
     }
     polling = false;
   }
