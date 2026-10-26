@@ -50,6 +50,7 @@ test("One and many parts share the same keyboard and totals",()=>{
     ["🔗 Переглянути на MAKA"]);
   assert.equal(one.reply_markup.inline_keyboard[1][0].url,
     "https://maka.com.ua/uk/product/A2711800109");
+  assert.deepEqual(one.link_preview_options,{is_disabled:false});
   assert.doesNotMatch(one.text,/Склад MAKA|🏬/);
   const multi=renderTelegramOrder({stage:"EDIT",draft:{items:[product,product]},
     sessionKey:"aabbccdd11"});
@@ -57,6 +58,11 @@ test("One and many parts share the same keyboard and totals",()=>{
   assert.equal(multi.reply_markup.inline_keyboard.length,5);
   assert.match(multi.text,/Обрано: <b>2<\/b>[^]*\n\n2\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109">A2711800109<\/a>/);
   assert.equal(multi.reply_markup.inline_keyboard.flat().filter(b=>b.url).length,0);
+  assert.deepEqual(multi.link_preview_options,{is_disabled:true});
+  assert.equal((multi.text.match(/href="https:\/\/maka\.com\.ua\/uk\/product\//g)||[]).length,2);
+  // Pagination/quantity edits reuse this option and cannot bring a preview back.
+  assert.deepEqual(renderTelegramOrder({stage:"EDIT",draft:{items:[product,product],page:0},
+    sessionKey:"aabbccdd11"}).link_preview_options,{is_disabled:true});
 });
 test("All user-provided product data is escaped and no price matrix leaks",()=>{
   const view=renderTelegramOrder({sessionKey:"aabbccdd11",stage:"EDIT",draft:{items:[{
@@ -283,4 +289,24 @@ test("A single result has no №1 in search or cart; multiple results remain num
   assert.equal(both.reply_markup.inline_keyboard[1][0].text,"№2");
   assert.match(both.text,/1\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603">A1673200603<\/a>/);
   assert.match(both.text,/2\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109">A2711800109<\/a>/);
+});
+
+test("One product retains preview, multi-product cart and checkout review do not",()=>{
+  const article="A2711800109",offer={offerId:1,sourceType:"OWN_STOCK",quantity:4,price:500};
+  const one={article,name:"Масляний фільтр",quantity:1,selectedOffer:0,offers:[offer]};
+  const two={...one,article:"A1673200603",offers:[{...offer,offerId:2}]};
+  const quote=renderTelegramOrder({stage:"EDIT",draft:{items:[one]},sessionKey:"aabbccdd11"});
+  const oneCart=renderTelegramOrder({stage:"CART",draft:{items:[one]},sessionKey:"aabbccdd11"});
+  const twoCart=renderTelegramOrder({stage:"CART",draft:{items:[one,two]},sessionKey:"aabbccdd11"});
+  const review=renderTelegramOrder({stage:"REVIEW",draft:{items:[one,two]},sessionKey:"aabbccdd11"});
+  assert.deepEqual(quote.link_preview_options,{is_disabled:false});
+  assert.deepEqual(oneCart.link_preview_options,{is_disabled:false});
+  assert.deepEqual(twoCart.link_preview_options,{is_disabled:true});
+  assert.deepEqual(review.link_preview_options,{is_disabled:true});
+  assert.match(twoCart.text,/href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109"/);
+  assert.match(twoCart.text,/href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603"/);
+  const noPreview=renderTelegramOrder({stage:"EDIT",draft:{items:[one,two]},
+    locale:"en",sessionKey:"aabbccdd11"});
+  assert.deepEqual(noPreview.link_preview_options,{is_disabled:true});
+  assert.match(noPreview.text,/https:\/\/maka\.com\.ua\/en\/product\/A2711800109/);
 });
