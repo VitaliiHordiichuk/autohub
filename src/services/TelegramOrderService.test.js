@@ -50,7 +50,7 @@ test("One and many parts share the same keyboard and totals",()=>{
     ["🔗 Переглянути на MAKA"]);
   assert.equal(one.reply_markup.inline_keyboard[1][0].url,
     "https://maka.com.ua/uk/product/A2711800109");
-  assert.deepEqual(one.link_preview_options,{is_disabled:false});
+  assert.deepEqual(one.link_preview_options,{is_disabled:false,show_above_text:true});
   assert.doesNotMatch(one.text,/Склад MAKA|🏬/);
   const multi=renderTelegramOrder({stage:"EDIT",draft:{items:[product,product]},
     sessionKey:"aabbccdd11"});
@@ -299,7 +299,7 @@ test("One product retains preview, multi-product cart and checkout review do not
   const oneCart=renderTelegramOrder({stage:"CART",draft:{items:[one]},sessionKey:"aabbccdd11"});
   const twoCart=renderTelegramOrder({stage:"CART",draft:{items:[one,two]},sessionKey:"aabbccdd11"});
   const review=renderTelegramOrder({stage:"REVIEW",draft:{items:[one,two]},sessionKey:"aabbccdd11"});
-  assert.deepEqual(quote.link_preview_options,{is_disabled:false});
+  assert.deepEqual(quote.link_preview_options,{is_disabled:false,show_above_text:true});
   assert.deepEqual(oneCart.link_preview_options,{is_disabled:false});
   assert.deepEqual(twoCart.link_preview_options,{is_disabled:true});
   assert.deepEqual(review.link_preview_options,{is_disabled:true});
@@ -309,4 +309,18 @@ test("One product retains preview, multi-product cart and checkout review do not
     locale:"en",sessionKey:"aabbccdd11"});
   assert.deepEqual(noPreview.link_preview_options,{is_disabled:true});
   assert.match(noPreview.text,/https:\/\/maka\.com\.ua\/en\/product\/A2711800109/);
+});
+
+test("Single search preview is above pricing while multi-item lists hide previews",()=>{
+  const a={article:"A2711800109",name:"Фільтр",quantity:1,selectedOffer:0,
+    offers:[{offerId:15,sourceType:"OWN_STOCK",quantity:3,price:1300}]};
+  const b={...a,article:"A1673200603",
+    offers:[{offerId:16,sourceType:"OWN_STOCK",quantity:2,price:3200}]};
+  const one=renderTelegramOrder({stage:"EDIT",draft:{items:[a]},sessionKey:"abbccdde00"});
+  assert.equal(one.link_preview_options.show_above_text,true);
+  assert.equal(one.link_preview_options.is_disabled,false);
+  assert.match(one.text,/Доступно: 3 шт/);
+  const many=renderTelegramOrder({stage:"EDIT",draft:{items:[a,b]},sessionKey:"abbccdde00"});
+  assert.deepEqual(many.link_preview_options,{is_disabled:true});
+  assert.equal((many.text.match(/href="https:\/\/maka\.com\.ua/g)||[]).length,2);
 });
