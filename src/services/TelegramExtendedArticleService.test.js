@@ -133,3 +133,21 @@ test("A long suffix alone is not sold as a base, even when prefix search finds i
   assert.equal(quoted,false);
   assert.deepEqual(r.offers,[]);
 });
+
+test("A batch of twenty Mercedes extensions remains inside Telegram limits",()=>{
+  const items=Array.from({length:20},(_,i)=>({
+    article:"A"+String(1673200500+i)+"80",
+    requestedArticle:String(1673200500+i),
+    name:"Стійка амортизаційна Mercedes-Benz",
+    quantity:1,selectedOffer:0,offers:[
+      {offerId:1000+i,sourceType:"OWN_STOCK",quantity:4,price:94638.65},
+    ],
+  }));
+  const output=renderTelegramOrder({
+    stage:"EDIT",draft:{items},sessionKey:"aabbccdd11",
+  });
+  assert.ok(output.text.length<4096,"Telegram HTML must fit a single complete message");
+  assert.ok(output.reply_markup.inline_keyboard.flat().length<=100);
+  assert.deepEqual(output.link_preview_options,{is_disabled:true});
+  assert.equal((output.text.match(/ → /g)||[]).length,20);
+});
