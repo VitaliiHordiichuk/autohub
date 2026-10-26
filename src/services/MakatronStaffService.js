@@ -93,10 +93,18 @@ export function formatStaffNewOrder(order) {
     "• <code>" + escapeTelegramHtml(item.article) + "</code> " +
     escapeTelegramHtml(String(item.name || "").slice(0,70)) + " × " +
     escapeTelegramHtml(item.quantity) + " — " + money(Number(item.price_at_purchase)*Number(item.quantity)));
+  const delivery=order.delivery||{};
+  const recipient=[delivery.recipientFirstName,delivery.recipientLastName].filter(Boolean).join(" ");
+  const destination=delivery.novaPoshta?.cityName &&
+    (delivery.novaPoshta?.pointName||delivery.novaPoshta?.pointAddress)
+    ? delivery.novaPoshta.cityName + ", " +
+      (delivery.novaPoshta.pointName||delivery.novaPoshta.pointAddress) : null;
   return [
     "🛒 <b>Нове замовлення №" + Number(order.id) + "</b>",
     "Статус: <b>" + escapeTelegramHtml(order.status) + "</b>",
-    "Клієнт: " + escapeTelegramHtml(order.company_name || "Не вказано"),
+    "Клієнт: " + escapeTelegramHtml(recipient||order.company_name||"Не вказано"),
+    ...(delivery.recipientPhone?["Телефон: "+escapeTelegramHtml(delivery.recipientPhone)]:[]),
+    ...(destination?["Доставка: "+escapeTelegramHtml(destination)]:[]),
     ...(order.comment ? ["Коментар: " + escapeTelegramHtml(String(order.comment).slice(0,250))] : []),
     "", ...items, ...((order.items || []).length>12 ? ["…ще позицій: " + ((order.items || []).length-12)] : []),
     "", "Разом: <b>" + money(order.total_amount) + "</b>",
