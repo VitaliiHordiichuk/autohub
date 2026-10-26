@@ -50,7 +50,7 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
         escapeTelegramHtml(String(product.name||"Запчастина").slice(0,130)),
     ];
     const buttons=[];
-    for(const offer of offers.slice(0,8)){
+    for(const offer of offers.slice(0,4)){
       const warehouse=offer.warehouse_name||offer.supplier_name||"Склад";
       const available=Number(offer.quantity)>0 && offer.is_available===true;
       if(!available)continue;
@@ -66,12 +66,19 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       for(const price of matrix.slice(0,10)){
         lines.push("• "+escapeTelegramHtml(price.name)+": <b>"+cash(price.price)+"</b>");
       }
-      buttons.push([{text:"📄 Клієнту · "+String(warehouse).slice(0,22),
+      buttons.push([{text:"📄 "+String(warehouse).slice(0,16)+" · Роздріб",
         callback_data:"st:g:"+Number(offer.id)+":0"}]);
+      for(const group of matrix.slice(0,8)){
+        const groupId=Number(String(group.key||"").split(":")[1]);
+        if(Number.isSafeInteger(groupId)&&groupId>0){
+          buttons.push([{text:"📄 "+String(warehouse).slice(0,10)+" · "+String(group.name).slice(0,16),
+            callback_data:"st:g:"+Number(offer.id)+":"+groupId}]);
+        }
+      }
     }
     results.push({
       text:lines.join("\n").slice(0,3850),
-      ...(buttons.length?{reply_markup:{inline_keyboard:buttons.slice(0,8)}}:{})
+      ...(buttons.length?{reply_markup:{inline_keyboard:buttons.slice(0,40)}}:{})
     });
   }
   if(parsed.articles.length>10){
