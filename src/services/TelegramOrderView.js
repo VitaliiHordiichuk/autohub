@@ -1,4 +1,4 @@
-import { escapeTelegramHtml } from "./TelegramCatalogFormatter.js";
+import { escapeTelegramHtml, telegramProductUrl } from "./TelegramCatalogFormatter.js";
 
 export function telegramOrderLocale(locale) { return locale === "en" ? "en" : "uk"; }
 const TXT = {
@@ -7,6 +7,7 @@ const TXT = {
     none:"Не знайдено", unavailable:"Немає в наявності", total:"Разом",pcs:"шт.",
     add:"➕ Ще артикул", next:"🛒 Додати вибране до кошика",
     cartTitle:"🛒 <b>Ваш кошик</b>",cartAdd:"➕ Додати запчастини",checkout:"✅ Оформити замовлення",
+    openProduct:"🔗 Переглянути на MAKA",
     clearCart:"🗑 Очистити кошик",clearQuestion:"<b>Видалити всі товари з кошика?</b>",
     clearYes:"🗑 Так, очистити",clearNo:"Ні, залишити",
     cartSaved:"✅ Вибрані товари додано до кошика.",cartEmpty:"Кошик порожній.",
@@ -37,6 +38,7 @@ const TXT = {
     none:"Not found",unavailable:"Out of stock",total:"Total",pcs:"pcs",
     add:"➕ More articles",next:"🛒 Add selected to cart",
     cartTitle:"🛒 <b>Your cart</b>",cartAdd:"➕ Add parts",checkout:"✅ Checkout",
+    openProduct:"🔗 View on MAKA",
     clearCart:"🗑 Clear cart",clearQuestion:"<b>Remove every item from your cart?</b>",
     clearYes:"🗑 Yes, clear",clearNo:"No, keep items",
     cartSaved:"✅ Selected items were added to your cart.",cartEmpty:"Your cart is empty.",
@@ -115,6 +117,13 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
         {text: "+", callback_data: cb(key, "p", i)},
         {text: "🗑", callback_data: cb(key, "x", i)},
       ]);
+    }
+    // Telegram link buttons open the product card without affecting the cart.
+    // Show a dedicated button for one part; multi-part lists use linked articles
+    // inside the message to avoid a long row of extra buttons.
+    if(items.length===1 && items[0]?.offers?.length) {
+      const url=telegramProductUrl(items[0].article,locale);
+      if(url)rows.push([{text:t.openProduct,url}]);
     }
     if (pageCount > 1) {
       const navigation = [];
@@ -209,16 +218,21 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       const article=esc(String(i.article||"").slice(0,55));
       const prefix=singleItem?"":(n+1)+". ";
       if (!i.offers?.length) {lines.push(prefix+"<code>"+article+"</code> — "+t.none);return;}
+      const productUrl=(stage==="EDIT"||stage==="CART")
+        ?telegramProductUrl(i.article,locale):null;
+      const articleLabel=productUrl
+        ?'<a href="'+esc(productUrl)+'">'+article+'</a>'
+        :"<b>"+article+"</b>";
       const offer=i.offers[i.selectedOffer||0];
       // MAKA is the default selling warehouse; label only supplier offers.
       const source=offer.sourceType==="OWN_STOCK"?"":"🚚 "+t.sourceSupplier+" · ";
       if(compact) {
         // 20 parts must fit in one complete HTML message, without truncating tags.
-        lines.push(prefix+"<b>"+article+"</b>"+(name?" · "+name:"")+
+        lines.push(prefix+articleLabel+(name?" · "+name:"")+
           "\n   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+
           " · "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(offer.price,locale)+"/"+t.pcs);
       } else {
-        lines.push(prefix+"<b>"+article+"</b>"+(name?" · "+name:""));
+        lines.push(prefix+articleLabel+(name?" · "+name:""));
         lines.push("   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
           " · "+money(offer.price,locale)+"/"+t.pcs);
         lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
