@@ -130,6 +130,12 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
       rows.push([{text:t.checkout,callback_data:cb(key,"checkout")}]);
       rows.push([{text:t.clearCart,callback_data:cb(key,"clear")}]);
     }
+    // iOS may collapse reply keyboards despite is_persistent. These inline
+    // shortcuts stay with the current result/cart even when hidden below.
+    rows.push([
+      {text:locale==="en"?"🔎 Search":"🔎 Пошук",callback_data:cb(key,"gosearch")},
+      {text:locale==="en"?"🛒 Cart":"🛒 Кошик",callback_data:cb(key,"gocart")},
+    ]);
     return {inline_keyboard: rows};
   }
   if(stage==="CART_CLEAR_CONFIRM")return {inline_keyboard:[
