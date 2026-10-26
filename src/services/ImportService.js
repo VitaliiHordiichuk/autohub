@@ -5,6 +5,8 @@ from "../repositories/WarehouseSupplierImportRepository.js";
 
 import { ProductRepository }
 from "../repositories/ProductRepository.js";
+import { PrivateCostRepository } from "../repositories/PrivateCostRepository.js";
+import { parsePrivateUnitCost,privateCostEnabled } from "./PrivateCostImportService.js";
 
 import { ImportRepository }
 from "../repositories/ImportRepository.js";
@@ -310,6 +312,19 @@ export const ImportService = {
 
       const settings =
         warehouseSupplierImport;
+
+      const usePrivateCost=privateCostEnabled(settings,{
+        fileType:context.fileType||settings.file_type||"CSV",
+        importMethod:context.importMethod||settings.import_method||"MANUAL",
+      });
+      // Reject invalid private costs before any changes to stock or prices.
+      if(usePrivateCost) {
+        for(const row of rows){
+          row.internalUnitCost=parsePrivateUnitCost(row.internalUnitCost,{
+            article:row.article,rowNumber:row.rowNumber||0,
+          });
+        }
+      }
 
       const importedSourceType = sourceTypeForFulfillment(
         resolveFulfillmentType({
@@ -867,6 +882,12 @@ export const ImportService = {
 
             productOfferId = Number(
               newOffer.id
+            );
+          }
+
+          if (usePrivateCost) {
+            await PrivateCostRepository.upsert(
+              productOfferId,row.internalUnitCost,db
             );
           }
 
