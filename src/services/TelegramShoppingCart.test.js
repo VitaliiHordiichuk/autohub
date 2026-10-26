@@ -58,7 +58,7 @@ test("Unavailable offer cannot sneak into final checkout",async()=>{
   assert.equal(r.items[0].offers.length,0);
   assert.equal(r.items[0].missingOfferId,2143);
   const button=renderTelegramOrder({stage:"CART",draft:{items:r.items},sessionKey:"aabbccdd11"});
-  assert.deepEqual(button.reply_markup.inline_keyboard[0].map(b=>b.text),["№1","🗑"]);
+  assert.deepEqual(button.reply_markup.inline_keyboard[0].map(b=>b.text),["🗑"]);
   const restored=await refreshTelegramCartItems(r.items,{resolveItem:async()=>item("A2711800109",2143,120,0,3)});
   assert.equal(restored.changed,true);
   assert.equal(restored.items[0].offers[0].offerId,2143);
@@ -88,16 +88,23 @@ test("Two-button persistent menu, distinct previews, and explicit clear confirma
   const menu=telegramMainKeyboard("uk");
   assert.deepEqual(menu.keyboard[0].map(b=>b.text),["🔎 Пошук","🛒 Кошик"]);
   assert.equal(menu.is_persistent,true);
+  assert.equal(menu.one_time_keyboard,false);
   assert.equal(telegramMenuIntent("🛒 Кошик"),"cart");
   assert.equal(telegramMenuIntent("🔎 Пошук"),"search");
   const found=renderTelegramOrder({stage:"EDIT",draft:{items:[item()]},sessionKey:"aabbccdd11"});
   assert.match(found.text,/Результати пошуку/);
   assert.ok(found.reply_markup.inline_keyboard.flat().some(x=>x.text==="🛒 Додати вибране до кошика"));
+  const quickMenu=found.reply_markup.inline_keyboard.at(-1);
+  assert.deepEqual(quickMenu.map(x=>x.callback_data),
+    ["mo:aabbccdd11:gosearch","mo:aabbccdd11:gocart"]);
   const cart=renderTelegramOrder({stage:"CART",draft:{items:[item()]},sessionKey:"aabbccdd11"});
   assert.match(cart.text,/Ваш кошик/);
   assert.ok(cart.reply_markup.inline_keyboard.flat().some(x=>x.text==="✅ Оформити замовлення"));
   assert.ok(cart.reply_markup.inline_keyboard.flat().some(x=>x.text==="🗑 Очистити кошик"));
-  assert.deepEqual(cart.reply_markup.inline_keyboard[0].map(x=>x.text),["№1","1 шт.","−","+","🗑"]);
+  assert.deepEqual(cart.reply_markup.inline_keyboard.at(-1).map(x=>x.text),
+    ["🔎 Пошук","🛒 Кошик"]);
+  assert.deepEqual(cart.reply_markup.inline_keyboard[0].map(x=>x.text),["1 шт.","−","+","🗑"]);
+  assert.doesNotMatch(cart.text,/№1|1\\. <b>A2711800109<\\/b>/);
   const confirm=renderTelegramOrder({stage:"CART_CLEAR_CONFIRM",draft:{items:[item()]},sessionKey:"aabbccdd11"});
   assert.match(confirm.text,/Видалити всі товари/);
   assert.deepEqual(confirm.reply_markup.inline_keyboard.map(row=>row[0].callback_data),
