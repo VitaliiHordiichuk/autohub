@@ -104,7 +104,7 @@ test("Two-button persistent menu, distinct previews, and explicit clear confirma
   assert.deepEqual(cart.reply_markup.inline_keyboard.at(-1).map(x=>x.text),
     ["🔎 Пошук","🛒 Кошик"]);
   assert.deepEqual(cart.reply_markup.inline_keyboard[0].map(x=>x.text),["1 шт.","−","+","🗑"]);
-  assert.doesNotMatch(cart.text,/№1|1\\. <b>A2711800109<\\/b>/);
+  assert.doesNotMatch(cart.text,/№1|1\. <b>A2711800109<\/b>/);
   const confirm=renderTelegramOrder({stage:"CART_CLEAR_CONFIRM",draft:{items:[item()]},sessionKey:"aabbccdd11"});
   assert.match(confirm.text,/Видалити всі товари/);
   assert.deepEqual(confirm.reply_markup.inline_keyboard.map(row=>row[0].callback_data),
