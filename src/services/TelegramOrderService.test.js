@@ -49,7 +49,7 @@ test("One and many parts share the same keyboard and totals",()=>{
   const multi=renderTelegramOrder({stage:"EDIT",draft:{items:[product,product]},
     sessionKey:"aabbccdd11"});
   assert.match(multi.text,/3.000 грн/);
-  assert.equal(multi.reply_markup.inline_keyboard.length,4);
+  assert.equal(multi.reply_markup.inline_keyboard.length,5);
   assert.match(multi.text,/Обрано: <b>2<\/b>[^]*\n\n2\. <b>A2711800109<\/b>/);
 });
 test("All user-provided product data is escaped and no price matrix leaks",()=>{
@@ -140,7 +140,7 @@ test("Unavailable parts have no controls but remain visible between available on
   ];
   const v=renderTelegramOrder({stage:"EDIT",draft:{items},sessionKey:"aabbccdd11"});
   assert.match(v.text,/Масляний фільтр[^]*\n\n2\. <code>A1673200503<\/code> — Не знайдено\n\n3\./);
-  assert.equal(v.reply_markup.inline_keyboard.length,4);
+  assert.equal(v.reply_markup.inline_keyboard.length,5);
   assert.equal(v.reply_markup.inline_keyboard[1][0].text,"№3");
   assert.equal(v.reply_markup.inline_keyboard[1][0].callback_data,"mo:aabbccdd11:a:2");
 });
@@ -247,5 +247,30 @@ test("Checkout has a fresh-search escape hatch but approved basket controls stay
   }]},sessionKey:"aabbccdd11"});
   assert.deepEqual(basket.reply_markup.inline_keyboard[0].map(x=>x.text),
     ["№1","1 шт.","−","+","🗑"]);
-  assert.equal(basket.reply_markup.inline_keyboard.length,3);
+  assert.equal(basket.reply_markup.inline_keyboard.length,4);
+});
+
+test("A one-part cart has no №1 in either the text or controls; search stays numbered",()=>{
+  const product={article:"A1673200603",name:"Стійка амортизаційна",
+    quantity:1,selectedOffer:0,
+    offers:[{offerId:218,quantity:2,price:104353.47,sourceType:"OWN_STOCK"}]};
+  const cart=renderTelegramOrder({stage:"CART",draft:{items:[product]},sessionKey:"aabbccdd11"});
+  assert.deepEqual(cart.reply_markup.inline_keyboard[0].map(b=>b.text),
+    ["1 шт.","−","+","🗑"]);
+  assert.deepEqual(cart.reply_markup.inline_keyboard[0].map(b=>b.callback_data),[
+    "mo:aabbccdd11:q:0","mo:aabbccdd11:m:0",
+    "mo:aabbccdd11:p:0","mo:aabbccdd11:x:0",
+  ]);
+  assert.match(cart.text,/^🛒 <b>Ваш кошик<\/b>\n<b>A1673200603<\/b>/);
+  assert.doesNotMatch(cart.text,/1\. <b>A1673200603<\/b>/);
+  const search=renderTelegramOrder({stage:"EDIT",draft:{items:[product]},sessionKey:"aabbccdd11"});
+  assert.equal(search.reply_markup.inline_keyboard[0][0].text,"№1");
+  assert.match(search.text,/1\. <b>A1673200603<\/b>/);
+  const both=renderTelegramOrder({stage:"CART",draft:{items:[product,{
+    ...product,article:"A2711800109",offers:[{...product.offers[0],offerId:219}],
+  }]},sessionKey:"aabbccdd11"});
+  assert.equal(both.reply_markup.inline_keyboard[0][0].text,"№1");
+  assert.equal(both.reply_markup.inline_keyboard[1][0].text,"№2");
+  assert.match(both.text,/1\. <b>A1673200603<\/b>/);
+  assert.match(both.text,/2\. <b>A2711800109<\/b>/);
 });
