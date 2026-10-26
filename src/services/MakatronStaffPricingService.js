@@ -1,5 +1,7 @@
 import { pool } from "../config/db.js";
 import { SearchService } from "./SearchService.js";
+import { siteSearchEnabled,quoteWebsiteOffer } from "./MakatronSharedSiteSearchClient.js";
+import { searchMakatronStaffThroughWebsite } from "./MakatronWebsiteStaffFormatter.js";
 import { resolveTelegramExtendedArticle } from "./TelegramExtendedArticleService.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
@@ -25,6 +27,12 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
   const input=String(text||"").replace(/^\/(?:price|prices|quote|ціна|цена)(?:@\w+)?\s*/i,"");
   const parsed=parseTelegramArticles(input);
   if(parsed.error) return [{text:"⚠️ Надішліть артикули, по одному у рядку (до 20)."}];
+  if(siteSearchEnabled()){
+    return searchMakatronStaffThroughWebsite({
+      parsed,staffUserId:Number(staffUserId),getContext,
+      searchWebsite:deps.searchWebsite
+    });
+  }
   const context=await getContext(Number(staffUserId));
   if(context.showAllPrices !== true) throw new Error("Staff pricing context not available");
   // No full price matrix: MAKAtron uses only retail and the exact VIP group.
@@ -156,6 +164,16 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
     throw new Error("Invalid quote");
   const db=deps.db||pool;
   const getContext=deps.getContext||CustomerPricingService.getContext;
+  if(siteSearchEnabled()){
+    const context=await getContext(Number(staffUserId));
+    if(context.showAllPrices!==true)throw Error("Staff access unavailable");
+    const vip=context.priceGroups?.find(g=>
+      Number(g.id)===groupId && String(g.name||"").trim().toUpperCase()==="VIP");
+    if(groupId!==0&&!vip)throw Error("Only retail or VIP quotes allowed");
+    return (deps.quoteWebsite||quoteWebsiteOffer)({
+      offerId:id,group:groupId===0?"RETAIL":"VIP",userId:Number(staffUserId)
+    });
+  }
   const data=(await db.query(
     "SELECT po.id,po.product_id,po.warehouse_id,po.quantity,po.is_available,po.is_hidden,po.minimum_sale_price,"+
     "CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL "+
