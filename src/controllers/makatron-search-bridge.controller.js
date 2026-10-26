@@ -52,7 +52,7 @@ export async function searchForMakatron(req,res,deps={}) {
     const read=deps.read||readWebsiteArticleSearch;
     const result=await read({
       article,requestedLocale:locale,
-      userId:mode==="client"?id:null,
+      userId:mode==="client"?Number(userId):null,
       includeSourceDetails:mode==="staff",
     });
     if(result.found&&mode==="staff"){
