@@ -64,7 +64,7 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
         retailPrice:offer.retail_price,minimumSalePrice:offer.minimum_sale_price
       },context)||[];
       for(const price of matrix.slice(0,10)){
-        lines.push("• "+escapeTelegramHtml(price.name)+": <b>"+cash(price.price)+"</b>");
+        lines.push("• "+escapeTelegramHtml(String(price.name).slice(0,36))+": <b>"+cash(price.price)+"</b>");
       }
       buttons.push([{text:"📄 "+String(warehouse).slice(0,16)+" · Роздріб",
         callback_data:"st:g:"+Number(offer.id)+":0"}]);
@@ -77,7 +77,7 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       }
     }
     results.push({
-      text:lines.join("\n").slice(0,3850),
+      text:lines.join("\n"),
       ...(buttons.length?{reply_markup:{inline_keyboard:buttons.slice(0,40)}}:{})
     });
   }
