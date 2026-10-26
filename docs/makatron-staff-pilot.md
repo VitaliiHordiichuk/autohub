@@ -41,6 +41,10 @@ safe customer offer). Other group prices are not offered by MAKAtron. No VIN req
    retail/VIP quote buttons send one plain-text line: catalogue number — price
    in UAH. No links, names, quantities, warehouses, group labels or HTML.
    Other group prices (including VIP+) and old group callbacks are rejected.
+   Staff lookup shows one compact message per article: own Mercedes warehouse
+   and supplier quantities first; only own warehouse retail/incoming/VIP prices
+   next; then one VIP price per external warehouse/supplier. Do not display
+   supplier incoming prices or their retail prices. Keep quote buttons.
 7. New orders are notified via the isolated worker's Telegram token; the
    notification includes item list, amount, recipient and delivery.
    Confirm/cancel callbacks ALWAYS recheck role and require a second tap.

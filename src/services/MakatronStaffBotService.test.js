@@ -40,49 +40,72 @@ test("new-order message escapes user data, and actions use two-step callbacks",(
  assert.equal(kb.inline_keyboard[0][1].callback_data,"st:x:35");
 });
 
-test("staff pricing gives retail, private incoming and exact VIP, no other groups",async()=>{
+test("compact staff pricing groups own warehouse and supplier stocks and prices",async()=>{
  envStaff(true);
- const offers=[{
-  id:9,product_id:7,quantity:3,is_available:true,warehouse_id:1,
-  warehouse_name:"MAKA",warehouse_city:"Харків",
-  retail_price:200,minimum_sale_price:150
- }];
- const db={query:async(sql)=>{assert.match(sql,/product_offer_internal_costs/);
-  return {rows:[{product_offer_id:9,unit_cost:"101.123456"}]}}};
+ const offers=[
+  {id:8,product_id:7,warehouse_id:4,warehouse_name:"Паша",quantity:2,
+   is_available:true,retail_price:109845.76,minimum_sale_price:99859.78},
+  {id:9,product_id:7,warehouse_id:1,warehouse_name:"Основной склад Mercedes",
+   quantity:1,is_available:true,retail_price:189741.30,minimum_sale_price:150000},
+ ];
+ const db={query:async(sql,params)=>{
+  assert.match(sql,/product_offer_internal_costs/);
+  assert.deepEqual(params,[9],"Read private incoming cost for main warehouse only");
+  return {rows:[{product_offer_id:9,unit_cost:"130921.500000"}]};
+ }};
  const result=await searchMakatronStaffPrices(
- {text:"A1234567890",staffUserId:5},{
-  db,search:async()=>({found:true,exactProduct:{id:7,article:"A1234567890",name:"Фільтр"}}),
+ {text:"A1673200603",staffUserId:5},{
+  db,search:async()=>({found:true,exactProduct:{id:7,article:"A1673200603",name:"Стійка амортизаційна"}}),
   findOffers:async()=>offers,
   getContext:async()=>({showAllPrices:true,priceGroups:[
    {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"},
    {id:2,name:"Gold",discountPercent:10,pricingMode:"DISCOUNT"},
-   {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"},
-   {id:5,name:"Registered",discountPercent:5,pricingMode:"DISCOUNT"}
+   {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"}
   ]})
  });
  assert.equal(result.length,1);
- assert.match(result[0].text,/Роздріб: <b>200 грн<\/b>/);
- assert.match(result[0].text,/Вхідна: <b>101,123456 грн<\/b>/);
- assert.match(result[0].text,/VIP: <b>150 грн<\/b>/);
- assert.doesNotMatch(result[0].text,/Gold|VIP\+|Registered/);
+ assert.equal(result[0].text,[
+  "<b>A1673200603</b> - Стійка амортизаційна",
+  "Основний склад Mercedes - 1 шт",
+  "Паша - 2 шт",
+  "",
+  "Роздріб: 189 741,3 грн",
+  "Вхідна: 130 921,50 грн",
+  "VIP: 150 000 грн",
+  "Паша: 99 859,78 грн"
+ ].join("\n"));
  assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
-  ["st:g:9:0","st:g:9:3"]);
+  ["st:g:9:0","st:g:9:3","st:g:8:0","st:g:8:3"]);
+ assert.doesNotMatch(result[0].text,/Gold|VIP\+|Registered|Харків|Кількість:/);
 });
 
-test("absent VIP does not fall back to VIP+ or other groups",async()=>{
- const offers=[{id:9,product_id:7,quantity:1,is_available:true,
-  warehouse_name:"MAKA",retail_price:200,minimum_sale_price:150}];
+test("supplier-only response shows just available stock and supplier VIP price",async()=>{
+ const result=await searchMakatronStaffPrices(
+ {text:"A1234567890",staffUserId:5},{
+  db:{query:async()=>{throw Error("Do not query incoming costs without main warehouse");}},
+  search:async()=>({found:true,exactProduct:{id:7,article:"A1234567890",name:"Фільтр"}}),
+  findOffers:async()=>[{id:8,warehouse_id:4,warehouse_name:"Паша",quantity:2,
+   is_available:true,retail_price:200,minimum_sale_price:150}],
+  getContext:async()=>({showAllPrices:true,priceGroups:[
+   {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"}
+  ]})
+ });
+ assert.equal(result[0].text,"<b>A1234567890</b> - Фільтр\nПаша - 2 шт\n\nПаша: 150 грн");
+});
+
+test("missing VIP never substitutes other client groups",async()=>{
  const result=await searchMakatronStaffPrices(
  {text:"A1234567890",staffUserId:5},{
   db:{query:async()=>({rows:[]})},
   search:async()=>({found:true,exactProduct:{id:7,article:"A1234567890",name:"Фільтр"}}),
-  findOffers:async()=>offers,
+  findOffers:async()=>[{id:9,warehouse_id:1,warehouse_name:"Основной склад Mercedes",quantity:1,is_available:true,
+   retail_price:200,minimum_sale_price:150}],
   getContext:async()=>({showAllPrices:true,priceGroups:[
    {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"},
    {id:2,name:"Gold",discountPercent:10,pricingMode:"DISCOUNT"}
   ]})
  });
- assert.match(result[0].text,/VIP: <b>—<\/b>/);
+ assert.match(result[0].text,/VIP: —/);
  assert.doesNotMatch(result[0].text,/Gold|VIP\+/);
  assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
   ["st:g:9:0"]);

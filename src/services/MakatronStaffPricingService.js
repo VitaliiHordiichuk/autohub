@@ -44,40 +44,64 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       results.push({text:"🔎 <code>"+escapeTelegramHtml(product.article)+"</code>\nНемає доступних залишків."});
       continue;
     }
-    const ids=offers.map((offer)=>Number(offer.id));
-    const costs=(await db.query(
-      "SELECT product_offer_id,unit_cost FROM product_offer_internal_costs "+
-      "WHERE product_offer_id=ANY($1::integer[])",[ids]
-    )).rows;
-    const costByOffer=new Map(costs.map((row)=>[Number(row.product_offer_id),row.unit_cost]));
+    // Only the own Mercedes warehouse (ID 1) shows retail + incoming + VIP.
+    // Suppliers show quantity and their respective VIP price only.
+    const visibleOffers=offers
+      .filter(offer=>Number(offer.quantity)>0 && offer.is_available===true)
+      .sort((a,b)=>Number(Number(b.warehouse_id)===1)-Number(Number(a.warehouse_id)===1))
+      .slice(0,4);
+    if(!visibleOffers.length){
+      results.push({text:escapeTelegramHtml(product.article)+" - Немає доступних залишків."});
+      continue;
+    }
+    const mainOffer=visibleOffers.find(offer=>Number(offer.warehouse_id)===1);
+    const costByOffer=new Map();
+    if(mainOffer){
+      const rows=(await db.query(
+        "SELECT product_offer_id,unit_cost FROM product_offer_internal_costs "+
+        "WHERE product_offer_id=$1",[Number(mainOffer.id)]
+      )).rows;
+      for(const row of rows)costByOffer.set(Number(row.product_offer_id),row.unit_cost);
+    }
     const lines=[
-      "🔎 <b>"+escapeTelegramHtml(product.article)+"</b> — "+
+      "<b>"+escapeTelegramHtml(product.article)+"</b> - "+
         escapeTelegramHtml(String(product.name||"Запчастина").slice(0,130)),
     ];
+    const stockLines=[];
+    const supplierPriceLines=[];
     const buttons=[];
-    for(const offer of offers.slice(0,4)){
-      const warehouse=offer.warehouse_name||offer.supplier_name||"Склад";
-      const available=Number(offer.quantity)>0 && offer.is_available===true;
-      if(!available)continue;
-      const vipPrice=vipGroup?CustomerPricingService.price({
-        retailPrice:offer.retail_price,minimumSalePrice:offer.minimum_sale_price
-      },{
-        discountPercent:vipGroup.discountPercent,
-        isVip:vipGroup.pricingMode==="MINIMUM"
-      }):null;
-      lines.push("",
-        "🏬 <b>"+escapeTelegramHtml(warehouse)+"</b>"+
-          (offer.warehouse_city?" · "+escapeTelegramHtml(offer.warehouse_city):""),
-        "Кількість: <b>"+Number(offer.quantity)+"</b>",
-        "Роздріб: <b>"+cash(offer.retail_price)+"</b>",
-        "Вхідна: <b>"+cost(costByOffer.get(Number(offer.id)))+"</b>",
-        "VIP: <b>"+cash(vipPrice?.customerPrice)+"</b>");
-      buttons.push([{text:"📄 "+String(warehouse).slice(0,16)+" · Роздріб",
+    const vipFor=offer=>vipGroup?CustomerPricingService.price({
+      retailPrice:offer.retail_price,minimumSalePrice:offer.minimum_sale_price
+    },{
+      discountPercent:vipGroup.discountPercent,
+      isVip:vipGroup.pricingMode==="MINIMUM"
+    }):null;
+    for(const offer of visibleOffers){
+      const own=Number(offer.warehouse_id)===1;
+      const warehouse=own?"Основний склад Mercedes":
+        String(offer.warehouse_name||offer.supplier_name||"Склад");
+      const label=escapeTelegramHtml(warehouse);
+      const vipPrice=vipFor(offer);
+      stockLines.push(label+" - "+Number(offer.quantity)+" шт");
+      if(!own)supplierPriceLines.push(label+": "+cash(vipPrice?.customerPrice));
+      // Existing retail/VIP copy-to-client buttons stay unchanged.
+      buttons.push([{text:"📄 "+warehouse.slice(0,16)+" · Роздріб",
         callback_data:"st:g:"+Number(offer.id)+":0"}]);
       if(vipGroup && vipPrice){
-        buttons.push([{text:"📄 "+String(warehouse).slice(0,16)+" · VIP",
+        buttons.push([{text:"📄 "+warehouse.slice(0,16)+" · VIP",
           callback_data:"st:g:"+Number(offer.id)+":"+Number(vipGroup.id)}]);
       }
+    }
+    lines.push(...stockLines);
+    if(mainOffer){
+      lines.push("",
+        "Роздріб: "+cash(mainOffer.retail_price),
+        "Вхідна: "+cost(costByOffer.get(Number(mainOffer.id))),
+        "VIP: "+cash(vipFor(mainOffer)?.customerPrice));
+    }
+    if(supplierPriceLines.length){
+      if(!mainOffer)lines.push("");
+      lines.push(...supplierPriceLines);
     }
     results.push({
       text:lines.join("\n"),
