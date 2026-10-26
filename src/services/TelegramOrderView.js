@@ -87,7 +87,8 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   if (stage === "EDIT" || stage === "CART") {
     const rows = [];
     const items = draft.items || [];
-    const singleCartItem=stage==="CART"&&items.length===1;
+    // Position numbers only help when the current list has multiple entries.
+    const singleItem=items.length===1;
     // One compact row per part, referenced by its number in the quote above.
     // Paginate at 10 parts so keyboards stay within Telegram API limits.
     const pageSize = 10;
@@ -97,15 +98,15 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
       const item = items[i];
       if (!item.offers?.length) {
         if(stage==="CART")rows.push([
-          ...(!singleCartItem?[{text:"№"+(i+1),callback_data:cb(key,"a",i)}]:[]),
+          ...(!singleItem?[{text:"№"+(i+1),callback_data:cb(key,"a",i)}]:[]),
           {text:"🗑",callback_data:cb(key,"x",i)},
         ]);
         continue;
       }
-      // A single saved-cart item needs no position marker. The search
-      // preview and carts with 2+ items retain numbered article references.
+      // One result needs no №1 in search or in the saved cart.
+      // Two or more results keep numbered article references.
       rows.push([
-        ...(!singleCartItem?[{
+        ...(!singleItem?[{
           text:"№"+(i+1),
           callback_data:cb(key,item.offers.length>1?"s":"a",i),
         }]:[]),
@@ -201,12 +202,12 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   } else if (stage==="EDIT"||stage==="CART"||stage==="REVIEW") {
     lines.push(stage==="REVIEW"?t.review:stage==="CART"?t.cartTitle:t.header);
     const compact=items.length>=12;
-    const singleCartItem=stage==="CART"&&items.length===1;
+    const singleItem=items.length===1;
     items.forEach((i,n)=>{
       if(n>0) lines.push(""); // Visually separate individual positions.
       const name=esc(String(i.name||"").slice(0,compact?25:64));
       const article=esc(String(i.article||"").slice(0,55));
-      const prefix=singleCartItem?"":(n+1)+". ";
+      const prefix=singleItem?"":(n+1)+". ";
       if (!i.offers?.length) {lines.push(prefix+"<code>"+article+"</code> — "+t.none);return;}
       const offer=i.offers[i.selectedOffer||0];
       // MAKA is the default selling warehouse; label only supplier offers.
