@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - feat/maka-unified-search-backend-2026-10-27
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 jobs:
   tests:
