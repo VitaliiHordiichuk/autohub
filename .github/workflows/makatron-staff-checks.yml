@@ -7,6 +7,7 @@ on:
       - "src/services/MakatronStaff*"
       - "src/services/TelegramBotService.js"
       - "scripts/makatron-staff-link.mjs"
+      - "scripts/test-makatron-staff-staging.mjs"
       - "migrations/117_makatron_staff_orders_quotes.sql"
       - ".github/workflows/makatron-staff-checks.yml"
   workflow_dispatch:
@@ -27,5 +28,6 @@ jobs:
           node --check src/services/MakatronStaffBotService.js
           node --check src/services/TelegramBotService.js
           node --check scripts/makatron-staff-link.mjs
+          node --check scripts/test-makatron-staff-staging.mjs
       - name: Staff authorization and safe quotes
         run: node --test src/services/MakatronStaffBotService.test.js
