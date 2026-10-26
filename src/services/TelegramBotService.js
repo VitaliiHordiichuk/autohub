@@ -122,11 +122,15 @@ async function poll() {
             ? "✅ Phone number confirmed. You can now send VIN requests and chat with a manager."
             : "This number does not match the phone number in your MAKA account. Check your profile number or share your own contact.",
         };
+        const pilot=telegramInlineCheckoutEnabled(message.chat.id);
         await api("sendMessage", {
           chat_id:message.chat.id,
           text:copy[locale],
-          reply_markup:{remove_keyboard:true},
+          reply_markup:pilot
+            ? telegramMainKeyboard(locale)
+            : {remove_keyboard:true},
         });
+        if(pilot)menuShownInThisProcess.add(String(message.chat.id));
         continue;
       }
       const match = String(message?.text || "").match(/^\/start\s+([a-f0-9]{48})$/i);
