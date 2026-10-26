@@ -178,3 +178,41 @@ test("англомовні запити повертають лише англо
   assert.match(responses[0].text, /MAKA warehouse/);
   assert.doesNotMatch(responses[0].text, /не знайдено|Результати/);
 });
+
+test("shared mode uses the live website backend for CLIENT and never runs Telegram-side search rules",async()=>{
+ const previous=process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED;
+ process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED="true";
+ const calls=[];
+ try{
+  const responses=await searchTelegramCatalog({
+   text:"A2966808206",chatId:42,telegramUserId:42
+  },{
+   getLocale:async()=> "uk",
+   resolveViewer:async()=>({userId:42,locale:"uk",firstName:"Тест"}),
+   search:async()=>{throw Error("Legacy Telegram search must never run");},
+   pricing:async()=>{throw Error("Worker pricing must not run");},
+   buildCard:async()=>{throw Error("Worker card builder must not run");},
+   searchWebsite:async req=>{
+    calls.push(req);
+    return {success:true,locale:"uk",
+      productCard:{product:{id:11,article:"A2966808206",name:"Килимки"},
+       offers:[{id:9,sourceType:"OWN_STOCK",isAvailable:true,
+        quantity:1,displayQuantity:"1",retailPrice:200}]},
+      family:[{product:{id:12,article:"A29668082069051",name:"Килимки"},
+       offers:[{id:10,sourceType:"OWN_STOCK",isAvailable:true,
+        quantity:1,retailPrice:210}]}]
+    };
+   }
+  });
+  assert.deepEqual(calls,[{
+   article:"A2966808206",locale:"uk",mode:"client",userId:42
+  }]);
+  assert.equal(responses.length,1);
+  assert.match(responses[0].text,/A2966808206/);
+  assert.match(responses[0].text,/A29668082069051/);
+  assert.match(responses[0].text,/200 грн/);
+ }finally{
+  if(previous===undefined)delete process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED;
+  else process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED=previous;
+ }
+});
