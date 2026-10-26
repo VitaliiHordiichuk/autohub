@@ -7,7 +7,7 @@ customer offer). No VIN request workflow or analytics are added.
 ## Deployment boundary
 
 - Public MAKA backend and the old Telegram bot are NOT part of this patch.
-- Apply ONLY the eight paths changed from
+- Apply ONLY the runtime paths changed from
   `feat/mercedes-private-cost-import-2026-10-26` to
   `feat/makatron-staff-orders-quotes-2026-10-26`.
 - Deploy into the existing isolated MAKAtron worker release, **not** into
@@ -66,5 +66,13 @@ customer offer). No VIN request workflow or analytics are added.
 ## Test command
 
 `node --test src/services/MakatronStaffBotService.test.js`
+
+For database integration, apply migration 117 on a disposable restored copy of
+the MAKA database and use:
+
+`DB_NAME=autohub_makatron_staff_stage_<timestamp> NODE_ENV=test node --env-file=<private-worker-env> scripts/test-makatron-staff-staging.mjs`
+
+The script refuses any non-staging DB name, performs only SELECTs, checks real
+Mercedes cost and client-safe quotes, and sends no Telegram messages.
 
 GitHub Actions workflow: `.github/workflows/makatron-staff-checks.yml`.
