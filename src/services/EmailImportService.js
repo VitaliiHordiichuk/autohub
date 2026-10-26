@@ -10,6 +10,7 @@ import { ImportFileParserService } from "./ImportFileParserService.js";
 import {
   parseImportNumber,
 } from "./ImportNumericService.js";
+import { assertPrivateCostColumn,parseRowPrivateCost } from "./PrivateCostImportService.js";
 
 import { EmailImportFileRepository } from "../repositories/EmailImportFileRepository.js";
 import { EmailImportRuleRepository } from "../repositories/EmailImportRuleRepository.js";
@@ -112,6 +113,7 @@ function normalizeImportedRow(row, settings, rowNumber) {
     quantity,
     price,
     retailPrice,
+    internalUnitCost:parseRowPrivateCost(row,settings,rowNumber,article),
   };
 }
 
@@ -133,6 +135,9 @@ function buildImportErrorRow(row, settings, error, rowNumber) {
 
 
 function normalizeRows(parsedRows, settings) {
+  // Fail the entire attachment BEFORE any stock import if configured cost
+  // column F is missing or corrupted: a partial full replacement is unsafe.
+  assertPrivateCostColumn(parsedRows,settings);
   const rows = [];
   const importErrors = [];
   const startRow = Number(settings.start_row) || 1;
