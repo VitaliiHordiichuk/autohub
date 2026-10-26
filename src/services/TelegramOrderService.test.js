@@ -174,7 +174,9 @@ test("Long Mercedes article stays in full quote without №1 for one result",()=
   assert.equal(v.reply_markup.inline_keyboard[0][0].text,"1 шт.");
   assert.match(v.text,/href="https:\/\/maka\.com\.ua\/uk\/product\/A167320050380">A167320050380<\/a>/);
   assert.doesNotMatch(v.text,/1\. <a href=/);
-  assert.ok(v.reply_markup.inline_keyboard.flat().every(row=>row.callback_data.length<=64));
+  assert.ok(v.reply_markup.inline_keyboard.flat().every(button=>
+    button.url ? button.url.startsWith("https://maka.com.ua/") :
+      button.callback_data?.length<=64));
 });
 test("Generic self-pickup needs no warehouse, address or internal selection",()=>{
   assert.deepEqual(pickupSelection("uk"),{method:"PICKUP",label:"Самовивіз"});
