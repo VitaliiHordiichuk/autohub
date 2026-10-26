@@ -19,4 +19,4 @@ jobs:
           node --check src/controllers/makatron-search-bridge.controller.js
           node --check src/services/WebsiteArticleSearchService.js
           node --check src/services/WebsiteStaffPricingService.js
-          node --test src/controllers/search.controller.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/WebsiteArticleSearchService.test.js
+          node --test src/controllers/search.controller.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/WebsiteArticleSearchService.test.js src/services/WebsiteStaffPricingService.test.js
