@@ -704,7 +704,7 @@ import {
 import {
   parseImportNumber,
 } from "../services/ImportNumericService.js";
-import { assertPrivateCostColumn,parseRowPrivateCost } from "../services/PrivateCostImportService.js";
+import { assertPrivateCostColumn,parseRowPrivateCost,privateCostSettings } from "../services/PrivateCostImportService.js";
 
 
 function readColumn(
@@ -1158,7 +1158,7 @@ export async function uploadImport(
       importErrors,
     } = await normalizeRows(
       parsedRows,
-      settings
+      privateCostSettings(settings,{fileType,importMethod:"MANUAL"})
     );
 
     const result =
@@ -1273,7 +1273,7 @@ export async function previewImport(
       importErrors,
     } = await normalizeRows(
       parsedRows,
-      settings
+      privateCostSettings(settings,{fileType,importMethod:"MANUAL"})
     );
 
     return res.json({
