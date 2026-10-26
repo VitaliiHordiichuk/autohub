@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { pool } from "../config/db.js";
 import { SearchService } from "./SearchService.js";
+import { resolveTelegramExtendedArticle } from "./TelegramExtendedArticleService.js";
 import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
@@ -136,17 +137,20 @@ async function create(chatId,userId,draft) {
 async function locateArticle(article,locale,pricingContext,viewerId) {
   try {
     const found=await SearchService.searchByArticle(article);
-    const product=found?.exactProduct||found?.family?.[0]||null;
-    if(!found?.found||!product)return {article,name:"",quantity:0,selectedOffer:0,offers:[]};
-    const raw=await ProductCardService.build(product,pricingContext,{userId:viewerId,cartId:null});
-    const localized=await PublicSearchPresenterService.present({
-      requestedLocale:locale,productCard:raw,includeSourceDetails:false,
+    return await resolveTelegramExtendedArticle({
+      article,found,
+      quoteProduct:async product=>{
+        const raw=await ProductCardService.build(product,pricingContext,{userId:viewerId,cartId:null});
+        const localized=await PublicSearchPresenterService.present({
+          requestedLocale:locale,productCard:raw,includeSourceDetails:false,
+        });
+        return {
+          article:String(localized.productCard.product.article||article).slice(0,60),
+          name:String(localized.productCard.product.name||"").slice(0,90),
+          quantity:0,selectedOffer:0,offers:selectTelegramOffers(localized.productCard.offers),
+        };
+      },
     });
-    return {
-      article:String(localized.productCard.product.article||article).slice(0,60),
-      name:String(localized.productCard.product.name||"").slice(0,90),
-      quantity:0,selectedOffer:0,offers:selectTelegramOffers(localized.productCard.offers),
-    };
   } catch(error) {
     console.error("MAKAtron order lookup:",error.message);
     return {article,name:"",quantity:0,selectedOffer:0,offers:[]};
