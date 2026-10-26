@@ -2,6 +2,8 @@ import { pool } from "../config/db.js";
 
 import { ProductRepository }
 from "../repositories/ProductRepository.js";
+import {PrivateCostRepository} from "../repositories/PrivateCostRepository.js";
+import {parsePrivateUnitCost} from "./PrivateCostImportService.js";
 
 import { ImportNewProductRepository }
 from "../repositories/ImportNewProductRepository.js";
@@ -249,6 +251,32 @@ async function approveLockedRow(
     throw new Error(
       "Не удалось создать предложение нового товара"
     );
+  }
+
+  // New products in REVIEW mode have no offer at import time. On approval,
+  // recover column F from the stored original CSV row, in the same transaction.
+  if (row.latest_import_row_id) {
+    const privateCostResult=await db.query(`
+      SELECT ir.raw_data,
+        CASE WHEN imp.warehouse_id=1
+          AND imp.file_type='XLSX' AND imp.import_method='MANUAL'
+          THEN wsi.internal_purchase_price_column ELSE NULL
+        END AS cost_column
+      FROM import_rows ir
+      JOIN imports imp ON imp.id=ir.import_id
+      LEFT JOIN warehouse_supplier_imports wsi
+        ON wsi.id=imp.warehouse_supplier_import_id
+      WHERE ir.id=$1 AND imp.warehouse_id=$2
+      LIMIT 1
+    `,[row.latest_import_row_id,row.warehouse_id]);
+    const source=privateCostResult.rows[0];
+    const col=Number(source?.cost_column||0);
+    if(col&&Array.isArray(source?.raw_data)){
+      const unitCost=parsePrivateUnitCost(source.raw_data[col-1],{
+        article:row.article,rowNumber:row.latest_import_row_id,
+      });
+      await PrivateCostRepository.upsert(offer.id,unitCost,db);
+    }
   }
 
   const taxonomy = taxonomyContext
