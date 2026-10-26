@@ -623,6 +623,14 @@ export async function handleTelegramOrderCallback(callback,api) {
     return true;
   }
   await api("answerCallbackQuery",{callback_query_id:callback.id});
+  if(["gosearch","gocart"].includes(action)) {
+    // These shortcuts are independent of the Telegram reply-keyboard's
+    // visibility and do not clear an existing saved cart.
+    if(row.stage==="PROCESSING")return true;
+    if(action==="gosearch")await showSearch(chatId,telegramUserId,api,locale);
+    else await showCart(chatId,telegramUserId,api,locale);
+    return true;
+  }
   if(action==="newsearch" && row.stage==="PROCESSING")return true;
   if(action==="newsearch" || (row.stage==="DONE"&&action==="reset")) {
     await showSearch(chatId,telegramUserId,api,locale);
