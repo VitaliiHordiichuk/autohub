@@ -107,3 +107,29 @@ test("Unknown numbers stay as unavailable, without synthetic offers or guessed m
   });
   assert.deepEqual(r,{article:"1673200503",name:"",quantity:0,selectedOffer:0,offers:[]});
 });
+
+test("A long color/fitment VARIANT returned FIRST by prefix lookup is not auto-sold",async()=>{
+  const requested="1673200503",visited=[];
+  const found={found:true,rule:"MERCEDES",numberResolution:"PREFIX",
+    exactProduct:variant,family:[variant,base,same]};
+  const result=await resolveTelegramExtendedArticle({
+    article:requested,found,
+    quoteProduct:async p=>{
+      visited.push(p.article);
+      return {...quote(p),offers:[{offerId:p.id,quantity:1,price:222,sourceType:"OWN_STOCK"}]};
+    },
+  });
+  assert.deepEqual(visited,["A167320050380"]);
+  assert.equal(result.article,"A167320050380");
+  assert.equal(result.requestedArticle,requested);
+});
+test("A long suffix alone is not sold as a base, even when prefix search finds it",async()=>{
+  let quoted=false;
+  const r=await resolveTelegramExtendedArticle({
+    article:"1673200503",found:{found:true,rule:"PREFIX",
+      exactProduct:variant,family:[variant]},
+    quoteProduct:async()=>{quoted=true;return quote(variant);},
+  });
+  assert.equal(quoted,false);
+  assert.deepEqual(r.offers,[]);
+});
