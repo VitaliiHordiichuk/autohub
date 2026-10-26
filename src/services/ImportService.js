@@ -5,6 +5,8 @@ from "../repositories/WarehouseSupplierImportRepository.js";
 
 import { ProductRepository }
 from "../repositories/ProductRepository.js";
+import { PrivateCostRepository } from "../repositories/PrivateCostRepository.js";
+import { parsePrivateUnitCost } from "./PrivateCostImportService.js";
 
 import { ImportRepository }
 from "../repositories/ImportRepository.js";
@@ -310,6 +312,16 @@ export const ImportService = {
 
       const settings =
         warehouseSupplierImport;
+
+      // Additional cost is unrelated to the pricing engine. Fail BEFORE any
+      // writes if callers bypass CSV/email preflight with partial data.
+      if (settings.internal_purchase_price_column) {
+        for (const row of rows) {
+          row.internalUnitCost=parsePrivateUnitCost(row.internalUnitCost,{
+            article:row.article,rowNumber:row.rowNumber||0,
+          });
+        }
+      }
 
       const importedSourceType = sourceTypeForFulfillment(
         resolveFulfillmentType({
@@ -867,6 +879,12 @@ export const ImportService = {
 
             productOfferId = Number(
               newOffer.id
+            );
+          }
+
+          if (settings.internal_purchase_price_column) {
+            await PrivateCostRepository.upsert(
+              productOfferId,row.internalUnitCost,db
             );
           }
 
