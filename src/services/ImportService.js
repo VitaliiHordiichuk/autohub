@@ -6,7 +6,7 @@ from "../repositories/WarehouseSupplierImportRepository.js";
 import { ProductRepository }
 from "../repositories/ProductRepository.js";
 import { PrivateCostRepository } from "../repositories/PrivateCostRepository.js";
-import { parsePrivateUnitCost } from "./PrivateCostImportService.js";
+import { parsePrivateUnitCost,privateCostEnabled } from "./PrivateCostImportService.js";
 
 import { ImportRepository }
 from "../repositories/ImportRepository.js";
@@ -313,10 +313,13 @@ export const ImportService = {
       const settings =
         warehouseSupplierImport;
 
-      // Additional cost is unrelated to the pricing engine. Fail BEFORE any
-      // writes if callers bypass CSV/email preflight with partial data.
-      if (settings.internal_purchase_price_column) {
-        for (const row of rows) {
+      const usePrivateCost=privateCostEnabled(settings,{
+        fileType:context.fileType||settings.file_type||"CSV",
+        importMethod:context.importMethod||settings.import_method||"MANUAL",
+      });
+      // Reject invalid private costs before any changes to stock or prices.
+      if(usePrivateCost) {
+        for(const row of rows){
           row.internalUnitCost=parsePrivateUnitCost(row.internalUnitCost,{
             article:row.article,rowNumber:row.rowNumber||0,
           });
@@ -882,7 +885,7 @@ export const ImportService = {
             );
           }
 
-          if (settings.internal_purchase_price_column) {
+          if (usePrivateCost) {
             await PrivateCostRepository.upsert(
               productOfferId,row.internalUnitCost,db
             );
