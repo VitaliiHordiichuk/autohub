@@ -54,6 +54,11 @@ export async function searchForMakatron(req,res,deps={}) {
       article,requestedLocale:locale,
       userId:mode==="client"?Number(userId):null,
       includeSourceDetails:mode==="staff",
+      // Mirror the website availability context for the same CLIENT:
+      // reservation ownership depends on userId, not just pricing.
+      availabilityContext:{
+        userId:mode==="client"?Number(userId):null,cartId:null
+      },
     });
     if(result.found&&mode==="staff"){
       const privatePricing=deps.staffPrices||websiteStaffPrices;
