@@ -8,6 +8,7 @@ const TXT = {
     add:"➕ Ще артикул", next:"🛒 Додати вибране до кошика",
     cartTitle:"🛒 <b>Ваш кошик</b>",cartAdd:"➕ Додати запчастини",checkout:"✅ Оформити замовлення",
     openProduct:"🔗 Переглянути на MAKA",
+    alternative:"Інший номер",pickAlternative:"Обрати",
     clearCart:"🗑 Очистити кошик",clearQuestion:"<b>Видалити всі товари з кошика?</b>",
     clearYes:"🗑 Так, очистити",clearNo:"Ні, залишити",
     cartSaved:"✅ Вибрані товари додано до кошика.",cartEmpty:"Кошик порожній.",
@@ -39,6 +40,7 @@ const TXT = {
     add:"➕ More articles",next:"🛒 Add selected to cart",
     cartTitle:"🛒 <b>Your cart</b>",cartAdd:"➕ Add parts",checkout:"✅ Checkout",
     openProduct:"🔗 View on MAKA",
+    alternative:"Alternative",pickAlternative:"Select",
     clearCart:"🗑 Clear cart",clearQuestion:"<b>Remove every item from your cart?</b>",
     clearYes:"🗑 Yes, clear",clearNo:"No, keep items",
     cartSaved:"✅ Selected items were added to your cart.",cartEmpty:"Your cart is empty.",
@@ -117,6 +119,14 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
         {text: "+", callback_data: cb(key, "p", i)},
         {text: "🗑", callback_data: cb(key, "x", i)},
       ]);
+      if(stage==="EDIT"&&item.alternatives?.length) {
+        // One short switch button directly under its position, not a second
+        // cart item or a fake quantity/price row.
+        rows.push([{
+          text:"🔁 "+(singleItem?"":("№"+(i+1)+" · "))+t.pickAlternative+" "+String(item.alternatives[0].article).slice(0,28),
+          callback_data:cb(key,"v",i),
+        }]);
+      }
     }
     // Telegram link buttons open the product card without affecting the cart.
     // Show a dedicated button for one part; multi-part lists use linked articles
@@ -242,6 +252,17 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
         lines.push("   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
           " · "+money(offer.price,locale)+"/"+t.pcs);
         lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
+      }
+      if(stage==="EDIT"&&i.alternatives?.length) {
+        const alternative=i.alternatives[0],altOffer=alternative.offers?.[alternative.selectedOffer||0];
+        if(altOffer) {
+          const altArticle=esc(String(alternative.article||"").slice(0,55));
+          const altUrl=telegramProductUrl(alternative.article,locale);
+          const altLink=altUrl?'<a href="'+esc(altUrl)+'">'+altArticle+'</a>':altArticle;
+          lines.push("   ↳ "+(compact?"":t.alternative+": ")+altLink+
+            " · "+Math.max(0,Number(altOffer.quantity))+" "+t.pcs+
+            " · "+money(altOffer.price,locale)+"/"+t.pcs);
+        }
       }
     });
     lines.push("");
