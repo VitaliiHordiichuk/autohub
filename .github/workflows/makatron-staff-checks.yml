@@ -1,0 +1,31 @@
+name: MAKAtron staff orders and pricing checks
+on:
+  push:
+    branches:
+      - feat/makatron-staff-orders-quotes-2026-10-26
+    paths:
+      - "src/services/MakatronStaff*"
+      - "src/services/TelegramBotService.js"
+      - "scripts/makatron-staff-link.mjs"
+      - "migrations/117_makatron_staff_orders_quotes.sql"
+      - ".github/workflows/makatron-staff-checks.yml"
+  workflow_dispatch:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Syntax
+        run: |
+          node --check src/services/MakatronStaffService.js
+          node --check src/services/MakatronStaffPricingService.js
+          node --check src/services/MakatronStaffBotService.js
+          node --check src/services/TelegramBotService.js
+          node --check scripts/makatron-staff-link.mjs
+      - name: Staff authorization and safe quotes
+        run: node --test src/services/MakatronStaffBotService.test.js
