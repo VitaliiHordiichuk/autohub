@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { SearchService } from "./SearchService.js";
+import { resolveTelegramExtendedArticle } from "./TelegramExtendedArticleService.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { parseTelegramArticles,escapeTelegramHtml } from "./TelegramCatalogFormatter.js";
@@ -19,6 +20,7 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
   const db=deps.db||pool;
   const search=deps.search||SearchService.searchByArticle;
   const findOffers=deps.findOffers||ProductRepository.findOffersByProductIds;
+  const resolveExtended=deps.resolveExtended||resolveTelegramExtendedArticle;
   const getContext=deps.getContext||CustomerPricingService.getContext;
   const input=String(text||"").replace(/^\/(?:price|prices|quote|ціна|цена)(?:@\w+)?\s*/i,"");
   const parsed=parseTelegramArticles(input);
@@ -37,13 +39,38 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       results.push({text:"❌ <code>"+escapeTelegramHtml(requested)+"</code> — не знайдено"});
       continue;
     }
-    const product=found.exactProduct || found.family?.[0];
-    if(!product)continue;
-    const offers=await findOffers([Number(product.id)]);
-    if(!offers.length){
-      results.push({text:"🔎 <code>"+escapeTelegramHtml(product.article)+"</code>\nНемає доступних залишків."});
+    // Reuse the customer's tested Mercedes SAME-number resolution. Only a
+    // real stocked +2-digit SAME article can replace an unavailable base;
+    // 4+-digit VARIANT numbers are never silently substituted.
+    const offerCache=new Map();
+    const resolved=await resolveExtended({
+      article:requested,found,
+      quoteProduct:async candidate=>{
+        const id=Number(candidate?.id);
+        const offers=Number.isSafeInteger(id)&&id>0
+          ?await findOffers([id]):[];
+        offerCache.set(id,offers);
+        return {
+          article:candidate.article,
+          name:candidate.name,
+          productId:id,
+          offers:offers.filter(o=>
+            o.is_available===true&&Number(o.quantity)>0&&
+            Number(o.retail_price)>0
+          ).map(o=>({
+            offerId:Number(o.id),quantity:Number(o.quantity),
+            price:Number(o.retail_price)
+          }))
+        };
+      },
+    });
+    if(!resolved.offers?.length){
+      results.push({text:"<code>"+escapeTelegramHtml(requested)+"</code> - Немає доступних залишків."});
       continue;
     }
+    const product={article:resolved.article,name:resolved.name};
+    const offers=offerCache.get(Number(resolved.productId))||[];
+    const requestedArticle=resolved.requestedArticle||null;
     // Only the own Mercedes warehouse (ID 1) shows retail + incoming + VIP.
     // Suppliers show quantity and their respective VIP price only.
     const visibleOffers=offers
@@ -63,8 +90,11 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       )).rows;
       for(const row of rows)costByOffer.set(Number(row.product_offer_id),row.unit_cost);
     }
+    const articleHeading=requestedArticle
+      ?escapeTelegramHtml(requestedArticle)+" → "+escapeTelegramHtml(product.article)
+      :escapeTelegramHtml(product.article);
     const lines=[
-      "<b>"+escapeTelegramHtml(product.article)+"</b> - "+
+      "<b>"+articleHeading+"</b> - "+
         escapeTelegramHtml(String(product.name||"Запчастина").slice(0,130)),
     ];
     const stockLines=[];
@@ -84,9 +114,12 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       const vipPrice=vipFor(offer);
       stockLines.push(label+" - "+Number(offer.quantity)+" шт");
       if(!own)supplierPriceLines.push(label+": "+cash(vipPrice?.customerPrice));
-      // Existing retail/VIP copy-to-client buttons stay unchanged.
-      buttons.push([{text:"📄 "+warehouse.slice(0,16)+" · Роздріб",
-        callback_data:"st:g:"+Number(offer.id)+":0"}]);
+      // Only the own Mercedes warehouse can generate retail quotations.
+      // Suppliers expose VIP only; remove the retail button entirely.
+      if(own){
+        buttons.push([{text:"📄 "+warehouse.slice(0,16)+" · Роздріб",
+          callback_data:"st:g:"+Number(offer.id)+":0"}]);
+      }
       if(vipGroup && vipPrice){
         buttons.push([{text:"📄 "+warehouse.slice(0,16)+" · VIP",
           callback_data:"st:g:"+Number(offer.id)+":"+Number(vipGroup.id)}]);
@@ -124,7 +157,7 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
   const db=deps.db||pool;
   const getContext=deps.getContext||CustomerPricingService.getContext;
   const data=(await db.query(
-    "SELECT po.id,po.product_id,po.quantity,po.is_available,po.is_hidden,po.minimum_sale_price,"+
+    "SELECT po.id,po.product_id,po.warehouse_id,po.quantity,po.is_available,po.is_hidden,po.minimum_sale_price,"+
     "CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL "+
     "THEN po.manual_retail_price ELSE po.retail_price END AS retail_price,"+
     "p.article,w.is_active AS warehouse_active,"+
@@ -137,6 +170,9 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
   if(!data||data.is_available!==true||data.is_hidden===true||
       Number(data.quantity)<=0||data.warehouse_active!==true||
       data.supplier_active===false)throw new Error("Offer unavailable");
+  // Invalidate old supplier-retail Telegram buttons, not only the new UI.
+  if(groupId===0 && Number(data.warehouse_id)!==1)
+    throw new Error("Retail quote unavailable for external warehouse");
   const eligible=await (deps.findOffers||ProductRepository.findOffersByProductIds)([Number(data.product_id)]);
   const current=eligible.find((offer)=>Number(offer.id)===id);
   if(!current)throw new Error("Offer no longer available");

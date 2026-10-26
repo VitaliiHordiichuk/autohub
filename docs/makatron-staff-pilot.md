@@ -44,7 +44,12 @@ safe customer offer). Other group prices are not offered by MAKAtron. No VIN req
    Staff lookup shows one compact message per article: own Mercedes warehouse
    and supplier quantities first; only own warehouse retail/incoming/VIP prices
    next; then one VIP price per external warehouse/supplier. Do not display
-   supplier incoming prices or their retail prices. Keep quote buttons.
+   supplier incoming prices or their retail prices. Own warehouse has retail
+   and VIP quote buttons; external suppliers have VIP ONLY. Reject old retail
+   buttons for suppliers. Staff search reuses the customer Mercedes SAME
+   resolver: base articles can fall back to a genuinely stocked two-digit
+   extension; long four-plus digit variants are never auto-substituted.
+   Show the requested base and resolved actual number when a fallback happens.
 7. New orders are notified via the isolated worker's Telegram token; the
    notification includes item list, amount, recipient and delivery.
    Confirm/cancel callbacks ALWAYS recheck role and require a second tap.

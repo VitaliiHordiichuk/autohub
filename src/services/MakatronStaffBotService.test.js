@@ -75,7 +75,7 @@ test("compact staff pricing groups own warehouse and supplier stocks and prices"
   "Паша: 99 859,78 грн"
  ].join("\n"));
  assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
-  ["st:g:9:0","st:g:9:3","st:g:8:0","st:g:8:3"]);
+  ["st:g:9:0","st:g:9:3","st:g:8:3"]);
  assert.doesNotMatch(result[0].text,/Gold|VIP\+|Registered|Харків|Кількість:/);
 });
 
@@ -91,6 +91,8 @@ test("supplier-only response shows just available stock and supplier VIP price",
   ]})
  });
  assert.equal(result[0].text,"<b>A1234567890</b> - Фільтр\nПаша - 2 шт\n\nПаша: 150 грн");
+ assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
+  ["st:g:8:3"]);
 });
 
 test("missing VIP never substitutes other client groups",async()=>{
@@ -111,11 +113,80 @@ test("missing VIP never substitutes other client groups",async()=>{
   ["st:g:9:0"]);
 });
 
+test("base Mercedes article uses stocked real two-digit SAME, not long VARIANT",async()=>{
+ const base={id:101,article:"A1673200503",brand_name:"Mercedes-Benz"};
+ const same={id:102,article:"A167320050380",brand_name:"Mercedes-Benz"};
+ const variant={id:103,article:"A16732005039051",brand_name:"Mercedes-Benz"};
+ const queried=[];
+ const result=await searchMakatronStaffPrices({
+  text:"1673200503",staffUserId:5
+ },{
+  search:async()=>({found:true,rule:"MERCEDES",exactProduct:base,
+   family:[base,same,variant]}),
+  findOffers:async ids=>{
+   queried.push(ids[0]);
+   return ids[0]===102?[{id:902,warehouse_id:1,warehouse_name:"MAKA",
+    quantity:2,is_available:true,retail_price:100,minimum_sale_price:80}]:
+    ids[0]===103?[{id:903,warehouse_id:1,quantity:8,is_available:true,
+    retail_price:50,minimum_sale_price:40}]:[];
+  },
+  db:{query:async()=>({rows:[{product_offer_id:902,unit_cost:"60"}]})},
+  getContext:async()=>({showAllPrices:true,priceGroups:[
+   {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"}
+  ]})
+ });
+ assert.deepEqual(queried,[101,102]);
+ assert.match(result[0].text,/1673200503 → A167320050380/);
+ assert.match(result[0].text,/Основний склад Mercedes - 2 шт/);
+ assert.match(result[0].text,/VIP: 80 грн/);
+ assert.doesNotMatch(result[0].text,/A16732005039051/);
+ assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(b=>b.callback_data),
+  ["st:g:902:0","st:g:902:3"]);
+});
+
+test("Mercedes base never auto-quotes a four-digit VARIANT",async()=>{
+ const base={id:101,article:"A1673200503",brand_name:"Mercedes-Benz"};
+ const variant={id:103,article:"A16732005039051",brand_name:"Mercedes-Benz"};
+ const queried=[];
+ const result=await searchMakatronStaffPrices({text:"A1673200503",staffUserId:5},{
+  search:async()=>({found:true,rule:"MERCEDES",exactProduct:base,
+    family:[base,variant]}),
+  findOffers:async ids=>{
+   queried.push(ids[0]);
+   return ids[0]===103?[{id:903,warehouse_id:1,quantity:3,
+    is_available:true,retail_price:100,minimum_sale_price:80}]:[];
+  },
+  db:{query:async()=>{throw Error("No available base or SAME cost");}},
+  getContext:async()=>({showAllPrices:true,priceGroups:[]})
+ });
+ assert.deepEqual(queried,[101]);
+ assert.match(result[0].text,/Немає доступних залишків/);
+ assert.doesNotMatch(result[0].text,/A16732005039051/);
+});
+
+test("supplier retail is blocked even through an old quote callback",async()=>{
+ const db={query:async()=>({rows:[{id:8,product_id:7,warehouse_id:4,
+  quantity:2,is_available:true,is_hidden:false,minimum_sale_price:150,
+  retail_price:200,article:"A1234567890",warehouse_active:true,supplier_active:true}]})};
+ const overrides={db,
+  findOffers:async()=>[{id:8,quantity:2,retail_price:200,minimum_sale_price:150}],
+  getContext:async()=>({showAllPrices:true,priceGroups:[
+   {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"}
+  ]})
+ };
+ await assert.rejects(
+  buildMakatronClientQuote({offerId:8,priceGroupId:0,staffUserId:5},overrides),
+  /Retail quote unavailable for external warehouse/
+ );
+ const vip=await buildMakatronClientQuote({offerId:8,priceGroupId:3,staffUserId:5},overrides);
+ assert.equal(vip.text,"A1234567890 — 150 грн");
+});
+
 test("client-ready quotation is one plain article-and-price line only",async()=>{
  const db={query:async(sql)=>{
   assert.doesNotMatch(sql,/internal_costs|unit_cost|purchase_price/i);
   return {rows:[{id:9,product_id:7,quantity:3,is_available:true,is_hidden:false,
-   minimum_sale_price:150,retail_price:200,article:"A1234567890",name:"Колодки",
+   warehouse_id:1,minimum_sale_price:150,retail_price:200,article:"A1234567890",name:"Колодки",
    warehouse_name:"MAKA",warehouse_active:true,supplier_active:true}]}},
  };
  const overrides={db,findOffers:async()=>[{id:9,product_id:7,quantity:2,retail_price:200,minimum_sale_price:150}],
