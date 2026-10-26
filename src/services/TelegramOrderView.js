@@ -68,7 +68,7 @@ export function telegramMainKeyboard(locale="uk") {
   return {keyboard:[[
     {text:locale==="en"?"🔎 Search":"🔎 Пошук"},
     {text:locale==="en"?"🛒 Cart":"🛒 Кошик"},
-  ]],resize_keyboard:true,is_persistent:true};
+  ]],resize_keyboard:true,is_persistent:true,one_time_keyboard:false};
 }
 export function telegramMenuIntent(text){
   const input=String(text||"").trim();
@@ -87,6 +87,7 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
   if (stage === "EDIT" || stage === "CART") {
     const rows = [];
     const items = draft.items || [];
+    const singleCartItem=stage==="CART"&&items.length===1;
     // One compact row per part, referenced by its number in the quote above.
     // Paginate at 10 parts so keyboards stay within Telegram API limits.
     const pageSize = 10;
@@ -96,15 +97,18 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
       const item = items[i];
       if (!item.offers?.length) {
         if(stage==="CART")rows.push([
-          {text:"№"+(i+1),callback_data:cb(key,"a",i)},
+          ...(!singleCartItem?[{text:"№"+(i+1),callback_data:cb(key,"a",i)}]:[]),
           {text:"🗑",callback_data:cb(key,"x",i)},
         ]);
         continue;
       }
-      // The full catalogue article is always printed in the numbered quote.
-      // The short position marker leaves room for all five buttons on iPhone.
+      // A single saved-cart item needs no position marker. The search
+      // preview and carts with 2+ items retain numbered article references.
       rows.push([
-        {text: "№" + (i + 1), callback_data: cb(key, item.offers.length > 1 ? "s" : "a", i)},
+        ...(!singleCartItem?[{
+          text:"№"+(i+1),
+          callback_data:cb(key,item.offers.length>1?"s":"a",i),
+        }]:[]),
         {text: String(item.quantity || 0) + " " + t.pcs, callback_data: cb(key, "q", i)},
         {text: "−", callback_data: cb(key, "m", i)},
         {text: "+", callback_data: cb(key, "p", i)},
@@ -191,21 +195,23 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
   } else if (stage==="EDIT"||stage==="CART"||stage==="REVIEW") {
     lines.push(stage==="REVIEW"?t.review:stage==="CART"?t.cartTitle:t.header);
     const compact=items.length>=12;
+    const singleCartItem=stage==="CART"&&items.length===1;
     items.forEach((i,n)=>{
       if(n>0) lines.push(""); // Visually separate individual positions.
       const name=esc(String(i.name||"").slice(0,compact?25:64));
       const article=esc(String(i.article||"").slice(0,55));
-      if (!i.offers?.length) {lines.push((n+1)+". <code>"+article+"</code> — "+t.none);return;}
+      const prefix=singleCartItem?"":(n+1)+". ";
+      if (!i.offers?.length) {lines.push(prefix+"<code>"+article+"</code> — "+t.none);return;}
       const offer=i.offers[i.selectedOffer||0];
       // MAKA is the default selling warehouse; label only supplier offers.
       const source=offer.sourceType==="OWN_STOCK"?"":"🚚 "+t.sourceSupplier+" · ";
       if(compact) {
         // 20 parts must fit in one complete HTML message, without truncating tags.
-        lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:"")+
+        lines.push(prefix+"<b>"+article+"</b>"+(name?" · "+name:"")+
           "\n   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+
           " · "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(offer.price,locale)+"/"+t.pcs);
       } else {
-        lines.push((n+1)+". <b>"+article+"</b>"+(name?" · "+name:""));
+        lines.push(prefix+"<b>"+article+"</b>"+(name?" · "+name:""));
         lines.push("   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
           " · "+money(offer.price,locale)+"/"+t.pcs);
         lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
