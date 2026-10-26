@@ -704,6 +704,7 @@ import {
 import {
   parseImportNumber,
 } from "../services/ImportNumericService.js";
+import { assertPrivateCostColumn,parseRowPrivateCost,privateCostSettings } from "../services/PrivateCostImportService.js";
 
 
 function readColumn(
@@ -833,6 +834,7 @@ function normalizeImportedRow(
     quantity,
     price,
     retailPrice,
+    internalUnitCost:parseRowPrivateCost(row,settings,rowNumber,article),
   };
 }
 
@@ -970,6 +972,8 @@ async function normalizeRows(
   parsedRows,
   settings
 ) {
+  // Fail old five-column files before a full stock import.
+  assertPrivateCostColumn(parsedRows,settings);
   const rows = [];
   const importErrors = [];
   const startRow =
@@ -1154,7 +1158,7 @@ export async function uploadImport(
       importErrors,
     } = await normalizeRows(
       parsedRows,
-      settings
+      privateCostSettings(settings,{fileType,importMethod:"MANUAL"})
     );
 
     const result =
@@ -1269,7 +1273,7 @@ export async function previewImport(
       importErrors,
     } = await normalizeRows(
       parsedRows,
-      settings
+      privateCostSettings(settings,{fileType,importMethod:"MANUAL"})
     );
 
     return res.json({
