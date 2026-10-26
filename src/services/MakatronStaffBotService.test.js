@@ -40,7 +40,7 @@ test("new-order message escapes user data, and actions use two-step callbacks",(
  assert.equal(kb.inline_keyboard[0][1].callback_data,"st:x:35");
 });
 
-test("staff pricing shows six-decimal real cost and official client group prices",async()=>{
+test("staff pricing gives retail, private incoming and exact VIP, no other groups",async()=>{
  envStaff(true);
  const offers=[{
   id:9,product_id:7,quantity:3,is_available:true,warehouse_id:1,
@@ -55,15 +55,37 @@ test("staff pricing shows six-decimal real cost and official client group prices
   findOffers:async()=>offers,
   getContext:async()=>({showAllPrices:true,priceGroups:[
    {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"},
-   {id:2,name:"Gold",discountPercent:10,pricingMode:"DISCOUNT"}
+   {id:2,name:"Gold",discountPercent:10,pricingMode:"DISCOUNT"},
+   {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"},
+   {id:5,name:"Registered",discountPercent:5,pricingMode:"DISCOUNT"}
   ]})
  });
  assert.equal(result.length,1);
- assert.match(result[0].text,/101,123456/);
- assert.match(result[0].text,/VIP/);
- assert.match(result[0].text,/150/);
- assert.ok(result[0].reply_markup.inline_keyboard.some(row=>
-  row.some(item=>item.callback_data==="st:g:9:3")));
+ assert.match(result[0].text,/Роздріб: <b>200 грн<\/b>/);
+ assert.match(result[0].text,/Вхідна: <b>101,123456 грн<\/b>/);
+ assert.match(result[0].text,/VIP: <b>150 грн<\/b>/);
+ assert.doesNotMatch(result[0].text,/Gold|VIP\+|Registered/);
+ assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
+  ["st:g:9:0","st:g:9:3"]);
+});
+
+test("absent VIP does not fall back to VIP+ or other groups",async()=>{
+ const offers=[{id:9,product_id:7,quantity:1,is_available:true,
+  warehouse_name:"MAKA",retail_price:200,minimum_sale_price:150}];
+ const result=await searchMakatronStaffPrices(
+ {text:"A1234567890",staffUserId:5},{
+  db:{query:async()=>({rows:[]})},
+  search:async()=>({found:true,exactProduct:{id:7,article:"A1234567890",name:"Фільтр"}}),
+  findOffers:async()=>offers,
+  getContext:async()=>({showAllPrices:true,priceGroups:[
+   {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"},
+   {id:2,name:"Gold",discountPercent:10,pricingMode:"DISCOUNT"}
+  ]})
+ });
+ assert.match(result[0].text,/VIP: <b>—<\/b>/);
+ assert.doesNotMatch(result[0].text,/Gold|VIP\+/);
+ assert.deepEqual(result[0].reply_markup.inline_keyboard.flat().map(x=>x.callback_data),
+  ["st:g:9:0"]);
 });
 
 test("client-ready quotation never selects or includes private unit cost",async()=>{
@@ -75,13 +97,23 @@ test("client-ready quotation never selects or includes private unit cost",async(
  };
  const overrides={db,findOffers:async()=>[{id:9,product_id:7,quantity:2,retail_price:200,minimum_sale_price:150}],
  getContext:async()=>({showAllPrices:true,priceGroups:[
-  {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"}
+  {id:3,name:"VIP",discountPercent:0,pricingMode:"MINIMUM"},
+  {id:2,name:"Gold",discountPercent:10,pricingMode:"DISCOUNT"},
+  {id:4,name:"VIP+",discountPercent:0,pricingMode:"MINIMUM"}
  ]})};
  const result=await buildMakatronClientQuote({offerId:9,priceGroupId:3,staffUserId:5},overrides);
  assert.match(result.text,/150/);
  assert.match(result.text,/Кількість: 2/);
  assert.doesNotMatch(result.text,/Вхідна|себестоимость|закуп/i);
- await assert.rejects(buildMakatronClientQuote({offerId:9,priceGroupId:99,staffUserId:5},overrides),/Price group/);
+ const retail=await buildMakatronClientQuote({offerId:9,priceGroupId:0,staffUserId:5},overrides);
+ assert.match(retail.text,/Ціна: <b>200 грн<\/b>/);
+ assert.doesNotMatch(retail.text,/Група:/);
+ for(const oldGroupId of [2,4,99]){
+  await assert.rejects(
+   buildMakatronClientQuote({offerId:9,priceGroupId:oldGroupId,staffUserId:5},overrides),
+   /Only retail or VIP quotes allowed/
+  );
+ }
 });
 
 test("unknown Telegram user cannot confirm orders or see staff quotes",async()=>{

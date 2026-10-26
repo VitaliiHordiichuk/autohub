@@ -39,7 +39,7 @@ export async function handleMakatronStaffMessage(message,api,deps={}) {
   if(/^(\/staff|\/start|\/help)(?:@\w+)?$/i.test(text)){
     await reply(api,chatId,"🤖 <b>MAKAtron · робочий режим</b>\n"+
       "🛒 Замовлення — нові заявки, підтвердження, скасування.\n"+
-      "💰 Процінка — артикули, залишки, вхідна ціна, групи клієнтів.\n"+
+      "💰 Процінка — артикули, залишки, роздрібна, вхідна та VIP-ціна.\n"+
       "Надішліть артикул, щоб отримати процінку.",{
         parse_mode:"HTML",reply_markup:markup()});
     return true;
@@ -60,7 +60,7 @@ export async function handleMakatronStaffMessage(message,api,deps={}) {
   if(/^(?:💰\s*Процінка|\/price(?:@\w+)?|\/quote(?:@\w+)?|\/prices(?:@\w+)?)$/i.test(text)){
     await reply(api,chatId,
       "🔎 Надішліть артикул або список артикулів, по одному в рядку.\n"+
-      "Покажу залишки, реальну вхідну ціну та ціни для клієнтських груп.",{
+      "Покажу залишки, роздрібну, реальну вхідну та VIP-ціну.",{
         reply_markup:markup()});
     return true;
   }

@@ -1,8 +1,8 @@
 # MAKAtron restricted staff pilot — Orders + Parts Quotes
 
 Scope: **new orders** (notify, confirm, cancel, open admin) and **parts quotes**
-(warehouse availability, true incoming unit cost, existing price groups, safe
-customer offer). No VIN request workflow or analytics are added.
+(warehouse availability, true incoming unit cost, retail and exact VIP price,
+safe customer offer). Other group prices are not offered by MAKAtron. No VIN request workflow or analytics are added.
 
 ## Deployment boundary
 
@@ -37,8 +37,9 @@ customer offer). No VIN request workflow or analytics are added.
    receives the two-button staff menu. No customer phone verification or
    old-bot linking is reused.
 6. A manager may type an article, or use `/price A1679068510` to get
-   real-time offers, incoming cost and group prices. Price group buttons send
-   a separate cost-free customer-ready text to the manager for forwarding.
+   real-time offers, incoming cost, retail and exact VIP prices. Only
+   retail/VIP quote buttons send cost-free client-ready text. Other group
+   prices (including VIP+) and old group callbacks are rejected.
 7. New orders are notified via the isolated worker's Telegram token; the
    notification includes item list, amount, recipient and delivery.
    Confirm/cancel callbacks ALWAYS recheck role and require a second tap.

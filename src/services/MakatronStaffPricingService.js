@@ -25,6 +25,11 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
   if(parsed.error) return [{text:"⚠️ Надішліть артикули, по одному у рядку (до 20)."}];
   const context=await getContext(Number(staffUserId));
   if(context.showAllPrices !== true) throw new Error("Staff pricing context not available");
+  // No full price matrix: MAKAtron uses only retail and the exact VIP group.
+  const vipGroup=(context.priceGroups||[]).find(group=>
+    String(group.name||"").trim().toUpperCase()==="VIP" &&
+    Number.isSafeInteger(Number(group.id)) && Number(group.id)>0
+  );
   const results=[];
   for(const requested of parsed.articles.slice(0,10)){
     const found=await search(requested);
@@ -54,26 +59,24 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
       const warehouse=offer.warehouse_name||offer.supplier_name||"Склад";
       const available=Number(offer.quantity)>0 && offer.is_available===true;
       if(!available)continue;
+      const vipPrice=vipGroup?CustomerPricingService.price({
+        retailPrice:offer.retail_price,minimumSalePrice:offer.minimum_sale_price
+      },{
+        discountPercent:vipGroup.discountPercent,
+        isVip:vipGroup.pricingMode==="MINIMUM"
+      }):null;
       lines.push("",
         "🏬 <b>"+escapeTelegramHtml(warehouse)+"</b>"+
-         (offer.warehouse_city?" · "+escapeTelegramHtml(offer.warehouse_city):""),
-        "Кількість: <b>"+Number(offer.quantity)+"</b>"+
-         " · Роздріб: <b>"+cash(offer.retail_price)+"</b>",
-        "Вхідна: <b>"+cost(costByOffer.get(Number(offer.id)))+"</b>");
-      const matrix=CustomerPricingService.priceMatrix({
-        retailPrice:offer.retail_price,minimumSalePrice:offer.minimum_sale_price
-      },context)||[];
-      for(const price of matrix.slice(0,10)){
-        lines.push("• "+escapeTelegramHtml(String(price.name).slice(0,36))+": <b>"+cash(price.price)+"</b>");
-      }
+          (offer.warehouse_city?" · "+escapeTelegramHtml(offer.warehouse_city):""),
+        "Кількість: <b>"+Number(offer.quantity)+"</b>",
+        "Роздріб: <b>"+cash(offer.retail_price)+"</b>",
+        "Вхідна: <b>"+cost(costByOffer.get(Number(offer.id)))+"</b>",
+        "VIP: <b>"+cash(vipPrice?.customerPrice)+"</b>");
       buttons.push([{text:"📄 "+String(warehouse).slice(0,16)+" · Роздріб",
         callback_data:"st:g:"+Number(offer.id)+":0"}]);
-      for(const group of matrix.slice(0,8)){
-        const groupId=Number(String(group.key||"").split(":")[1]);
-        if(Number.isSafeInteger(groupId)&&groupId>0){
-          buttons.push([{text:"📄 "+String(warehouse).slice(0,10)+" · "+String(group.name).slice(0,16),
-            callback_data:"st:g:"+Number(offer.id)+":"+groupId}]);
-        }
+      if(vipGroup && vipPrice){
+        buttons.push([{text:"📄 "+String(warehouse).slice(0,16)+" · VIP",
+          callback_data:"st:g:"+Number(offer.id)+":"+Number(vipGroup.id)}]);
       }
     }
     results.push({
@@ -87,8 +90,8 @@ export async function searchMakatronStaffPrices({text,staffUserId},deps={}) {
   return results;
 }
 
-// Safe client-ready quote contains NO unit cost and NO wholesale matrix.
-// The chosen pricing group is looked up afresh in the MAKA price engine.
+// Customer-ready quotes contain NO incoming cost: only retail or exact VIP.
+// Stale Telegram buttons for other groups must be rejected, not merely hidden.
 export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUserId},deps={}) {
   const id=Number(offerId), groupId=Number(priceGroupId);
   if(!Number.isSafeInteger(Number(staffUserId))||Number(staffUserId)<=0||
@@ -115,8 +118,9 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
   if(!current)throw new Error("Offer no longer available");
   const context=await getContext(Number(staffUserId));
   if(context.showAllPrices!==true)throw new Error("Staff access not available");
-  const group=groupId===0?null:context.priceGroups?.find((row)=>row.id===groupId);
-  if(groupId!==0&&!group)throw new Error("Price group not found");
+  const group=groupId===0?null:context.priceGroups?.find(row=>
+    Number(row.id)===groupId && String(row.name||"").trim().toUpperCase()==="VIP");
+  if(groupId!==0&&!group)throw new Error("Only retail or VIP quotes allowed");
   const price=CustomerPricingService.price({
     retailPrice:current.retail_price,minimumSalePrice:current.minimum_sale_price
   },group?{discountPercent:group.discountPercent,isVip:group.pricingMode==="MINIMUM"}:
@@ -129,7 +133,7 @@ export async function buildMakatronClientQuote({offerId,priceGroupId=0,staffUser
       "На складі: "+escapeTelegramHtml(data.warehouse_name)+"\n"+
       "Кількість: "+Number(current.quantity)+"\n"+
       "Ціна: <b>"+cash(price.customerPrice)+"</b>\n"+
-      (group?"Група: "+escapeTelegramHtml(group.name)+"\n":"")+
+      (group?"Група: VIP\n":"")+
       "\nhttps://maka.com.ua/uk/product/"+encodeURIComponent(data.article),
     parse_mode:"HTML"
   };
