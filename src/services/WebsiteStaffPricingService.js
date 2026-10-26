@@ -2,6 +2,18 @@ import { pool } from "../config/db.js";
 import { ProductRepository } from "../repositories/ProductRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 
+async function currentVipPricing(db){
+  const rows=(await db.query(
+    "SELECT discount_percent,pricing_mode FROM price_groups "+
+    "WHERE UPPER(TRIM(name))='VIP' LIMIT 2"
+  )).rows;
+  if(rows.length!==1)return null;
+  return {
+    discountPercent:Number(rows[0].discount_percent||0),
+    isVip:rows[0].pricing_mode==="MINIMUM"
+  };
+}
+
 // Private, server-side presentation only. The public website search does not
 // call this service and can never return purchasing costs or VIP staff data.
 export async function websiteStaffPrices(searchResponse, deps={}) {
@@ -14,8 +26,7 @@ export async function websiteStaffPrices(searchResponse, deps={}) {
         ids.add(Number(offer.id));
   }
   if(ids.size===0)return {};
-  const context=await (deps.context||CustomerPricingService.getContext)(null);
-  void context; // Staff price is calculated from the actual website pricing engine.
+  const vipContext=await (deps.vipContext||currentVipPricing)(db);
   const dbRows=(await db.query(
     "SELECT po.id,po.warehouse_id,po.minimum_sale_price,"+
     "CASE WHEN po.price_mode='MANUAL' AND po.manual_retail_price IS NOT NULL "+
@@ -34,9 +45,9 @@ export async function websiteStaffPrices(searchResponse, deps={}) {
     const retail=CustomerPricingService.price({
       retailPrice:row.retail_price,minimumSalePrice:row.minimum_sale_price
     },{discountPercent:0,isVip:false});
-    const vip=CustomerPricingService.price({
+    const vip=vipContext?CustomerPricingService.price({
       retailPrice:row.retail_price,minimumSalePrice:row.minimum_sale_price
-    },{discountPercent:0,isVip:true});
+    },vipContext):null;
     const own=Number(row.warehouse_id)===1;
     result[String(row.id)]={
       warehouseName:own?"Основний склад Mercedes":
@@ -70,9 +81,12 @@ export async function websiteStaffClientQuote({offerId,group,userId},deps={}) {
     .find(o=>Number(o.id)===id && o.is_available===true &&
       Number(o.quantity)>0);
   if(!offer)throw new Error("Offer unavailable");
+  const vipContext=group==="VIP"
+    ?await (deps.vipContext||currentVipPricing)(db):null;
+  if(group==="VIP"&&!vipContext)throw Error("VIP group unavailable");
   const price=CustomerPricingService.price({
     retailPrice:offer.retail_price,minimumSalePrice:offer.minimum_sale_price
-  },{discountPercent:0,isVip:group==="VIP"});
+  },group==="VIP"?vipContext:{discountPercent:0,isVip:false});
   if(!price)throw new Error("Price unavailable");
   const value=new Intl.NumberFormat("uk-UA",{
     maximumFractionDigits:2
