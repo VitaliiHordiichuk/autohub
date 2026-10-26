@@ -10,7 +10,7 @@ import { ImportFileParserService } from "./ImportFileParserService.js";
 import {
   parseImportNumber,
 } from "./ImportNumericService.js";
-import { assertPrivateCostColumn,parseRowPrivateCost } from "./PrivateCostImportService.js";
+import { assertPrivateCostColumn,parseRowPrivateCost,privateCostSettings } from "./PrivateCostImportService.js";
 
 import { EmailImportFileRepository } from "../repositories/EmailImportFileRepository.js";
 import { EmailImportRuleRepository } from "../repositories/EmailImportRuleRepository.js";
@@ -136,8 +136,9 @@ function buildImportErrorRow(row, settings, error, rowNumber) {
 
 
 function normalizeRows(parsedRows, settings) {
-  // Fail the entire attachment BEFORE any stock import if configured cost
-  // column F is missing or corrupted: a partial full replacement is unsafe.
+  // Scheduled EMAIL/CSV stays on the original five public price columns.
+  // It neither requires nor overwrites the private XLSX-only cost.
+  settings=privateCostSettings(settings,{fileType:settings.file_type,importMethod:"EMAIL"});
   assertPrivateCostColumn(parsedRows,settings);
   const rows = [];
   const importErrors = [];
