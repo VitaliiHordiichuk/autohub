@@ -274,7 +274,14 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       [{text:t.back,callback_data:cb(sessionKey,"back")}],
       [{text:t.freshSearch,callback_data:cb(sessionKey,"newsearch")}],
     ]};
-  return {text:lines.join("\n"),parse_mode:"HTML",reply_markup:keyboard};
+  // In multi-part searches Telegram otherwise expands the first product
+  // link into a large card, obscuring the remaining search results.
+  // Explicitly set this on both new messages and edits (publish forwards it).
+  const link_preview_options=(stage==="EDIT"||stage==="CART")
+    ? {is_disabled:items.length!==1}
+    : {is_disabled:true};
+  return {text:lines.join("\n"),parse_mode:"HTML",
+    link_preview_options,reply_markup:keyboard};
 }
 export function deliveryKeyboard(key,locale="uk",{pickupAvailable=true}={}) {
   const t=orderText(locale);
