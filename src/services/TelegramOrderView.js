@@ -223,16 +223,22 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       const articleLabel=productUrl
         ?'<a href="'+esc(productUrl)+'">'+article+'</a>'
         :"<b>"+article+"</b>";
+      // One searched number stays one result, even if stock was found on a
+      // compatible Mercedes extension. The link always opens the real item.
+      const requested=i.requestedArticle&&stage==="EDIT"
+        ?esc(String(i.requestedArticle).slice(0,55))+" → "
+        :"";
+      const articleLine=requested+articleLabel;
       const offer=i.offers[i.selectedOffer||0];
       // MAKA is the default selling warehouse; label only supplier offers.
       const source=offer.sourceType==="OWN_STOCK"?"":"🚚 "+t.sourceSupplier+" · ";
       if(compact) {
         // 20 parts must fit in one complete HTML message, without truncating tags.
-        lines.push(prefix+articleLabel+(name?" · "+name:"")+
+        lines.push(prefix+articleLine+(name?" · "+name:"")+
           "\n   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+
           " · "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(offer.price,locale)+"/"+t.pcs);
       } else {
-        lines.push(prefix+articleLabel+(name?" · "+name:""));
+        lines.push(prefix+articleLine+(name?" · "+name:""));
         lines.push("   "+source+t.count+": "+Math.max(0,Number(offer.quantity))+" "+t.pcs+
           " · "+money(offer.price,locale)+"/"+t.pcs);
         lines.push("   "+t.selected+": <b>"+Number(i.quantity||0)+"</b> · "+money(Number(i.quantity||0)*Number(offer.price),locale));
