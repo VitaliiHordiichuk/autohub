@@ -73,11 +73,12 @@ function currency(value, locale = "uk") {
     : null;
 }
 
-function articleUrl(article, locale) {
+export function telegramProductUrl(article, locale = "uk") {
   const normalized = normalizeArticle(article);
   if (!ARTICLE_RE.test(normalized)) return null;
   return "https://maka.com.ua/" + lang(locale) + "/product/" + encodeURIComponent(article);
 }
+const articleUrl = telegramProductUrl;
 
 function available(offers) {
   return (offers || []).filter((offer) =>
