@@ -104,11 +104,11 @@ export function formatStaffNewOrder(order) {
     "Статус: <b>" + escapeTelegramHtml(order.status) + "</b>",
     "Клієнт: " + escapeTelegramHtml(recipient||order.company_name||"Не вказано"),
     ...(delivery.recipientPhone?["Телефон: "+escapeTelegramHtml(delivery.recipientPhone)]:[]),
-    ...(destination?["Доставка: "+escapeTelegramHtml(destination)]:[]),
+    ...(destination?["Доставка: "+escapeTelegramHtml(String(destination).slice(0,220))]:[]),
     ...(order.comment ? ["Коментар: " + escapeTelegramHtml(String(order.comment).slice(0,250))] : []),
     "", ...items, ...((order.items || []).length>12 ? ["…ще позицій: " + ((order.items || []).length-12)] : []),
     "", "Разом: <b>" + money(order.total_amount) + "</b>",
-  ].join("\n").slice(0,3700);
+  ].join("\n");
 }
 
 // Dedicated MAKAtron worker sends order notifications using ITS OWN Telegram token.
