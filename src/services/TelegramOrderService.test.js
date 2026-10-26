@@ -44,14 +44,19 @@ test("One and many parts share the same keyboard and totals",()=>{
   assert.deepEqual(one.reply_markup.inline_keyboard[0].map(b=>b.callback_data),
     ["mo:aabbccdd11:q:0","mo:aabbccdd11:m:0",
       "mo:aabbccdd11:p:0","mo:aabbccdd11:x:0"]);
-  assert.match(one.text,/<b>A2711800109<\/b>/);
-  assert.doesNotMatch(one.text,/1\. <b>A2711800109<\/b>/);
+  assert.match(one.text,/href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109">A2711800109<\/a>/);
+  assert.doesNotMatch(one.text,/1\. <a href=/);
+  assert.deepEqual(one.reply_markup.inline_keyboard[1].map(b=>b.text),
+    ["🔗 Переглянути на MAKA"]);
+  assert.equal(one.reply_markup.inline_keyboard[1][0].url,
+    "https://maka.com.ua/uk/product/A2711800109");
   assert.doesNotMatch(one.text,/Склад MAKA|🏬/);
   const multi=renderTelegramOrder({stage:"EDIT",draft:{items:[product,product]},
     sessionKey:"aabbccdd11"});
   assert.match(multi.text,/3.000 грн/);
   assert.equal(multi.reply_markup.inline_keyboard.length,5);
-  assert.match(multi.text,/Обрано: <b>2<\/b>[^]*\n\n2\. <b>A2711800109<\/b>/);
+  assert.match(multi.text,/Обрано: <b>2<\/b>[^]*\n\n2\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109">A2711800109<\/a>/);
+  assert.equal(multi.reply_markup.inline_keyboard.flat().filter(b=>b.url).length,0);
 });
 test("All user-provided product data is escaped and no price matrix leaks",()=>{
   const view=renderTelegramOrder({sessionKey:"aabbccdd11",stage:"EDIT",draft:{items:[{
@@ -167,8 +172,8 @@ test("Long Mercedes article stays in full quote without №1 for one result",()=
   const v=renderTelegramOrder({stage:"EDIT",draft,sessionKey:"aabbccdd11"});
   assert.equal(v.reply_markup.inline_keyboard[0].length,4);
   assert.equal(v.reply_markup.inline_keyboard[0][0].text,"1 шт.");
-  assert.match(v.text,/<b>A167320050380<\/b>/);
-  assert.doesNotMatch(v.text,/1\. <b>A167320050380<\/b>/);
+  assert.match(v.text,/href="https:\/\/maka\.com\.ua\/uk\/product\/A167320050380">A167320050380<\/a>/);
+  assert.doesNotMatch(v.text,/1\. <a href=/);
   assert.ok(v.reply_markup.inline_keyboard.flat().every(row=>row.callback_data.length<=64));
 });
 test("Generic self-pickup needs no warehouse, address or internal selection",()=>{
@@ -249,7 +254,7 @@ test("Checkout has a fresh-search escape hatch but approved basket controls stay
   }]},sessionKey:"aabbccdd11"});
   assert.deepEqual(basket.reply_markup.inline_keyboard[0].map(x=>x.text),
     ["1 шт.","−","+","🗑"]);
-  assert.equal(basket.reply_markup.inline_keyboard.length,4);
+  assert.equal(basket.reply_markup.inline_keyboard.length,5);
 });
 
 test("A single result has no №1 in search or cart; multiple results remain numbered",()=>{
@@ -263,17 +268,17 @@ test("A single result has no №1 in search or cart; multiple results remain num
     "mo:aabbccdd11:q:0","mo:aabbccdd11:m:0",
     "mo:aabbccdd11:p:0","mo:aabbccdd11:x:0",
   ]);
-  assert.match(cart.text,/^🛒 <b>Ваш кошик<\/b>\n<b>A1673200603<\/b>/);
-  assert.doesNotMatch(cart.text,/1\. <b>A1673200603<\/b>/);
+  assert.match(cart.text,/^🛒 <b>Ваш кошик<\/b>\n<a href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603">A1673200603<\/a>/);
+  assert.doesNotMatch(cart.text,/1\. <a href=/);
   const search=renderTelegramOrder({stage:"EDIT",draft:{items:[product]},sessionKey:"aabbccdd11"});
   assert.equal(search.reply_markup.inline_keyboard[0][0].text,"1 шт.");
-  assert.match(search.text,/<b>A1673200603<\/b>/);
-  assert.doesNotMatch(search.text,/1\. <b>A1673200603<\/b>/);
+  assert.match(search.text,/href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603">A1673200603<\/a>/);
+  assert.doesNotMatch(search.text,/1\. <a href=/);
   const both=renderTelegramOrder({stage:"CART",draft:{items:[product,{
     ...product,article:"A2711800109",offers:[{...product.offers[0],offerId:219}],
   }]},sessionKey:"aabbccdd11"});
   assert.equal(both.reply_markup.inline_keyboard[0][0].text,"№1");
   assert.equal(both.reply_markup.inline_keyboard[1][0].text,"№2");
-  assert.match(both.text,/1\. <b>A1673200603<\/b>/);
-  assert.match(both.text,/2\. <b>A2711800109<\/b>/);
+  assert.match(both.text,/1\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200603">A1673200603<\/a>/);
+  assert.match(both.text,/2\. <a href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109">A2711800109<\/a>/);
 });
