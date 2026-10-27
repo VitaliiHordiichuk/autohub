@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { pool } from "../config/db.js";
 import { readWebsiteArticleSearch } from "../services/WebsiteArticleSearchService.js";
 import { websiteStaffPrices,websiteStaffClientQuote } from "../services/WebsiteStaffPricingService.js";
+import { websiteStaffVariants } from "../services/WebsiteStaffVariantService.js";
 
 function validSecret(expected,provided) {
   const a=Buffer.from(String(expected||""),"utf8");
@@ -61,6 +62,8 @@ export async function searchForMakatron(req,res,deps={}) {
     });
     if(result.found&&mode==="staff"){
       const privatePricing=deps.staffPrices||websiteStaffPrices;
+      const listVariants=deps.staffVariants||websiteStaffVariants;
+      result.response.staffVariants=await listVariants(result);
       result.response.staffPrices=await privatePricing(result.response);
     }
     return res.status(result.found?200:404).json(result.response);
