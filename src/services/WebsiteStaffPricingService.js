@@ -20,7 +20,8 @@ export async function websiteStaffPrices(searchResponse, deps={}) {
   const db=deps.db||pool;
   const ids=new Set();
   for(const card of [searchResponse.productCard,...(searchResponse.family||[]),
-    searchResponse.replacement?.sourceProductCard].filter(Boolean)){
+    searchResponse.replacement?.sourceProductCard,
+    ...(searchResponse.staffVariants||[])].filter(Boolean)){
     for(const offer of card.offers||[])
       if(offer.isAvailable===true&&Number(offer.quantity)>0&&Number(offer.id)>0)
         ids.add(Number(offer.id));
