@@ -60,7 +60,12 @@ test("Account identifiers and secret never travel in query strings",async()=>{
   });
   assert.equal(captured[0].url,"http://127.0.0.1:4000/api/search/telegram-quote");
   assert.deepEqual(captured[0].body,{offerId:99,group:"VIP",userId:2});
-  assert.equal(siteSearchEnabled(),false);
+  // The URL must be free of credentials regardless of whether shared search is on.
+  const parsedUrl=new URL(captured[0].url);
+  assert.equal(parsedUrl.search,"");
+  assert.equal(parsedUrl.hash,"");
+  assert.equal(parsedUrl.username,"");
+  assert.equal(parsedUrl.password,"");
  }finally{
   if(old===undefined)delete process.env.MAKATRON_SEARCH_BRIDGE_SECRET;
   else process.env.MAKATRON_SEARCH_BRIDGE_SECRET=old;
