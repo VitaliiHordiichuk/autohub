@@ -8,13 +8,15 @@ test("staff VIP price follows the current site VIP pricing mode, never bot const
   {id:8,isAvailable:true,quantity:2},
  ]},family:[]};
  const db={query:async(sql,params)=>{
-  if(sql.includes("FROM product_offers po")&&sql.includes("product_offer_internal_costs"))
+  if(sql.includes("FROM product_offers po")&&sql.includes("product_offer_internal_costs")){
+    assert.deepEqual(params,[[9,8]],"SQL ANY($1::integer[]) requires one array parameter");
     return {rows:[
       {id:9,warehouse_id:1,retail_price:200,minimum_sale_price:150,
         unit_cost:"100.123456",warehouse_name:"Основной склад"},
       {id:8,warehouse_id:4,retail_price:200,minimum_sale_price:150,
         unit_cost:"120",warehouse_name:"Паша"},
     ]};
+  }
   throw Error("Unexpected SQL in test "+sql);
  }};
  const data=await websiteStaffPrices(searchResponse,{
