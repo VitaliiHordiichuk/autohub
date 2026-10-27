@@ -29,15 +29,23 @@ export async function searchMakatronStaffThroughWebsite({
     }
     if(!data.staffPrices||typeof data.staffPrices!=="object")
       throw Error("Private staff price payload missing from website backend");
+    // Private staff family includes every stocked Mercedes variant, even when
+    // the customer-facing supplier rule omits it. Keep public analogs too.
+    const cards=[...(Array.isArray(data.staffVariants)?data.staffVariants:[]),
+      ...websiteSearchCards(data)];
+    const seen=new Set();
     let count=0;
-    for(const card of websiteSearchCards(data).slice(0,8)){
+    for(const card of cards){
+      const productId=Number(card?.product?.id);
+      if(!Number.isSafeInteger(productId)||productId<=0||seen.has(productId))continue;
+      seen.add(productId);
       const sellable=(card.offers||[]).filter(o=>o.isAvailable===true&&
         Number(o.quantity)>0&&data.staffPrices[String(o.id)]);
       if(!sellable.length)continue;
       count++;
       const sorted=[...sellable].sort((a,b)=>
         Number(data.staffPrices[String(b.id)].warehouseId===1)-
-        Number(data.staffPrices[String(a.id)].warehouseId===1)).slice(0,4);
+        Number(data.staffPrices[String(a.id)].warehouseId===1));
       const own=sorted.find(o=>data.staffPrices[String(o.id)].warehouseId===1);
       const lines=["<b>"+escapeTelegramHtml(card.product.article)+"</b> - "+
         escapeTelegramHtml(String(card.product.name||"Запчастина").slice(0,110))];
