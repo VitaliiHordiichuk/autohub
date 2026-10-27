@@ -38,7 +38,7 @@ export async function websiteStaffPrices(searchResponse, deps={}) {
     "LEFT JOIN product_offer_internal_costs ic ON ic.product_offer_id=po.id "+
     "WHERE po.id=ANY($1::integer[]) AND po.is_available=TRUE "+
     "AND po.is_hidden=FALSE AND po.quantity>0 AND w.is_active=TRUE "+
-    "AND (s.id IS NULL OR s.is_active=TRUE)",[...ids]
+    "AND (s.id IS NULL OR s.is_active=TRUE)",[[...ids]]
   )).rows;
   const result={};
   for(const row of dbRows){
