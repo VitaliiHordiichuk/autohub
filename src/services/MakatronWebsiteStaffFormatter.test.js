@@ -61,7 +61,7 @@ test("staff shows base Mercedes own warehouse even when public response only con
     getContext:async()=>({showAllPrices:true,priceGroups:[{id:3,name:"VIP"}]}),
     searchWebsite:async()=>data
   });
-  assert.deepEqual(result.map(r=>r.text.match(/<b>(.*?)<\\/b>/)?.[1]),
+  assert.deepEqual(result.map(r=>r.text.split("</b>")[0].replace(/^<b>/,"")),
     ["A1673200603","A167320060380"]);
   assert.match(result[0].text,/Основний склад Mercedes - 1 шт/);
   assert.match(result[0].text,/Паша - 2 шт/);
