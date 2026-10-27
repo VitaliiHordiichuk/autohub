@@ -1,0 +1,25 @@
+name: MAKA website shared article search
+on:
+  push:
+    branches:
+      - feat/maka-unified-search-backend-2026-10-27
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: |
+          node --check src/controllers/search.controller.js
+          node --check src/controllers/makatron-search-bridge.controller.js
+          node --check src/services/WebsiteArticleSearchService.js
+          node --check src/services/WebsiteStaffPricingService.js
+          node --test src/controllers/search.controller.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/WebsiteArticleSearchService.test.js src/services/WebsiteStaffPricingService.test.js
