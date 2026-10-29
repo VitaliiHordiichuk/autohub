@@ -64,6 +64,13 @@ test("price import handles zero/tiny old prices without overflowing history or r
     assert.equal(result.priceRises, 2);
     assert.equal(result.priceDrops, 1);
     assert.equal(result.missingOffersDisabled, 0);
+    const privateCosts = await pool.query(`
+      SELECT COUNT(*)::integer AS count
+      FROM product_offer_internal_costs pic
+      JOIN product_offers po ON po.id = pic.product_offer_id
+      WHERE po.warehouse_id = $1
+    `, [warehouseId]);
+    assert.equal(privateCosts.rows[0].count, 0, "partner warehouse must not receive MAKA internal costs");
 
     const offers = (await pool.query(`SELECT po.*, p.article FROM product_offers po
       JOIN products p ON p.id=po.product_id WHERE po.warehouse_id=$1`, [warehouseId])).rows;

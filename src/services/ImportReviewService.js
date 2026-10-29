@@ -2,6 +2,8 @@ import { pool } from "../config/db.js";
 
 import { ProductRepository }
 from "../repositories/ProductRepository.js";
+import {PrivateCostRepository} from "../repositories/PrivateCostRepository.js";
+import {parsePrivateUnitCost,privateCostEnabled} from "./PrivateCostImportService.js";
 
 import { ImportNewProductRepository }
 from "../repositories/ImportNewProductRepository.js";
@@ -249,6 +251,44 @@ async function approveLockedRow(
     throw new Error(
       "Не удалось создать предложение нового товара"
     );
+  }
+
+  // New products in REVIEW mode have no offer at import time. Recover the
+  // cost using the immutable import-time column snapshot, not a mutable profile.
+  if (row.latest_import_id) {
+    const privateCostResult=await db.query(`
+      SELECT ir.raw_data, imp.file_type, imp.import_method,
+        imp.private_cost_column AS cost_column, w.pricing_model
+      FROM imports imp
+      JOIN warehouses w ON w.id=imp.warehouse_id
+      LEFT JOIN import_rows ir ON ir.id=$2 AND ir.import_id=imp.id
+      WHERE imp.id=$1 AND imp.warehouse_id=$3
+      LIMIT 1
+    `,[row.latest_import_id,row.latest_import_row_id,row.warehouse_id]);
+    const source=privateCostResult.rows[0];
+    if(!source){
+      throw new Error("Не найдена история импорта подтверждаемого товара");
+    }
+    const col=Number(source?.cost_column||0);
+    const requiresCost=source&&privateCostEnabled({
+      warehouse_id:row.warehouse_id,
+      warehouse_type:row.warehouse_type,
+      supplier_type:row.supplier_type,
+      pricing_model:source.pricing_model,
+      internal_purchase_price_column:source.cost_column,
+    },{fileType:source.file_type,importMethod:source.import_method});
+    if(requiresCost && !col){
+      throw new Error("У старого XLSX-импорта нет подтверждённой колонки себестоимости; нужна ручная проверка перед утверждением товара");
+    }
+    if(requiresCost){
+      if(!Array.isArray(source?.raw_data)){
+        throw new Error("Не найдена исходная строка XLSX с реальной входящей ценой для подтверждаемого товара");
+      }
+      const unitCost=parsePrivateUnitCost(source.raw_data[col-1],{
+        article:row.article,rowNumber:row.latest_import_row_id,
+      });
+      await PrivateCostRepository.upsert(offer.id,unitCost,db);
+    }
   }
 
   const taxonomy = taxonomyContext

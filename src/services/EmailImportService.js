@@ -10,6 +10,7 @@ import { ImportFileParserService } from "./ImportFileParserService.js";
 import {
   parseImportNumber,
 } from "./ImportNumericService.js";
+import { assertPrivateCostColumn,parseRowPrivateCost,privateCostSettings } from "./PrivateCostImportService.js";
 
 import { EmailImportFileRepository } from "../repositories/EmailImportFileRepository.js";
 import { EmailImportRuleRepository } from "../repositories/EmailImportRuleRepository.js";
@@ -106,12 +107,14 @@ function normalizeImportedRow(row, settings, rowNumber) {
 
   return {
     rowNumber,
+    rawData:row,
     brand: brand || null,
     article,
     name,
     quantity,
     price,
     retailPrice,
+    internalUnitCost:parseRowPrivateCost(row,settings,rowNumber,article),
   };
 }
 
@@ -132,7 +135,11 @@ function buildImportErrorRow(row, settings, error, rowNumber) {
 }
 
 
-function normalizeRows(parsedRows, settings) {
+function normalizeRows(parsedRows, settings, fileType) {
+  // The actual attachment type, not the nominal profile type, determines
+  // whether the verified own-warehouse XLSX has a required private column F.
+  settings=privateCostSettings(settings,{fileType,importMethod:"EMAIL"});
+  assertPrivateCostColumn(parsedRows,settings);
   const rows = [];
   const importErrors = [];
   const startRow = Number(settings.start_row) || 1;
@@ -493,7 +500,7 @@ async function claimAttachment(
 }
 
 
-async function importAttachment(settings, attachment) {
+export async function importAttachment(settings, attachment) {
   const fileName = attachment.filename || "";
   const fileType =
     ImportFileParserService.detectFileType(fileName);
@@ -528,7 +535,8 @@ async function importAttachment(settings, attachment) {
     importErrors,
   } = normalizeRows(
     parsedRows,
-    settings
+    settings,
+    fileType
   );
 
   const result = await ImportService.importRows(

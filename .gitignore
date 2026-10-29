@@ -15,6 +15,5 @@ npm-debug.log*
 *.backup-before-*
 test-import.csv
 test-import.xlsx
-test-brand-admin.mjs
 uploads/
 autohub.dump

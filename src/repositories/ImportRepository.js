@@ -16,6 +16,7 @@ export const ImportRepository = {
       fileName = null,
       fileType = null,
       importMethod = null,
+      privateCostColumn = null,
     },
     db = pool
   ) {
@@ -29,10 +30,11 @@ export const ImportRepository = {
           file_name,
           file_type,
           import_method,
+          private_cost_column,
           status
         )
         VALUES (
-          $1,$2,$3,$4,$5,$6,$7,
+          $1,$2,$3,$4,$5,$6,$7,$8,
           'PROCESSING'
         )
         RETURNING *;
@@ -45,6 +47,7 @@ export const ImportRepository = {
         fileName,
         fileType,
         importMethod,
+        privateCostColumn,
       ]
     );
 

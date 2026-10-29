@@ -138,6 +138,10 @@ function mapProfile(row) {
     nameColumn: Number(row.name_column),
     priceColumn: Number(row.price_column),
     retailPriceColumn: row.retail_price_column === null ? null : Number(row.retail_price_column),
+    // Optional internal-only sixth column mapped per warehouse, not per supplier.
+    internalPurchasePriceColumn:
+      row.internal_purchase_price_column == null ? null :
+      Number(row.internal_purchase_price_column),
     quantityColumn: Number(row.quantity_column),
     startRow: Number(row.start_row),
     newProductsMode:

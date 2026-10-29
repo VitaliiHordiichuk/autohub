@@ -359,6 +359,7 @@ export const EmailImportFileRepository = {
           wsi.email_match_mode,
           wsi.email_subject_contains,
           wsi.email_filename_contains,
+          wsi.internal_purchase_price_column,
 
           sis.brand_mode,
           sis.fixed_brand_id,
@@ -371,6 +372,8 @@ export const EmailImportFileRepository = {
           sis.start_row,
 
           w.pricing_model,
+          w.type AS warehouse_type,
+          s.type AS supplier_type,
 
           s.name AS supplier_name
 
