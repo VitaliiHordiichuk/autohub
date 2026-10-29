@@ -557,7 +557,16 @@ function detectFuelTypes(text, epcGroups) {
   if (fuelContext && /(?:клапан|регулятор|valve|regulator)/iu.test(text)) {
     types.push("FUEL_PRESSURE_VALVE");
   }
-  if (fuelContext && /(?:бак|модул|tank|module)/iu.test(text)) {
+  // A fuel pump module is primarily a pump, not a fuel-tank module.
+  // Keep explicit tank references eligible for tank-module detection.
+  const fuelPumpModule = /(?:модул|module)/iu.test(text)
+    && /(?:насос|pump)/iu.test(text)
+    && !/(?:бак|tank)/iu.test(text);
+  if (
+    fuelContext
+    && /(?:бак|модул|tank|module)/iu.test(text)
+    && !fuelPumpModule
+  ) {
     types.push("FUEL_TANK_MODULE");
   }
   return types;
@@ -700,6 +709,23 @@ export function detectCustomerProductTypes(product = {}) {
   ) {
     detected.push("STEERING_PUMP");
   }
+  // NOx sensors belong to the exhaust system, not generic electronics.
+  if (
+    (epcGroups.has("90") || epcGroups.has("15"))
+    && /(?:датчик|сенсор|sensor|sonde)/iu.test(text)
+    && /\bno[xх]\b/iu.test(text)
+  ) {
+    detected.push("EXHAUST_SENSOR");
+  }
+
+  // Only standalone clip names in technical fastening/body groups.
+  if (
+    ["98", "99", "69", "88"].some((epc) => epcGroups.has(epc))
+    && /^\s*(?:кл[іи]п(?:с[аыи]?)?|klammer|clips?)\s*$/imu.test(text)
+  ) {
+    detected.push("FASTENER_CLIP_RIVET");
+  }
+
   detected.push(...windshieldTypes);
   if (isBrakeDiscComponent(text)) {
     const index = detected.indexOf("BRAKE_DISC");
@@ -729,7 +755,10 @@ export function detectCustomerProductTypes(product = {}) {
 
   const serviceBelt = /(?:рем[іе]нь|пасок|belt)/iu.test(text);
   const tensioner = detected.includes("BELT_TENSIONER");
-  if (serviceBelt && !tensioner) detected.push("SERVICE_BELT");
+  const safetyBelt = /(?:безпек|безопасн|seat[\s-]*belt|safety[\s-]*belt|sicherheitsgurt)/iu.test(text);
+  if (serviceBelt && !tensioner && !safetyBelt) {
+    detected.push("SERVICE_BELT");
+  }
   return [...new Set(detected)].filter((typeCode) => (
     !blocksPhase2G3FastenerTypes || !phase2g3FastenerTypeCodes.has(typeCode)
   ));
