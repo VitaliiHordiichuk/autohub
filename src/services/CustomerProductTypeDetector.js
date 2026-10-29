@@ -676,6 +676,30 @@ export function detectCustomerProductTypes(product = {}) {
   const detected = detectors
     .filter(([, pattern]) => pattern.test(text))
     .map(([typeCode]) => typeCode);
+
+  // Conservative EPC-qualified name recognition.
+  // Never classify unrelated components solely by a keyword.
+  if (
+    epcGroups.has("99")
+    && /(?:хомут|hose[\s-]*clamp|schlauchschelle)/iu.test(text)
+  ) {
+    detected.push("FASTENER_CLAMP");
+  }
+
+  if (
+    epcGroups.has("90")
+    && /(?:фара\s+(?:головн[а-яіїєґё]*\s+св[іе]тл[а-яіїєґё]*|передн[а-яіїєґё]*)|headlamp|headlight|hauptscheinwerfer)/iu.test(text)
+    && !/(?:кронштейн|кр[іи]плен|креплен|накладк|скл[а-яіїєґё]*|стекл[а-яіїєґё]*|корпус|кришк|крышк|ремкомплект|ламп|модул|блок\s+керув|блок\s+управл)/iu.test(text)
+  ) {
+    detected.push("LIGHTING_HEADLIGHT");
+  }
+
+  if (
+    epcGroups.has("46")
+    && /(?:гасос\s+(?:гур|гпк)|насос\s+г[іи]дроп[іи]дсилювач|насос\s+гидроусилител|servopumpe|lenkhilfepumpe)/iu.test(text)
+  ) {
+    detected.push("STEERING_PUMP");
+  }
   detected.push(...windshieldTypes);
   if (isBrakeDiscComponent(text)) {
     const index = detected.indexOf("BRAKE_DISC");

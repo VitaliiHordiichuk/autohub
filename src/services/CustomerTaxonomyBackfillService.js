@@ -391,7 +391,27 @@ async function buildBackfillCandidates({
     client,
   );
   const categoryBySlug = new Map(categories.map((category) => [category.slug, category]));
-  const safeTopLevel = coverage.safeTopLevel.map((item) => {
+  // Never add a fallback primary when a product already has
+  // a primary membership or a stronger high-confidence rule.
+  const productsWithPrimary = new Set(
+    (preview.evaluations || [])
+      .filter((evaluation) => (
+        (evaluation.existingMemberships || [])
+          .some((membership) => membership.isPrimary)
+      ))
+      .map((evaluation) => Number(evaluation.productId)),
+  );
+
+  const highRuleProductIds = new Set(
+    highRule.map((candidate) => Number(candidate.productId)),
+  );
+
+  const safeTopLevel = coverage.safeTopLevel
+    .filter((item) => (
+      !productsWithPrimary.has(Number(item.productId))
+      && !highRuleProductIds.has(Number(item.productId))
+    ))
+    .map((item) => {
     const section = item.targetSection || item.section;
     const category = categoryBySlug.get(section);
     return {
