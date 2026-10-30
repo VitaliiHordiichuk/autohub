@@ -159,6 +159,49 @@ test("no existing primary assigns new HIGH and SAFE proposals", async () => {
   assert.equal(safe.rows[0].confidence, "MEDIUM");
 });
 
+test("manual primary validates an active leaf and remains protected from later imports", async () => {
+  const repository = createRepository([]);
+  repository.demoteAllPrimary = async () => {};
+  const statements = [];
+  const db = {
+    async query(sql) {
+      statements.push(sql);
+      if (sql.includes("FROM customer_categories category")) return { rowCount: 1, rows: [{ id: 42 }] };
+      return { rowCount: 1, rows: [] };
+    },
+  };
+  const assigned = await CustomerTaxonomyAssignmentService.assignManual({
+    productId: 1, customerCategoryId: 42, approvedBy: 7,
+  }, { dbPool: db, repository });
+  assert.equal(assigned.assignmentSource, "MANUAL");
+  assert.equal(assigned.approvalStatus, "MANUAL_APPROVED");
+  assert.equal(assigned.approvedBy, 7);
+  assert.match(statements.find((sql) => sql.includes("FROM customer_categories category")), /category\.parent_id IS NOT NULL/);
+
+  const afterImport = await CustomerTaxonomyAssignmentService.applyResolutionInTransaction({
+    productId: 1,
+    resolution: { proposals: [highProposal(50)] },
+    assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+  }, { db, repository });
+  assert.equal(afterImport.decision, CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL);
+  assert.equal(repository.snapshot().filter((row) => row.isPrimary).length, 1);
+  assert.equal(repository.snapshot().find((row) => row.isPrimary).customerCategoryId, 42);
+});
+
+test("manual assignment refuses inactive or non-leaf public categories", async () => {
+  const repository = createRepository([]);
+  const db = {
+    async query(sql) {
+      if (sql.includes("FROM customer_categories category")) return { rowCount: 0, rows: [] };
+      return { rowCount: 1, rows: [] };
+    },
+  };
+  await assert.rejects(CustomerTaxonomyAssignmentService.assignManual({
+    productId: 1, customerCategoryId: 42, approvedBy: 7,
+  }, { dbPool: db, repository }), { statusCode: 400 });
+  assert.equal(repository.snapshot().length, 0);
+});
+
 test("MANUAL is preserved even when generic explicit override is requested", async () => {
   const { result, rows } = await applyInTransaction({
     existing: [manualPrimary()],

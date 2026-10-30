@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  assignCustomerTaxonomySubgroup,
   getCustomerTaxonomyOverview,
   getCustomerTaxonomyProduct,
   getCustomerTaxonomyProducts,
@@ -17,3 +18,8 @@ adminCustomerTaxonomyRouter.get(
   getCustomerTaxonomyProducts,
 );
 adminCustomerTaxonomyRouter.get("/products/:productId", getCustomerTaxonomyProduct);
+adminCustomerTaxonomyRouter.put(
+  "/products/:productId/primary-subgroup",
+  requireRole("ADMIN"),
+  assignCustomerTaxonomySubgroup,
+);

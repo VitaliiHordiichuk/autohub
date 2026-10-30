@@ -423,7 +423,7 @@ function detectExhaustTypes(text, epcGroups) {
     && !/(?:датчик|sensor|температур|temperature|тиск|давлен)/iu.test(text);
   if (catalyst) types.push("EXHAUST_CATALYST");
 
-  const mount = /(?:кронштейн|хомут|подушк|опор[аи]|тримач|держател|гумк|резинк|hanger|bracket|clamp|mount|rubber)/iu.test(text)
+  const mount = /(?:кронштейн|хомут|подушк|опор[аи]|тримач|держател|гумк|резинк|\bhanger\b|bracket|clamp|mount|rubber)/iu.test(text)
     && (exhaustContext || epcGroups.has("49"));
   if (mount) types.push("EXHAUST_MOUNT");
 
@@ -646,10 +646,49 @@ export function isKnownCustomerProductTypeCode(value) {
   return knownTypeCodes.has(String(value || "").trim().toUpperCase());
 }
 
+// Explicit part semantics accepted for future imports. These are deliberately
+// narrower than an EPC group: unrelated parts in the same technical group
+// retain their historical REAL_REVIEW protection.
+const noxSensorPattern = /(?:датчик|сенсор|зонд|sensor|sonde)[\s-]*no[xх](?![\p{L}\p{N}])|(?:датчик|сенсор|зонд|sensor|sonde).{0,30}(?<![\p{L}\p{N}])no[xх](?![\p{L}\p{N}])|(?<![\p{L}\p{N}])no[xх](?![\p{L}\p{N}]).{0,30}(?:датчик|сенсор|зонд|sensor|sonde)/iu;
+
+function approvedExactPartType(text, epcGroups) {
+  const adblue = ["14", "15", "47", "49", "90", "98"].some((epc) => epcGroups.has(epc))
+    && /\b(?:ad[\s-]?blue|scr)\b|адблю|едблю/iu.test(text);
+  if (adblue) {
+    // EPC 49 injectors already have an approved rule for this same leaf.
+    // Keep their established rule code/version instead of changing it on reimport.
+    if (epcGroups.has("49")
+      && /(?:форсунк|інжектор|инжектор|injector).*(?:ad[\s-]?blue|адблю|едблю)|(?:ad[\s-]?blue|адблю|едблю).*(?:форсунк|інжектор|инжектор|injector)/iu.test(text)) {
+      return "EXHAUST_ADBLUE_INJECTOR";
+    }
+    return "ADBLUE_SCR_COMPONENT";
+  }
+
+  const noxSensor = (epcGroups.has("90") || epcGroups.has("15"))
+    && noxSensorPattern.test(text)
+    && !/(?:кронштейн|тримач|держател|кабел|провод|роз[’']?єм|раз[ъь]?ем|holder|bracket|cable|connector|repair\s+kit)/iu.test(text);
+  if (noxSensor) return "EXHAUST_SENSOR";
+
+  // Owner-approved catalogue placement for generic EPC 15 pressure valves;
+  // a fuel, brake or transmission valve must not inherit this exception.
+  const enginePressureValve = epcGroups.has("15")
+    && /(?:^|\n)[ \t]*(?:клапан[ \t]+тиску|клапан[ \t]+давлен[а-яіїєґё]*|pressure[ \t]+valve)[ \t]*(?=\n|$)/imu.test(text)
+    && !/(?:палив|топлив|fuel|гальм|тормоз|brake|коробк|кпп|transmission|gearbox|вихлоп|выпуск|exhaust|ad[\s-]?blue|адблю|едблю|\bscr\b)/iu.test(text);
+  if (enginePressureValve) return "ENGINE_SENSOR";
+
+  const subframe = (epcGroups.has("33") || epcGroups.has("35"))
+    && /(?:п[іи]драмник|подрамник|subframe|балк[а-яіїєґё]*\s+(?:задн[а-яіїєґё]*\s+)?мост|rear\s+axle\s+beam)/iu.test(text)
+    && !/(?:болт|гвинт|винт|гайк|шайб|ущ[іи]льн|уплотн|кліпс|клипс|bolt|screw|nut|washer|seal|gasket|clip)/iu.test(text);
+  if (subframe) return "SUSPENSION_SUBFRAME_MOUNT";
+  return null;
+}
+
 export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
   const epcGroups = technicalEpcGroups(product);
+  const approvedType = approvedExactPartType(text, epcGroups);
+  if (approvedType) return [approvedType];
   const windshieldTypes = detectWindshieldTypes(text, epcGroups);
   const phase2g3Disposition = reviewedPhase2G3Disposition(product, epcGroups);
   if (phase2g3Disposition?.finalBucket === "HIGH") {
@@ -686,13 +725,12 @@ export function detectCustomerProductTypes(product = {}) {
     .filter(([, pattern]) => pattern.test(text))
     .map(([typeCode]) => typeCode);
 
-  // Conservative EPC-qualified name recognition.
-  // Never classify unrelated components solely by a keyword.
   if (
-    epcGroups.has("99")
-    && /(?:хомут|hose[\s-]*clamp|schlauchschelle)/iu.test(text)
+    ["54", "90", "98"].some((epc) => epcGroups.has(epc))
+    && /(?:^|\n)\s*(?:акумулятор|аккумулятор|battery\b|\d{1,3}\s*(?:v|в)\b.{0,20}\bbattery\b)/imu.test(text)
+    && !/(?:ключ|брелок|key\s*fob|телефон|phone|кабел|провод|клемм|клема|заряд|тримач|держател|holder|cable|terminal|charger)/iu.test(text)
   ) {
-    detected.push("FASTENER_CLAMP");
+    detected.push("ELECTRICAL_BATTERY");
   }
 
   if (
@@ -709,23 +747,6 @@ export function detectCustomerProductTypes(product = {}) {
   ) {
     detected.push("STEERING_PUMP");
   }
-  // NOx sensors belong to the exhaust system, not generic electronics.
-  if (
-    (epcGroups.has("90") || epcGroups.has("15"))
-    && /(?:датчик|сенсор|sensor|sonde)/iu.test(text)
-    && /\bno[xх]\b/iu.test(text)
-  ) {
-    detected.push("EXHAUST_SENSOR");
-  }
-
-  // Only standalone clip names in technical fastening/body groups.
-  if (
-    ["98", "99", "69", "88"].some((epc) => epcGroups.has(epc))
-    && /^\s*(?:кл[іи]п(?:с[аыи]?)?|klammer|clips?)\s*$/imu.test(text)
-  ) {
-    detected.push("FASTENER_CLIP_RIVET");
-  }
-
   detected.push(...windshieldTypes);
   if (isBrakeDiscComponent(text)) {
     const index = detected.indexOf("BRAKE_DISC");

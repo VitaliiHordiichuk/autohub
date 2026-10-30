@@ -374,7 +374,8 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
     assert.equal(first.taxonomyAssignedHigh, 1);
     assert.equal(first.taxonomyAssignedSafe, 1);
     assert.equal(first.taxonomyPreservedApproved, 11);
-    assert.equal(first.taxonomyUnclassified, 1);
+    assert.equal(first.taxonomyReview, 1);
+    assert.equal(first.taxonomyUnclassified, 0);
     assert.equal(first.taxonomyUnsupported, 1);
     assert.equal(first.taxonomyErrors, 0);
     assert.ok(createContextCalls > 0);

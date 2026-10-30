@@ -137,7 +137,7 @@ test("PHASE 2G.1 leaves remain hidden and earlier rules remain historical under 
     historical_phase2g1: 55,
     historical_v8: 361,
     historical_v9: 373,
-    active_v10: 374,
+    active_v10: 380,
     duplicate_active: 0,
   });
 });
@@ -170,7 +170,7 @@ test("historical migrations 097/098 remain membership-free after the v10 generat
   assert.equal(afterResult.rows[0].historical_v7, 313);
   assert.equal(afterResult.rows[0].historical_v8, 361);
   assert.equal(afterResult.rows[0].historical_v9, 373);
-  assert.equal(afterResult.rows[0].active_v10, 374);
+  assert.equal(afterResult.rows[0].active_v10, 380);
   assert.equal(afterResult.rows[0].duplicate_active, 0);
 });
 
@@ -253,12 +253,12 @@ test("controlled HIGH and SAFE PHASE 2G.1 backfills are dry, atomic and idempote
   const safeRepeat = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
     includeSafeTopLevel: true,
-    expectedCount: 1,
+    expectedCount: 0,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     repository: safeRepository,
   });
   assert.equal(safeRepeat.inserted, 0);
-  assert.equal(safeRepeat.unchanged, 1);
+  assert.equal(safeRepeat.unchanged, 0);
 
   const memberships = await pool.query(`
     SELECT product_id, assignment_source, assignment_origin, confidence,

@@ -195,3 +195,34 @@ test("customer taxonomy admin API exposes no mutation endpoint", async () => {
   });
   assert.equal(response.status, 404);
 });
+
+test("classification list filters before paging and admin alone can approve an existing leaf", async () => {
+  const article = (await pool.query("SELECT article FROM products WHERE id = $1", [productId])).rows[0].article;
+  const query = new URLSearchParams({ search: article, classification: "EXACT_SUBGROUP", page: "1", limit: "1" });
+  const filtered = await request(`/api/admin/catalog/products?${query}`);
+  assert.equal(filtered.status, 200);
+  const before = await filtered.json();
+  assert.equal(before.pagination.total, 1);
+  assert.equal(before.products[0].classification, "EXACT_SUBGROUP");
+  assert.equal(before.products[0].publicCategory.slug, "filters-oil");
+  assert.equal(before.products[0].technicalEpcGroup, "18");
+
+  const endpoint = `/api/admin/customer-taxonomy/products/${productId}/primary-subgroup`;
+  const options = {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customerCategoryId: taxonomyCategoryId }),
+  };
+  assert.equal((await fetch(`${baseUrl}${endpoint}`, options)).status, 401);
+  assert.equal((await request(endpoint, "MANAGER", options)).status, 403);
+  assert.equal((await request(endpoint, "ADMIN", options)).status, 200);
+
+  const stored = await pool.query(`
+    SELECT assignment_source, approval_status, is_primary
+    FROM product_customer_categories
+    WHERE product_id = $1 AND customer_category_id = $2
+  `, [productId, taxonomyCategoryId]);
+  assert.equal(stored.rows[0].assignment_source, "MANUAL");
+  assert.equal(stored.rows[0].approval_status, "MANUAL_APPROVED");
+  assert.equal(stored.rows[0].is_primary, true);
+});

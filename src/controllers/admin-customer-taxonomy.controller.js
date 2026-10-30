@@ -1,4 +1,5 @@
 import { AdminCustomerTaxonomyService } from "../services/AdminCustomerTaxonomyService.js";
+import { CustomerTaxonomyAssignmentService } from "../services/CustomerTaxonomyAssignmentService.js";
 
 function failure(res, error) {
   const status = Number(error?.statusCode) || 500;
@@ -38,6 +39,20 @@ export async function getCustomerTaxonomyProduct(req, res) {
       { locale: req.query.locale },
     );
     return res.json({ success: true, ...result });
+  } catch (error) {
+    return failure(res, error);
+  }
+}
+
+export async function assignCustomerTaxonomySubgroup(req, res) {
+  try {
+    const assignment = await CustomerTaxonomyAssignmentService.assignManual({
+      productId: req.params.productId,
+      customerCategoryId: req.body?.customerCategoryId,
+      isPrimary: true,
+      approvedBy: req.auth.userId,
+    });
+    return res.json({ success: true, assignment });
   } catch (error) {
     return failure(res, error);
   }

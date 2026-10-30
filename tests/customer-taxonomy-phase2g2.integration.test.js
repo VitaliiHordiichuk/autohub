@@ -107,8 +107,8 @@ test("migrations 099/100 Electrical leaves and v8/v9 rules remain historical und
     v8_successors: 313,
     phase2g2: 48,
     historical_v9: 373,
-    active_v10: 374,
-    total: 2280,
+    active_v10: 380,
+    total: 2286,
     duplicate_active: 0,
   });
 
@@ -243,12 +243,12 @@ test("controlled PHASE 2G.2 HIGH and SAFE backfills apply once and remain idempo
   const safeRepeat = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
     includeSafeTopLevel: true,
-    expectedCount: 1,
+    expectedCount: 0,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     repository: safeRepository,
   });
   assert.equal(safeRepeat.inserted, 0);
-  assert.equal(safeRepeat.unchanged, 1);
+  assert.equal(safeRepeat.unchanged, 0);
 
   const memberships = await pool.query(`
     SELECT product_id, assignment_source, assignment_origin, confidence,

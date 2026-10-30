@@ -109,6 +109,14 @@ test("exhaust detector separates complete parts from generic sensors and pipes",
     name: "Прокладка глушника",
     technicalEpcGroups: ["49"],
   })).includes("EXHAUST_MUFFLER"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Exhaust gas heat exchanger",
+    technicalEpcGroups: ["14"],
+  })).includes("EXHAUST_MOUNT"), false);
+  assert.equal(detectCustomerProductTypes(product({
+    name: "Exhaust hanger",
+    technicalEpcGroups: ["49"],
+  })).includes("EXHAUST_MOUNT"), true);
 });
 
 test("wheel detector distinguishes rims, caps, fasteners and TPMS", () => {

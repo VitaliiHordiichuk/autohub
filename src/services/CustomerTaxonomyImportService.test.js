@@ -3,14 +3,42 @@ import test from "node:test";
 
 import { CUSTOMER_PRODUCT_TYPE_DETECTOR_VERSION } from "./CustomerProductTypeDetector.js";
 import {
+  APPROVED_UNAMBIGUOUS_EPC_ROOT,
   CustomerTaxonomyImportIntegrityError,
   CustomerTaxonomyImportService,
 } from "./CustomerTaxonomyImportService.js";
+import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2G1_REVIEW } from "../data/CustomerTaxonomyPhase2G1Review.js";
+import { CUSTOMER_TAXONOMY_PHASE2G2_REVIEW } from "../data/CustomerTaxonomyPhase2G2Review.js";
+import { CUSTOMER_TAXONOMY_PHASE2G3_REVIEW } from "../data/CustomerTaxonomyPhase2G3Review.js";
 import {
   CUSTOMER_TAXONOMY_DECISION,
 } from "./CustomerTaxonomyResolver.js";
 
 const db = { query: async () => ({ rows: [], rowCount: 0 }) };
+
+test("every approved broad EPC root has a single reviewed direction and SAFE evidence", () => {
+  const reviewed = [
+    ...CUSTOMER_TAXONOMY_PHASE2E_REVIEW,
+    ...CUSTOMER_TAXONOMY_PHASE2F_REVIEW,
+    ...CUSTOMER_TAXONOMY_PHASE2G1_REVIEW,
+    ...CUSTOMER_TAXONOMY_PHASE2G2_REVIEW,
+    ...CUSTOMER_TAXONOMY_PHASE2G3_REVIEW,
+  ];
+  for (const [epc, section] of Object.entries(APPROVED_UNAMBIGUOUS_EPC_ROOT)) {
+    const rows = reviewed.filter((row) => row.epc === epc);
+    assert.ok(rows.some((row) => row.finalBucket === "SAFE_TOPLEVEL"), epc);
+    assert.deepEqual(
+      [...new Set(rows.map((row) => row.targetSection || row.section))],
+      [section],
+      epc,
+    );
+  }
+  for (const epc of ["14", "22", "24", "32", "35", "90", "99"]) {
+    assert.equal(APPROVED_UNAMBIGUOUS_EPC_ROOT[epc], undefined, epc);
+  }
+});
 
 const categories = [
   { id: 100, slug: "filters-maintenance", parentId: null, status: "ACTIVE", isActive: true },
@@ -19,6 +47,19 @@ const categories = [
   { id: 300, slug: "engine", parentId: null, status: "ACTIVE", isActive: true },
   { id: 400, slug: "brakes", parentId: null, status: "ACTIVE", isActive: true },
   { id: 401, slug: "brakes-pads", parentId: 400, status: "ACTIVE", isActive: true },
+  { id: 500, slug: "electrical-electronics-lighting", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 600, slug: "interior-safety", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 700, slug: "body-glass", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 800, slug: "cooling", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 801, slug: "cooling-hoses-pipes", parentId: 800, status: "ACTIVE", isActive: true },
+  { id: 201, slug: "steering-tie-rods", parentId: 200, status: "ACTIVE", isActive: true },
+  { id: 301, slug: "engine-sensors", parentId: 300, status: "ACTIVE", isActive: true },
+  { id: 501, slug: "electrical-batteries", parentId: 500, status: "ACTIVE", isActive: true },
+  { id: 900, slug: "exhaust", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 901, slug: "exhaust-adblue-scr", parentId: 900, status: "ACTIVE", isActive: true },
+  { id: 902, slug: "exhaust-sensors", parentId: 900, status: "ACTIVE", isActive: true },
+  { id: 1000, slug: "suspension", parentId: null, status: "ACTIVE", isActive: true },
+  { id: 1001, slug: "suspension-subframes", parentId: 1000, status: "ACTIVE", isActive: true },
 ];
 
 function oilFilterRule() {
@@ -128,8 +169,11 @@ function repositoryFixture({
   rules = [oilFilterRule()],
   memberships = [],
 } = {}) {
-  const state = { memberships: memberships.map((item) => ({ ...item })) };
+  const state = { memberships: memberships.map((item) => ({ ...item })), decisions: [] };
   const repository = {
+    async recordImportDecision(record) {
+      state.decisions.push(record);
+    },
     async lockProductForAssignment(productId) {
       assert.equal(productId, currentProduct.id);
       return productId;
@@ -209,6 +253,7 @@ test("import orchestration assigns HIGH with IMPORT provenance and is idempotent
   assert.equal(first.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_NEW_HIGH);
   assert.equal(first.finalCategory, "filters-oil");
   assert.equal(first.ruleCode, "TEST_FILTER_OIL_A_EPC18");
+  assert.equal(fixture.state.decisions[0].decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_NEW_HIGH);
   assert.equal(fixture.state.memberships.length, 1);
   assert.equal(fixture.state.memberships[0].assignmentOrigin, "IMPORT");
   assert.equal(fixture.state.memberships[0].assignmentSource, "RULE");
@@ -222,7 +267,7 @@ test("import orchestration assigns HIGH with IMPORT provenance and is idempotent
   assert.equal(fixture.state.memberships.length, 1);
 });
 
-test("SAFE, unclassified and unsupported are distinct normal import outcomes", async () => {
+test("SAFE, review and unsupported are distinct normal import outcomes", async () => {
   const safeFixture = repositoryFixture({
     currentProduct: product({
       article: "A9984600002",
@@ -249,8 +294,14 @@ test("SAFE, unclassified and unsupported are distinct normal import outcomes", a
     rules: [],
   });
   const unclassified = await classify(unclassifiedFixture);
-  assert.equal(unclassified.decision, CUSTOMER_TAXONOMY_DECISION.UNCLASSIFIED);
+  assert.equal(unclassified.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+  assert.equal(unclassified.reason, "NO_UNAMBIGUOUS_APPROVED_EPC_ROOT");
   assert.equal(unclassifiedFixture.state.memberships.length, 0);
+  assert.deepEqual(unclassifiedFixture.state.decisions[0], {
+    productId: 1,
+    decision: CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW,
+    reason: "NO_UNAMBIGUOUS_APPROVED_EPC_ROOT",
+  });
 
   const unsupportedFixture = repositoryFixture({
     currentProduct: product({
@@ -266,6 +317,198 @@ test("SAFE, unclassified and unsupported are distinct normal import outcomes", a
   const unsupported = await classify(unsupportedFixture);
   assert.equal(unsupported.decision, CUSTOMER_TAXONOMY_DECISION.UNSUPPORTED);
   assert.equal(unsupportedFixture.state.memberships.length, 0);
+});
+
+test("approved single-root EPC assigns only the root when no narrow rule matches", async () => {
+  for (const [epc, expected] of [
+    ["82", "electrical-electronics-lighting"],
+    ["92", "interior-safety"],
+    ["67", "body-glass"],
+  ]) {
+    const fixture = repositoryFixture({
+      currentProduct: product({
+        article: `A998${epc}00001`,
+        articleNormalized: `A998${epc}00001`,
+        name: "Деталь",
+        technicalEpcGroups: [epc],
+      }),
+      rules: [],
+    });
+    const result = await classify(fixture);
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_SAFE);
+    assert.equal(result.finalCategory, expected);
+    assert.equal(fixture.state.memberships[0].assignmentSource, "EPC_FALLBACK");
+    assert.equal(fixture.state.memberships[0].confidence, "MEDIUM");
+    assert.equal(fixture.state.memberships[0].parentSlug, null);
+  }
+});
+
+test("mixed, absent, and conflicting EPC evidence stays unassigned for review", async () => {
+  for (const [epc, name, rules, reason] of [
+    [["24"], "Деталь", [], "NO_UNAMBIGUOUS_APPROVED_EPC_ROOT"],
+    [[], "Деталь", [], "NO_TECHNICAL_EPC"],
+    [["82", "92"], "Деталь", [], "MULTIPLE_OR_UNAPPROVED_TECHNICAL_EPC"],
+    [["82", "90"], "Деталь", [], "MULTIPLE_OR_UNAPPROVED_TECHNICAL_EPC"],
+    [["82"], "Гальмівні колодки", [brakePadRule()], "EPC_NAME_SECTION_CONFLICT"],
+  ]) {
+    const fixture = repositoryFixture({
+      currentProduct: product({
+        article: "A9980000001",
+        articleNormalized: "A9980000001",
+        name,
+        technicalEpcGroups: epc,
+      }),
+      rules,
+    });
+    const result = await classify(fixture);
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+    assert.match(result.reason, new RegExp(reason));
+    assert.equal(fixture.state.memberships.length, 0);
+  }
+});
+
+test("even a narrow rule cannot auto-assign when EPC evidence is absent or contradictory", async () => {
+  const article = "A9981800001";
+  const articleRule = {
+    ...oilFilterRule(), matchType: "ARTICLE_EXACT",
+    matchValue: article, epcGroup: null,
+  };
+  for (const [epc, rules, reason] of [
+    [[], [articleRule], "NO_TECHNICAL_EPC"],
+    [["18", "82"], [oilFilterRule()], "MULTIPLE_OR_UNAPPROVED_TECHNICAL_EPC"],
+  ]) {
+    const fixture = repositoryFixture({
+      currentProduct: product({ article, articleNormalized: article,
+        name: "Фільтр масляний", technicalEpcGroups: epc }),
+      rules,
+    });
+    const result = await classify(fixture);
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+    assert.equal(result.reason, reason);
+    assert.equal(fixture.state.memberships.length, 0);
+  }
+});
+
+test("new root fallback never replaces an approved manual primary", async () => {
+  const existing = membership({
+    categoryId: 300,
+    categorySlug: "engine",
+    source: "MANUAL",
+    origin: "ADMIN",
+    confidence: "HIGH",
+    approvalStatus: "MANUAL_APPROVED",
+  });
+  const fixture = repositoryFixture({
+    currentProduct: product({
+      article: "A9988200001",
+      articleNormalized: "A9988200001",
+      name: "Деталь",
+      technicalEpcGroups: ["82"],
+    }),
+    memberships: [existing],
+    rules: [],
+  });
+  const before = structuredClone(fixture.state.memberships);
+  const result = await classify(fixture);
+  assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL);
+  assert.deepEqual(fixture.state.memberships, before);
+});
+
+test("the twelve 29 October import products keep precise leaves or receive only safe roots", async () => {
+  const coolingRule = {
+    ...oilFilterRule(), code: "COOLING_HOSE_PIPE_A_EPC20_PHASE2E_V1",
+    epcGroup: "20", matchValue: "COOLING_HOSE_PIPE",
+    targetCategoryId: 801, targetCategorySlug: "cooling-hoses-pipes",
+    targetParentId: 800, targetParentSlug: "cooling",
+  };
+  const steeringRule = {
+    ...oilFilterRule(), code: "STEERING_TIE_ROD_A_EPC46_V1",
+    epcGroup: "46", matchValue: "STEERING_TIE_ROD",
+    targetCategoryId: 201, targetCategorySlug: "steering-tie-rods",
+    targetParentId: 200, targetParentSlug: "steering",
+  };
+  const scenarios = [
+    ["A6541400505", "Abgasrueckfuehrkuehler", "14", null],
+    ["A4643261300", "Befestigungsbuegel", "32", null],
+    ["A6542261100", "Geraeuschisolierung", "22", null],
+    ["A2052406717", "Motorlager", "24", null],
+    ["A2239002334", "Steuergeraet", "90", null],
+    ["A2479000219", "Steuergeraet", "90", null],
+    ["A0008208112", "Електропривід замка", "82", "electrical-electronics-lighting"],
+    ["A2053510042", "Опора підрамника", "35", null],
+    ["A2742000300", "Патрубок системи охолодження", "20", "cooling-hoses-pipes"],
+    ["A29792048049H93", "Подушка спинки сидіння", "92", "interior-safety"],
+    ["A6541403200", "Exhaust gas heat exchanger", "14", null],
+    ["A2974608700", "Тяга кермова", "46", "steering-tie-rods"],
+  ];
+  for (const [article, name, epc, expected] of scenarios) {
+    const fixture = repositoryFixture({
+      currentProduct: product({
+        article, articleNormalized: article, name,
+        technicalEpcGroups: [epc],
+      }),
+      rules: [coolingRule, steeringRule],
+    });
+    const result = await classify(fixture);
+    assert.equal(result.finalCategory, expected, article);
+    assert.equal(fixture.state.memberships.length, expected ? 1 : 0, article);
+    if (!expected) assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+  }
+});
+
+test("owner-approved part semantics classify current examples and future analogues without article allowlists", async () => {
+  const rule = (code, epc, type, id, slug, parentId, parentSlug) => ({
+    ...oilFilterRule(), code, epcGroup: epc, matchValue: type,
+    targetCategoryId: id, targetCategorySlug: slug,
+    targetParentId: parentId, targetParentSlug: parentSlug,
+  });
+  const rules = [
+    rule("ELECTRICAL_BATTERY_A_EPC98_PHASE2G2_V1", "98", "ELECTRICAL_BATTERY", 501, "electrical-batteries", 500, "electrical-electronics-lighting"),
+    rule("EXHAUST_SENSOR_A_EPC90_V1", "90", "EXHAUST_SENSOR", 902, "exhaust-sensors", 900, "exhaust"),
+    rule("SUSPENSION_SUBFRAME_MOUNT_A_EPC35_PHASE2F_V1", "35", "SUSPENSION_SUBFRAME_MOUNT", 1001, "suspension-subframes", 1000, "suspension"),
+    rule("ADBLUE_SCR_COMPONENT_A_EPC14_EXPLICIT_V1", "14", "ADBLUE_SCR_COMPONENT", 901, "exhaust-adblue-scr", 900, "exhaust"),
+    rule("ADBLUE_SCR_COMPONENT_A_EPC15_EXPLICIT_V1", "15", "ADBLUE_SCR_COMPONENT", 901, "exhaust-adblue-scr", 900, "exhaust"),
+    rule("ADBLUE_SCR_COMPONENT_A_EPC90_EXPLICIT_V1", "90", "ADBLUE_SCR_COMPONENT", 901, "exhaust-adblue-scr", 900, "exhaust"),
+    rule("ADBLUE_SCR_COMPONENT_A_EPC98_EXPLICIT_V1", "98", "ADBLUE_SCR_COMPONENT", 901, "exhaust-adblue-scr", 900, "exhaust"),
+    rule("ENGINE_PRESSURE_VALVE_A_EPC15_EXPLICIT_V1", "15", "ENGINE_SENSOR", 301, "engine-sensors", 300, "engine"),
+  ];
+  const cases = [
+    ["A001982790826", "Акумулятор 12V/60ah", "98", "electrical-batteries"],
+    ["A0009053119", "Датчик NOX", "90", "exhaust-sensors"],
+    ["A212350380564", "Балка моста заднього", "35", "suspension-subframes"],
+    ["A000140447880", "Насос системи AdBlue", "14", "exhaust-adblue-scr"],
+    ["A000989980911", "Реагент AdBlue", "98", "exhaust-adblue-scr"],
+    ["A0001532000", "Клапан тиску", "15", "engine-sensors"],
+    ["A0001532600", "Клапан давления", "15", "engine-sensors"],
+    ["A8889000001", "NOx sensor", "90", "exhaust-sensors"],
+    ["A8883500001", "Rear axle beam", "35", "suspension-subframes"],
+    ["A8881400001", "AdBlue pump", "14", "exhaust-adblue-scr"],
+    ["A8889000002", "Датчик тиску системи AdBlue", "90", "exhaust-adblue-scr"],
+    ["A8881500001", "Pressure valve", "15", "engine-sensors"],
+  ];
+  for (const [article, name, epc, expected] of cases) {
+    const fixture = repositoryFixture({
+      currentProduct: product({ article, articleNormalized: article, name, technicalEpcGroups: [epc] }),
+      rules,
+    });
+    const result = await classify(fixture);
+    assert.equal(result.finalCategory, expected, article);
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_NEW_HIGH, article);
+    assert.equal(fixture.state.memberships.length, 1, article);
+    assert.equal(fixture.state.memberships[0].confidence, "HIGH", article);
+  }
+  const protectedFixture = repositoryFixture({
+    currentProduct: product({ article: "A0009053119", articleNormalized: "A0009053119", name: "Датчик NOX", technicalEpcGroups: ["90"] }),
+    rules,
+    memberships: [membership({
+      categoryId: 101, categorySlug: "filters-oil", source: "MANUAL", origin: "MANUAL",
+      confidence: "HIGH", approvalStatus: "MANUAL_APPROVED",
+    })],
+  });
+  const result = await classify(protectedFixture);
+  assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.PRESERVE_MANUAL);
+  assert.equal(protectedFixture.state.memberships[0].categorySlug, "filters-oil");
+  assert.equal(protectedFixture.state.memberships.length, 1);
 });
 
 test("reviewed EPC 42 and 43 assign only the SAFE brakes root", async () => {

@@ -22,6 +22,7 @@ export async function getCatalogProducts(req, res) {
     const result = await AdminCatalogCategoryService.searchProducts({
       search: req.query.search,
       assignment: req.query.assignment,
+      classification: req.query.classification,
       categoryId: req.query.categoryId,
       page: req.query.page,
       limit: req.query.limit,

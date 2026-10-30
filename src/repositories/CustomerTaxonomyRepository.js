@@ -95,6 +95,17 @@ function mapProductForResolution(row) {
 }
 
 export const CustomerTaxonomyRepository = {
+  async recordImportDecision({ productId, decision, reason }, db = pool) {
+    await db.query(`
+      INSERT INTO product_customer_taxonomy_decisions(product_id, decision, reason)
+      VALUES($1, $2, $3)
+      ON CONFLICT(product_id) DO UPDATE SET
+        decision = EXCLUDED.decision,
+        reason = EXCLUDED.reason,
+        updated_at = NOW()
+    `, [productId, decision, reason || null]);
+  },
+
   async lockProductForAssignment(productId, db = pool) {
     const result = await db.query(`
       SELECT id

@@ -618,7 +618,7 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
 
   const repeated = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
-    expectedCount: 3,
+    expectedCount: 0,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     includeSafeTopLevel: true,
     dbPool: pool,
@@ -626,24 +626,24 @@ test("SAFE_TOPLEVEL PostgreSQL backfill is explicit, top-level only and idempote
   });
   assert.equal(repeated.inserted, 0);
   assert.equal(repeated.updated, 0);
-  assert.equal(repeated.unchanged, 3);
+  assert.equal(repeated.unchanged, 0);
 
   const verification = await runCustomerTaxonomyBackfill({
     mode: "VERIFY",
-    expectedCount: 3,
+    expectedCount: 0,
     includeSafeTopLevel: true,
     dbPool: pool,
     repository,
   });
   assert.equal(verification.errors.length, 0);
   assert.deepEqual(verification.candidateVerification, {
-    memberships: 3,
-    primary: 3,
+    memberships: 0,
+    primary: 0,
     rule: 0,
-    epcFallback: 3,
+    epcFallback: 0,
     high: 0,
-    medium: 3,
-    autoApproved: 3,
+    medium: 0,
+    autoApproved: 0,
     review: 0,
   });
   assert.equal(verification.verification.duplicatePrimary, 0);

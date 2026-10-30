@@ -5,8 +5,9 @@ import {
 } from "../src/services/CustomerProductTypeDetector.js";
 
 const cases = [
-  ["Хомут", "99", "FASTENER_CLAMP", true],
-  ["Schlauchschelle", "99", "FASTENER_CLAMP", true],
+  // EPC 99 and a generic word alone do not justify a narrow unreviewed leaf.
+  ["Хомут", "99", "FASTENER_CLAMP", false],
+  ["Schlauchschelle", "99", "FASTENER_CLAMP", false],
   ["Фара головного світла", "90", "LIGHTING_HEADLIGHT", true],
   ["Hauptscheinwerfer", "90", "LIGHTING_HEADLIGHT", true],
   ["Гасос ГУР", "46", "STEERING_PUMP", true],

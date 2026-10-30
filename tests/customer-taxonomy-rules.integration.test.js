@@ -75,6 +75,10 @@ const windshieldMigrationUrl = new URL(
   "../migrations/104_add_customer_taxonomy_windshields.sql",
   import.meta.url,
 );
+const currentMigrationUrl = new URL(
+  "../migrations/121_classify_explicit_owner_approved_parts.sql",
+  import.meta.url,
+);
 let rules = [];
 
 const historicalExhaustMountArticles = Object.freeze([
@@ -140,8 +144,8 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     { section: "climate", count: 9 },
     { section: "cooling", count: 10 },
     { section: "electrical-electronics-lighting", count: 48 },
-    { section: "engine", count: 34 },
-    { section: "exhaust", count: 12 },
+    { section: "engine", count: 35 },
+    { section: "exhaust", count: 17 },
     { section: "fasteners-seals-standard-parts", count: 12 },
     { section: "filters-maintenance", count: 14 },
     { section: "fuel-system", count: 9 },
@@ -230,8 +234,8 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     active_v10_successors: 373,
     historical_phase2g3_v1_d9: 12,
     new_windshield_v1_d10: 1,
-    active_total: 374,
-    total: 2280,
+    active_total: 380,
+    total: 2286,
   });
 
   const versionDrift = await pool.query(`
@@ -321,7 +325,7 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
   `);
   // Historical detector migrations are immutable and never replayed after a
   // newer generation. The current migration itself remains repeat-safe.
-  await pool.query(windshieldSql);
+  await pool.query(await readFile(currentMigrationUrl, "utf8"));
   const afterResult = await pool.query(`
     SELECT
       (SELECT COUNT(*)::integer FROM customer_classification_rules) AS rules,
@@ -330,12 +334,12 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   assert.deepEqual(afterResult.rows[0], beforeResult.rows[0]);
-  assert.equal(afterResult.rows[0].rules, 2280);
+  assert.equal(afterResult.rows[0].rules, 2286);
   assert.equal(afterResult.rows[0].memberships, beforeResult.rows[0].memberships);
 });
 
-test("inactive historical v1 membership remains valid when migration 104 is replayed", async () => {
-  const currentSql = await readFile(windshieldMigrationUrl, "utf8");
+test("inactive historical v1 membership remains valid when migration 121 is replayed", async () => {
+  const currentSql = await readFile(currentMigrationUrl, "utf8");
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Historical taxonomy membership', TRUE)
@@ -927,19 +931,34 @@ test("mixed Electrical EPC groups do not approve generic names or audit REVIEW r
   }
 });
 
-test("all 700 accepted PHASE 2G.2 SAFE and REVIEW rows receive no narrow proposal", () => {
+test("PHASE 2G.2 SAFE and REVIEW rows remain conservative except owner-approved EPC 15 valves", () => {
   const conservativeRows = CUSTOMER_TAXONOMY_PHASE2G2_REVIEW.filter((row) => (
     row.finalBucket === "SAFE_TOPLEVEL" || row.finalBucket === "REAL_REVIEW"
   ));
   assert.equal(conservativeRows.length, 700);
+  let ownerApprovedCount = 0;
   for (const row of conservativeRows) {
     const result = resolve({
       article: row.article,
       name: row.name,
       epc: row.epc ? [row.epc] : [],
     });
-    assert.equal(result.proposals.length, 0, `${row.article}:${row.epc}`);
+    const approvedLeaf = row.epc === "15" && /^Клапан тиску$/iu.test(row.name)
+      ? "engine-sensors"
+      : row.epc === "90" && /датчик.{0,30}no[xх]/iu.test(row.name)
+        ? "exhaust-sensors"
+        : row.epc === "98" && /adblue/iu.test(row.name)
+          ? "exhaust-adblue-scr"
+          : null;
+    if (approvedLeaf) {
+      assert.equal(result.proposals.find((proposal) => proposal.isPrimary)?.category?.slug,
+        approvedLeaf, row.article);
+      ownerApprovedCount += 1;
+    } else {
+      assert.equal(result.proposals.length, 0, `${row.article}:${row.epc}`);
+    }
   }
+  assert.equal(ownerApprovedCount, 28);
 });
 
 test("reviewed PHASE 2G.3 TYPE_CODE rules resolve all 1208 approved Fasteners products", () => {

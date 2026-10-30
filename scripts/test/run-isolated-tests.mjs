@@ -1,6 +1,7 @@
 import {
   mkdtemp,
   readFile,
+  realpath,
   readdir,
   rm,
 } from "node:fs/promises";
@@ -93,19 +94,33 @@ if (
 
 const testDatabase =
   String(
-    process.env.TEST_DB_NAME ||
-    `${databaseConfig.productionDatabase}_test`
+    process.env.TEST_DB_NAME || ""
   ).trim();
 
 
+function isWithin(directory, target) {
+  const relative = path.relative(directory, target);
+  return Boolean(relative) && !relative.startsWith("..")
+    && !path.isAbsolute(relative);
+}
+
+const localTemporaryDirectories = [os.tmpdir(), "/private/tmp", "/tmp"];
+const localHost = ["localhost", "127.0.0.1", "::1"].includes(databaseConfig.host)
+  || (path.isAbsolute(databaseConfig.host)
+    && localTemporaryDirectories.some((directory) => isWithin(directory, databaseConfig.host)));
+
+
 if (
+  !localHost ||
+  !/_test$/i.test(databaseConfig.productionDatabase) ||
   !testDatabase ||
   testDatabase ===
     databaseConfig.productionDatabase ||
-  !/_test$/i.test(testDatabase)
+  !/_test$/i.test(testDatabase) ||
+  process.env.ISOLATED_TEST_DB_CONFIRMATION !== "LOCAL_TEST_CLUSTER_ONLY"
 ) {
   throw new Error(
-    "Защита остановила тесты: имя тестовой базы должно оканчиваться на _test и отличаться от рабочей базы"
+    "Защита остановила тесты: нужны локальный PostgreSQL, две разные базы *_test и подтверждение LOCAL_TEST_CLUSTER_ONLY"
   );
 }
 
@@ -131,9 +146,48 @@ function databaseCliArgs() {
 
 function localAdminDatabaseCliArgs() {
   return [
+    ...databaseCliArgs(),
     "--maintenance-db",
     "postgres",
   ];
+}
+
+
+async function verifyIsolatedCluster() {
+  const expected = await realpath(requiredEnv("ISOLATED_TEST_PGDATA"));
+  const roots = await Promise.all(localTemporaryDirectories.map((directory) => realpath(directory)));
+  if (!roots.some((directory) => isWithin(directory, expected))) {
+    throw new Error("Тестовый PostgreSQL должен находиться внутри временной папки");
+  }
+  const db = new Pool({
+    host: databaseConfig.host,
+    port: databaseConfig.port,
+    database: databaseConfig.productionDatabase,
+    user: databaseConfig.user,
+    password: databaseConfig.password,
+  });
+  try {
+    const { rows: [row] } = await db.query(`
+      SELECT current_database() AS database_name,
+             current_setting('data_directory') AS data_directory,
+             source.datcollate AS lc_collate,
+             source.datctype AS lc_ctype,
+             source.datlocprovider AS locale_provider,
+             pg_encoding_to_char(source.encoding) AS encoding
+      FROM pg_database source
+      WHERE source.datname = current_database()
+    `);
+    if (row.database_name !== databaseConfig.productionDatabase
+      || await realpath(row.data_directory) !== expected) {
+      throw new Error("Отказ: подключение ведёт не к указанному локальному тестовому кластеру");
+    }
+    if (row.locale_provider !== "c" || row.encoding !== "UTF8") {
+      throw new Error("Тестовая копия требует локальный UTF-8 PostgreSQL с libc locale");
+    }
+    return { lcCollate: row.lc_collate, lcCtype: row.lc_ctype, encoding: row.encoding };
+  } finally {
+    await db.end();
+  }
 }
 
 
@@ -802,6 +856,7 @@ async function main() {
     );
 
   try {
+    const sourceLocale = await verifyIsolatedCluster();
     console.log(
       "\n========== ИЗОЛИРОВАННАЯ ТЕСТОВАЯ БАЗА =========="
     );
@@ -845,7 +900,8 @@ async function main() {
         "--if-exists",
         "--force",
         testDatabase,
-      ]
+      ],
+      { env: postgresEnv }
     );
 
     await runCommand(
@@ -854,8 +910,17 @@ async function main() {
         ...localAdminDatabaseCliArgs(),
         "--owner",
         databaseConfig.user,
+        "--template",
+        "template0",
+        "--encoding",
+        sourceLocale.encoding,
+        "--lc-collate",
+        sourceLocale.lcCollate,
+        "--lc-ctype",
+        sourceLocale.lcCtype,
         testDatabase,
-      ]
+      ],
+      { env: postgresEnv }
     );
 
     await runCommand(
@@ -883,7 +948,10 @@ async function main() {
       ...await collectTestFiles("tests"),
       "test-brand-admin.mjs",
       "test-mercedes-family.mjs",
-    ].sort();
+    ].filter((file) => ![
+      "src/services/ProductImageLifecycle.integration.test.js",
+      "src/services/ProductImageReplacement.integration.test.js",
+    ].includes(file)).sort();
 
     console.log(
       `\nЗапускаю тестовые файлы: ${testFiles.length}`
@@ -910,6 +978,10 @@ async function main() {
         },
       }
     );
+
+    // Photo lifecycle tests intentionally own a separate synthetic cluster and
+    // must never inherit a production-backed fixture or this runner's DB_*.
+    await runCommand(process.execPath, ["scripts/test/run-photo-management-tests.mjs"]);
 
     console.log(
       `\nВсе тесты прошли в базе ${testDatabase}.`

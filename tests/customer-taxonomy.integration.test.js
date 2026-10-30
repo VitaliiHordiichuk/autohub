@@ -110,7 +110,7 @@ test("initial taxonomy contains hidden READY structure, seeded rules and no memb
       (SELECT COUNT(*)::integer FROM product_customer_categories WHERE product_id = $1) AS fixture_membership_count
   `, [ids.product]);
   assert.deepEqual(seededFoundation.rows[0], {
-    rule_count: 2280,
+    rule_count: 2286,
     fixture_membership_count: 0,
   });
 });

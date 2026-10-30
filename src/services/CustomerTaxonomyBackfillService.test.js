@@ -442,9 +442,11 @@ test("SAFE_TOPLEVEL is opt-in, uses EPC_FALLBACK + BACKFILL + MEDIUM and is idem
     approvalStatus: "AUTO_APPROVED",
   });
 
+  const membershipAfterFirstApply = { ...state.memberships[0] };
   const repeated = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
-    expectedCount: 1,
+    // The already-applied membership is no longer a candidate on this run.
+    expectedCount: 0,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     includeSafeTopLevel: true,
     dbPool: fakePool(),
@@ -453,7 +455,9 @@ test("SAFE_TOPLEVEL is opt-in, uses EPC_FALLBACK + BACKFILL + MEDIUM and is idem
   });
   assert.equal(repeated.inserted, 0);
   assert.equal(repeated.updated, 0);
-  assert.equal(repeated.unchanged, 1);
+  assert.equal(repeated.candidateCount, 0);
+  assert.equal(repeated.unchanged, 0);
+  assert.deepEqual(state.memberships, [membershipAfterFirstApply]);
 });
 
 test("SAFE_TOPLEVEL keeps the three confirmed REAL_REVIEW products unassigned", async () => {
@@ -547,7 +551,8 @@ test("SAFE_TOPLEVEL preserves existing HIGH and MANUAL primary memberships", asy
   const beforeManual = { ...existingManual };
   const report = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
-    expectedCount: 3,
+    // The manual primary is preserved, not counted as an APPLY candidate.
+    expectedCount: 2,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     includeSafeTopLevel: true,
     dbPool: fakePool(),
@@ -555,6 +560,7 @@ test("SAFE_TOPLEVEL preserves existing HIGH and MANUAL primary memberships", asy
     assignmentService: state.assignmentService,
   });
   assert.equal(report.insertedSafeTopLevel, 1);
+  assert.equal(report.candidateCount, 2);
   assert.equal(report.manualPreserved, 1);
   assert.equal(report.unchanged, 1);
   assert.deepEqual(state.memberships.find((item) => item.productId === 7), beforeHigh);

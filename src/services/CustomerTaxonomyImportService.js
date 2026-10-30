@@ -19,6 +19,35 @@ const REVIEWED_TECHNICAL_EPC_SAFE_ROOT = Object.freeze({
   "43": "brakes",
 });
 
+// Only EPC groups whose accepted Phase 2 review has one public root and
+// explicit SAFE_TOPLEVEL evidence. Mixed groups (14, 24, 32, 35, 90, etc.)
+// deliberately stay out of this table. The existing reviewed per-product
+// REAL_REVIEW decisions still take precedence below.
+export const APPROVED_UNAMBIGUOUS_EPC_ROOT = Object.freeze({
+  "03": "engine", "05": "engine", "07": "fuel-system",
+  "26": "transmission-drivetrain", "27": "transmission-drivetrain",
+  "37": "transmission-drivetrain", "41": "transmission-drivetrain",
+  "52": "body-glass", "61": "body-glass", "62": "body-glass",
+  "63": "body-glass", "65": "body-glass", "67": "body-glass",
+  "74": "body-glass", "75": "body-glass", "78": "body-glass",
+  "79": "body-glass", "82": "electrical-electronics-lighting",
+  "85": "body-glass", "86": "interior-safety",
+  "91": "interior-safety", "92": "interior-safety",
+});
+
+function conflictingNameSections(typeCodes, rules, section) {
+  const detected = new Set(typeCodes || []);
+  if (!detected.size) return [];
+  const conflicting = new Set();
+  for (const rule of rules || []) {
+    if (!rule.isActive || rule.matchType !== "TYPE_CODE"
+      || !detected.has(rule.matchValue)) continue;
+    const targetSection = rule.targetParentSlug || rule.targetCategorySlug;
+    if (targetSection && targetSection !== section) conflicting.add(targetSection);
+  }
+  return [...conflicting].sort();
+}
+
 export class CustomerTaxonomyImportIntegrityError extends Error {
   constructor(productId, issues = []) {
     super(`Invalid existing customer taxonomy primary for product ${productId}: ${issues.join(",")}`);
@@ -46,8 +75,28 @@ function reviewedRows(product) {
   ].filter((item) => item.row);
 }
 
-function safeTopLevelDisposition({ product, resolution, existingMemberships }) {
-  if (primaryProposal(resolution.proposals)) {
+function safeTopLevelDisposition({ product, resolution, existingMemberships, rules, assignmentOrigin }) {
+  const isNewImport = assignmentOrigin === CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT;
+  const technicalEpc = [...new Set((product.technicalEpcGroups || []).map(String))];
+  if (isNewImport && resolution.numberFamily === "A" && technicalEpc.length === 0) {
+    return { section: null, requiresReview: true, reason: "NO_TECHNICAL_EPC" };
+  }
+  const mappedEpcSections = technicalEpc.map((epc) => (
+    APPROVED_UNAMBIGUOUS_EPC_ROOT[epc]
+    || REVIEWED_TECHNICAL_EPC_SAFE_ROOT[epc]
+  ));
+  if (isNewImport && technicalEpc.length > 1 && (
+    mappedEpcSections.some((section) => !section)
+    || new Set(mappedEpcSections).size !== 1
+  )) {
+    return { section: null, requiresReview: true, reason: "MULTIPLE_OR_UNAPPROVED_TECHNICAL_EPC" };
+  }
+  const exact = primaryProposal(resolution.proposals);
+  if (exact) {
+    const section = exact.category.parentSlug || exact.category.slug;
+    if (isNewImport && conflictingNameSections(resolution.typeCodes, rules, section).length) {
+      return { section: null, requiresReview: true, reason: "EPC_NAME_SECTION_CONFLICT" };
+    }
     return { section: null, requiresReview: false, reason: null };
   }
 
@@ -77,6 +126,10 @@ function safeTopLevelDisposition({ product, resolution, existingMemberships }) {
   for (const epc of product.technicalEpcGroups || []) {
     const section = REVIEWED_TECHNICAL_EPC_SAFE_ROOT[String(epc)];
     if (section) safeSections.add(section);
+    if (isNewImport && resolution.numberFamily === "A") {
+      const approvedSection = APPROVED_UNAMBIGUOUS_EPC_ROOT[String(epc)];
+      if (approvedSection) safeSections.add(approvedSection);
+    }
   }
   if (!phase2g3Review) {
     for (const { row } of audited) {
@@ -95,11 +148,21 @@ function safeTopLevelDisposition({ product, resolution, existingMemberships }) {
       .map(({ phase }) => `${phase}_REAL_REVIEW`),
   ];
   if (safeSections.size > 1) reviewReasons.push("MULTIPLE_SAFE_TOPLEVEL_TARGETS");
+  if (safeSections.size === 1) {
+    const [section] = safeSections;
+    if (isNewImport && conflictingNameSections(resolution.typeCodes, rules, section).length) {
+      reviewReasons.push("EPC_NAME_SECTION_CONFLICT");
+    }
+  }
   if (reviewReasons.length || safeSections.size !== 1) {
     return {
       section: null,
-      requiresReview: reviewReasons.length > 0,
-      reason: reviewReasons.join(";") || null,
+      requiresReview: reviewReasons.length > 0 || (isNewImport && resolution.numberFamily === "A"),
+      reason: reviewReasons.join(";") || (isNewImport && resolution.numberFamily === "A"
+        ? (product.technicalEpcGroups?.length
+          ? "NO_UNAMBIGUOUS_APPROVED_EPC_ROOT"
+          : "NO_TECHNICAL_EPC")
+        : null),
     };
   }
   return {
@@ -161,9 +224,12 @@ async function evaluateProduct({
     product,
     resolution,
     existingMemberships,
+    rules,
+    assignmentOrigin,
   });
   const proposals = (resolution.proposals || []).filter((proposal) => (
     proposal.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
+    && (assignmentOrigin !== CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT || !disposition.requiresReview)
   ));
   if (!primaryProposal(proposals) && disposition.section) {
     let category = context?.categoryBySlug?.get(disposition.section) || null;
@@ -313,12 +379,20 @@ export const CustomerTaxonomyImportService = {
         assignment.decisionIssues,
       );
     }
-    return resultDetail({
+    const detail = resultDetail({
       product,
       resolution,
       assignment,
       disposition,
       candidate,
     });
+    if (assignmentOrigin === CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT) {
+      await repository.recordImportDecision({
+        productId: normalizedProductId,
+        decision: detail.decision,
+        reason: detail.reason,
+      }, db);
+    }
+    return detail;
   },
 };

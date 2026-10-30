@@ -1,4 +1,30 @@
 import { pool } from "../config/db.js";
+import { CUSTOMER_TAXONOMY_PHASE2E_REVIEW } from "../data/CustomerTaxonomyPhase2EReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2F_REVIEW } from "../data/CustomerTaxonomyPhase2FReview.js";
+import { CUSTOMER_TAXONOMY_PHASE2G1_REVIEW } from "../data/CustomerTaxonomyPhase2G1Review.js";
+import { CUSTOMER_TAXONOMY_PHASE2G2_REVIEW } from "../data/CustomerTaxonomyPhase2G2Review.js";
+import { CUSTOMER_TAXONOMY_PHASE2G3_REVIEW } from "../data/CustomerTaxonomyPhase2G3Review.js";
+
+// The accepted historical review manifests predate persisted import decisions.
+// Keep them visible in the admin queue without writing or changing memberships.
+const historicalReviewPhases = new Map();
+for (const [phase, rows] of [
+  ["PHASE_2E", CUSTOMER_TAXONOMY_PHASE2E_REVIEW],
+  ["PHASE_2F", CUSTOMER_TAXONOMY_PHASE2F_REVIEW],
+  ["PHASE_2G1", CUSTOMER_TAXONOMY_PHASE2G1_REVIEW],
+  ["PHASE_2G2", CUSTOMER_TAXONOMY_PHASE2G2_REVIEW],
+  ["PHASE_2G3", CUSTOMER_TAXONOMY_PHASE2G3_REVIEW],
+]) {
+  for (const row of rows) {
+    if (row.finalBucket !== "REAL_REVIEW") continue;
+    const article = String(row.article || "").toUpperCase();
+    if (!article) continue;
+    const phases = historicalReviewPhases.get(article) || new Set();
+    phases.add(phase);
+    historicalReviewPhases.set(article, phases);
+  }
+}
+const historicalReviewArticles = [...historicalReviewPhases.keys()];
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -242,6 +268,7 @@ export const AdminCatalogCategoryService = {
   async searchProducts({
     search = "",
     assignment = "ALL",
+    classification = "ALL",
     categoryId: categoryIdValue = null,
     page = 1,
     limit = 50,
@@ -252,6 +279,12 @@ export const AdminCatalogCategoryService = {
     const normalizedAssignment = ["ALL", "WITH", "WITHOUT"].includes(String(assignment).toUpperCase())
       ? String(assignment).toUpperCase()
       : "ALL";
+    const normalizedClassification = String(classification).toUpperCase();
+    if (!["ALL", "NO_PUBLIC_CATEGORY", "ROOT_ONLY", "REVIEW", "EXACT_SUBGROUP"].includes(normalizedClassification)) {
+      const error = new Error("Некоректний фільтр класифікації");
+      error.statusCode = 400;
+      throw error;
+    }
     const categoryId = categoryIdValue ? positiveInteger(categoryIdValue, null) : null;
     const values = [];
     const conditions = ["p.is_active = TRUE"];
@@ -274,6 +307,48 @@ export const AdminCatalogCategoryService = {
 
     if (normalizedAssignment === "WITH") conditions.push(effectiveExists);
     if (normalizedAssignment === "WITHOUT") conditions.push(`NOT ${effectiveExists}`);
+
+    const approvedPrimary = `EXISTS (
+      SELECT 1 FROM product_customer_categories primary_assignment
+      JOIN customer_categories public_category
+        ON public_category.id = primary_assignment.customer_category_id
+      WHERE primary_assignment.product_id = p.id
+        AND primary_assignment.is_primary = TRUE
+        AND primary_assignment.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+        AND public_category.status = 'ACTIVE'
+        AND public_category.is_active = TRUE
+    )`;
+    if (normalizedClassification === "NO_PUBLIC_CATEGORY") conditions.push(`NOT ${approvedPrimary}`);
+    if (normalizedClassification === "ROOT_ONLY" || normalizedClassification === "EXACT_SUBGROUP") {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM product_customer_categories primary_assignment
+        JOIN customer_categories public_category
+          ON public_category.id = primary_assignment.customer_category_id
+        WHERE primary_assignment.product_id = p.id
+          AND primary_assignment.is_primary = TRUE
+          AND primary_assignment.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+          AND public_category.status = 'ACTIVE'
+          AND public_category.is_active = TRUE
+          AND public_category.parent_id IS ${normalizedClassification === "ROOT_ONLY" ? "NULL" : "NOT NULL"}
+      )`);
+    }
+    if (normalizedClassification === "REVIEW") {
+      conditions.push(`NOT ${approvedPrimary}`);
+      values.push(historicalReviewArticles);
+      conditions.push(`(
+        COALESCE(p.article_normalized, p.article, '') = ANY($${values.length}::text[])
+        OR
+        EXISTS (
+          SELECT 1 FROM product_customer_taxonomy_decisions decision
+          WHERE decision.product_id = p.id AND decision.decision = 'REQUIRES_REVIEW'
+        )
+        OR EXISTS (
+          SELECT 1 FROM product_customer_categories review_assignment
+          WHERE review_assignment.product_id = p.id
+            AND review_assignment.approval_status = 'REVIEW'
+        )
+      )`);
+    }
 
     if (categoryId) {
       values.push(categoryId);
@@ -308,14 +383,62 @@ export const AdminCatalogCategoryService = {
     const offsetIndex = queryValues.length;
     const result = await db.query(`
       SELECT
-        p.id, p.article, p.name,
+        p.id, p.article, p.article_normalized, p.name,
+        CASE
+          WHEN COALESCE(p.article_normalized, p.article, '') ~ '^A[0-9]{10}'
+          THEN SUBSTRING(COALESCE(p.article_normalized, p.article, '') FROM 5 FOR 2)
+          ELSE NULL
+        END AS technical_epc_group,
         b.name AS brand_name,
         pm.name AS manufacturer,
+        public_primary.customer_category_id,
+        public_primary.customer_category_slug,
+        public_primary.customer_category_parent_id,
+        public_primary.customer_category_name_uk,
+        public_primary.customer_category_name_ru,
+        public_primary.customer_category_name_en,
+        public_primary.assignment_source AS public_assignment_source,
+        import_decision.decision AS import_decision,
+        import_decision.reason AS import_reason,
+        public_review.has_review,
+        public_review.rule_code AS review_rule_code,
         image.image_url,
         image.image_count
       FROM products p
       LEFT JOIN brands b ON b.id = p.brand_id
       LEFT JOIN part_manufacturers pm ON pm.id = p.manufacturer_id
+      LEFT JOIN product_customer_taxonomy_decisions import_decision
+        ON import_decision.product_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT membership.customer_category_id,
+               category.slug AS customer_category_slug,
+               category.parent_id AS customer_category_parent_id,
+               COALESCE(uk.name, ru.name, en.name, category.slug) AS customer_category_name_uk,
+               COALESCE(ru.name, uk.name, en.name, category.slug) AS customer_category_name_ru,
+               COALESCE(en.name, uk.name, ru.name, category.slug) AS customer_category_name_en,
+               membership.assignment_source
+        FROM product_customer_categories membership
+        JOIN customer_categories category ON category.id = membership.customer_category_id
+        LEFT JOIN customer_category_translations uk
+          ON uk.category_id = category.id AND uk.language_code = 'uk'
+        LEFT JOIN customer_category_translations ru
+          ON ru.category_id = category.id AND ru.language_code = 'ru'
+        LEFT JOIN customer_category_translations en
+          ON en.category_id = category.id AND en.language_code = 'en'
+        WHERE membership.product_id = p.id
+          AND membership.is_primary = TRUE
+          AND membership.approval_status IN ('AUTO_APPROVED', 'MANUAL_APPROVED')
+          AND category.status = 'ACTIVE' AND category.is_active = TRUE
+        LIMIT 1
+      ) public_primary ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT TRUE AS has_review, membership.rule_code
+        FROM product_customer_categories membership
+        WHERE membership.product_id = p.id
+          AND membership.approval_status = 'REVIEW'
+        ORDER BY membership.assigned_at DESC
+        LIMIT 1
+      ) public_review ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id
@@ -450,6 +573,9 @@ export const AdminCatalogCategoryService = {
       products: result.rows.map((row) => {
         const id = Number(row.id);
         const assignments = assignmentsByProduct.get(id) || [];
+        const historicalPhases = historicalReviewPhases.get(
+          String(row.article_normalized || row.article || "").toUpperCase(),
+        );
         return {
           id,
           article: row.article,
@@ -458,6 +584,27 @@ export const AdminCatalogCategoryService = {
           manufacturer: row.manufacturer,
           imageUrl: row.image_url,
           imageCount: Number(row.image_count || 0),
+          technicalEpcGroup: row.technical_epc_group,
+          classification: row.customer_category_id
+            ? row.customer_category_parent_id === null ? "ROOT_ONLY" : "EXACT_SUBGROUP"
+            : row.import_decision === "REQUIRES_REVIEW" || row.has_review || historicalPhases
+              ? "REVIEW" : "NO_PUBLIC_CATEGORY",
+          publicCategory: row.customer_category_id ? {
+            id: Number(row.customer_category_id),
+            slug: row.customer_category_slug,
+            parentId: row.customer_category_parent_id === null ? null : Number(row.customer_category_parent_id),
+            nameUk: row.customer_category_name_uk,
+            nameRu: row.customer_category_name_ru,
+            nameEn: row.customer_category_name_en,
+          } : null,
+          publicAssignmentSource: row.public_assignment_source || null,
+          reviewReason: row.import_decision === "REQUIRES_REVIEW"
+            ? row.import_reason || "REQUIRES_REVIEW"
+            : historicalPhases
+            ? `HISTORICAL_REAL_REVIEW:${[...historicalPhases].join(",")}`
+            : row.has_review
+            ? row.review_rule_code ? `REVIEW_PROPOSAL:${row.review_rule_code}` : "REVIEW_PROPOSAL"
+            : null,
           category: assignments[0] || null,
           assignments,
         };

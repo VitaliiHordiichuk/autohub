@@ -78,7 +78,43 @@ export const CustomerTaxonomyAssignmentService = {
     approvedBy,
   }, { dbPool = pool, repository = CustomerTaxonomyRepository } = {}) {
     return withTransaction(dbPool, async (db) => {
+      const normalizedProductId = Number(productId);
+      const normalizedCategoryId = Number(customerCategoryId);
+      if (!Number.isInteger(normalizedProductId) || normalizedProductId <= 0
+        || !Number.isInteger(normalizedCategoryId) || normalizedCategoryId <= 0) {
+        const error = new Error("Invalid product or customer category id");
+        error.statusCode = 400;
+        throw error;
+      }
       await repository.lockProductForAssignment?.(productId, db);
+      const productResult = await db.query(
+        "SELECT id FROM products WHERE id = $1 AND is_active = TRUE",
+        [normalizedProductId],
+      );
+      if (!productResult.rowCount) {
+        const error = new Error("Active product not found");
+        error.statusCode = 404;
+        throw error;
+      }
+      const categoryResult = await db.query(`
+        SELECT category.id
+        FROM customer_categories category
+        WHERE category.id = $1
+          AND category.status = 'ACTIVE'
+          AND category.is_active = TRUE
+          AND category.parent_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM customer_categories child
+            WHERE child.parent_id = category.id
+              AND child.status = 'ACTIVE' AND child.is_active = TRUE
+          )
+        FOR SHARE OF category
+      `, [normalizedCategoryId]);
+      if (!categoryResult.rowCount) {
+        const error = new Error("Choose an existing active public subgroup");
+        error.statusCode = 400;
+        throw error;
+      }
       await repository.listMembershipsForProduct(productId, db, { lock: true });
       if (isPrimary) await repository.demoteAllPrimary(productId, db);
       return repository.upsertMembership({

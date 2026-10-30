@@ -34,9 +34,13 @@ test("fuel tank module remains recognized", () => {
   assert.ok(!result.includes("FUEL_PUMP"));
 });
 
-test("reviewed NOx sensor is not auto-promoted", () => {
+test("explicit NOx sensor follows owner-approved exhaust placement", () => {
   assert.deepEqual(
     types("A000905141287", "Датчик NOX", "90"),
+    ["EXHAUST_SENSOR"]
+  );
+  assert.deepEqual(
+    types("A000905141288", "Кронштейн датчика NOX", "90"),
     []
   );
 });

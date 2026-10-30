@@ -20,7 +20,7 @@ const ruleMigrationUrl = new URL(
   import.meta.url,
 );
 const currentMigrationUrl = new URL(
-  "../migrations/104_add_customer_taxonomy_windshields.sql",
+  "../migrations/121_classify_explicit_owner_approved_parts.sql",
   import.meta.url,
 );
 const touchedProductIds = new Set();
@@ -123,8 +123,8 @@ test("migrations 101/102 remain historical after windshield rules advance to v10
     v9_successors: 361,
     phase2g3: 12,
     historical_v9: 373,
-    active_v10: 374,
-    total: 2280,
+    active_v10: 380,
+    total: 2286,
     duplicate_active: 0,
   });
 
@@ -344,12 +344,12 @@ test("controlled PHASE 2G.3 HIGH and SAFE backfills apply once and remain idempo
   const safeRepeat = await runCustomerTaxonomyBackfill({
     mode: "APPLY",
     includeSafeTopLevel: true,
-    expectedCount: 2,
+    expectedCount: 0,
     confirmation: CUSTOMER_TAXONOMY_SAFE_TOPLEVEL_CONFIRMATION,
     repository: safeRepository,
   });
   assert.equal(safeRepeat.inserted, 0);
-  assert.equal(safeRepeat.unchanged, 2);
+  assert.equal(safeRepeat.unchanged, 0);
 
   const memberships = await pool.query(`
     SELECT product_id, assignment_source, assignment_origin, confidence,

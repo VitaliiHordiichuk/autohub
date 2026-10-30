@@ -75,11 +75,11 @@ test("PHASE 2G.2 SAFE and REVIEW decisions stay out of narrow Electrical leaves"
   }
 });
 
-test("existing Wheels and Exhaust semantics are preserved instead of becoming Electrical sensors", () => {
+test("Wheels, Exhaust and owner-approved AdBlue semantics stay outside generic Electrical sensors", () => {
   const expected = [
     ["A000905003064", "TPMS_SENSOR"],
     ["A0009053505", "EXHAUST_SENSOR"],
-    ["A099905790064", "EXHAUST_SENSOR"],
+    ["A099905790064", "ADBLUE_SCR_COMPONENT"],
   ];
   for (const [article, expectedType] of expected) {
     const types = detectCustomerProductTypes(productFor(reviewedArticle(article)));
