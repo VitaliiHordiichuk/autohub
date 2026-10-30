@@ -21,3 +21,18 @@ test(
     );
   }
 );
+
+test("preview server gates all background schedulers and bot startup", async () => {
+  const source = await readFile(new URL("./server.js", import.meta.url), "utf8");
+  assert.match(source, /if \(areBackgroundJobsEnabled\(\)\) \{([\s\S]*?)\} else \{/);
+  const gated = source.match(/if \(areBackgroundJobsEnabled\(\)\) \{([\s\S]*?)\} else \{/)[1];
+  for (const starter of [
+    "startEmailImportScheduler",
+    "startAutomaticTranslationScheduler",
+    "startTelegramBot",
+    "startProductImageProcessingScheduler",
+    "startDataRetentionScheduler",
+  ]) {
+    assert.match(gated, new RegExp(`${starter}\\(\\)`));
+  }
+});

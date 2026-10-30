@@ -12,6 +12,7 @@ import { startTelegramBot } from "./services/TelegramBotService.js";
 import { startProductImageProcessingScheduler } from "./services/ProductImageProcessingScheduler.js";
 import { startDataRetentionScheduler } from "./services/DataRetentionScheduler.js";
 import { isCustomerTaxonomyImportEnabled } from "./config/featureFlags.js";
+import { areBackgroundJobsEnabled } from "./config/backgroundJobs.js";
 
 
 const PORT =
@@ -26,9 +27,13 @@ app.listen(PORT, "127.0.0.1", () => {
     `Customer taxonomy import: ${isCustomerTaxonomyImportEnabled() ? "enabled" : "disabled"}`
   );
 
-  startEmailImportScheduler();
-startAutomaticTranslationScheduler();
-  startTelegramBot();
-  startProductImageProcessingScheduler();
-  startDataRetentionScheduler();
+  if (areBackgroundJobsEnabled()) {
+    startEmailImportScheduler();
+    startAutomaticTranslationScheduler();
+    startTelegramBot();
+    startProductImageProcessingScheduler();
+    startDataRetentionScheduler();
+  } else {
+    console.log("Background jobs disabled for this API instance");
+  }
 });
