@@ -17,6 +17,7 @@ const ids = {
   manual: null,
   rejected: null,
   historical: null,
+  otherApproved: null,
   phase2d: null,
   safeSteering: null,
   safeExhaust: null,
@@ -179,6 +180,7 @@ before(async () => {
   ids.manual = await insertProduct("manual", 2);
   ids.rejected = await insertProduct("rejected", 3);
   ids.historical = await insertProduct("historical", 4);
+  ids.otherApproved = await insertProduct("other approved", 5);
   const phase2d = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Диск колісний легкосплавний', TRUE)
@@ -252,6 +254,14 @@ before(async () => {
     historicalFilterRule.code,
     historicalFilterRule.version,
   ]);
+  await pool.query(`
+    INSERT INTO product_customer_categories(
+      product_id, customer_category_id, is_primary,
+      assignment_source, assignment_origin, confidence,
+      approval_status, assigned_at, approved_at, updated_at
+    ) VALUES($1, $2, TRUE, 'EPC_FALLBACK', 'BACKFILL', 'MEDIUM',
+             'AUTO_APPROVED', NOW(), NOW(), NOW())
+  `, [ids.otherApproved, manualCategoryId]);
 });
 
 after(async () => {
@@ -471,6 +481,35 @@ test("controlled backfill preserves an approved membership on inactive historica
   });
   assert.equal(verification.errors.length, 0);
   assert.equal(verification.verification.orphanRule, 0);
+});
+
+test("VERIFY accepts a preserved approved primary in a different leaf", async () => {
+  const repository = scopedRepository([ids.otherApproved]);
+  const beforeResult = await pool.query(`
+    SELECT customer_category_id, assigned_at, approved_at, updated_at
+    FROM product_customer_categories WHERE product_id = $1
+  `, [ids.otherApproved]);
+
+  const preview = await runCustomerTaxonomyBackfill({ dbPool: pool, repository });
+  assert.equal(preview.candidateCount, 1);
+  assert.equal(preview.wouldInsert, 0);
+  assert.equal(preview.approvedPrimaryPreserved, 1);
+
+  const verification = await runCustomerTaxonomyBackfill({
+    mode: "VERIFY",
+    expectedCount: 1,
+    dbPool: pool,
+    repository,
+  });
+  assert.deepEqual(verification.errors, []);
+  assert.equal(verification.verification.approvedPrimary, 1);
+  assert.equal(verification.candidateVerification.memberships, 0);
+
+  const afterResult = await pool.query(`
+    SELECT customer_category_id, assigned_at, approved_at, updated_at
+    FROM product_customer_categories WHERE product_id = $1
+  `, [ids.otherApproved]);
+  assert.deepEqual(afterResult.rows, beforeResult.rows);
 });
 
 test("PHASE 2D controlled backfill uses EPC membership for an alphanumeric wheel variant", async () => {

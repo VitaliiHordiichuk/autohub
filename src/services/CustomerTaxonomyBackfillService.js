@@ -673,8 +673,29 @@ function verifyCandidateMemberships(report, candidates, memberships) {
     membershipKey(membership.productId, membership.customerCategoryId),
     membership,
   ]));
+  const byProduct = new Map();
+  for (const membership of memberships) {
+    const existing = byProduct.get(membership.productId) || [];
+    existing.push(membership);
+    byProduct.set(membership.productId, existing);
+  }
   const verified = [];
   for (const candidate of candidates) {
+    const classification = classifyExisting(
+      candidate,
+      byProduct.get(candidate.productId) || [],
+    );
+    // Backfill deliberately preserves an older approved primary even when a
+    // newer detector proposes another leaf. VERIFY must check that policy,
+    // not demand a membership that APPLY was forbidden to create.
+    if (
+      classification.action === "MANUAL_PRESERVED"
+      || classification.action === "REJECTED_PRESERVED"
+      || (classification.action === "APPROVED_PRIMARY_PRESERVED"
+        && classification.membership?.customerCategoryId !== candidate.categoryId)
+    ) {
+      continue;
+    }
     const membership = byKey.get(membershipKey(candidate.productId, candidate.categoryId));
     if (!membership) {
       report.errors.push(`MISSING_BACKFILL_MEMBERSHIP:${candidate.productId}:${candidate.categoryId}`);
