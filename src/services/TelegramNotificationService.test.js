@@ -70,7 +70,9 @@ test("отправляет гостевой VIN-запрос всем подкл
   assert.match(sent[0].payload.text, /Новий VIN-запит №42/);
   assert.match(sent[1].payload.text, /New VIN request №42/);
   assert.match(queries[0], /telegram_bot_locales/);
-  assert.match(queries[0], /r\.name IN \('ADMIN', 'MANAGER'\)/);
+  assert.match(queries[0], /ep\.staff_role IN \('ADMIN', 'MANAGER'\)/);
+  assert.match(queries[0], /ep\.access_enabled = TRUE AND ep\.telegram_allowed = TRUE/);
+  assert.match(queries[0], /ep\.removed_at IS NULL/);
   assert.match(queries[0], /u\.is_active = TRUE/);
   assert.match(queries[1], /LEFT JOIN users u ON u\.id = vr\.user_id/);
   assert.deepEqual(result, {

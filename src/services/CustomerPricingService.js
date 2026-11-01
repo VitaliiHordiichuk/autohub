@@ -40,12 +40,15 @@ export const CustomerPricingService = {
     const result = await db.query(`
       SELECT
         r.name AS role_name,
+        (ep.user_id IS NOT NULL AND ep.access_enabled=TRUE
+          AND ep.removed_at IS NULL) AS active_staff,
         c.id AS customer_id,
         pg.name,
         pg.discount_percent,
         pg.pricing_mode
       FROM users u
       JOIN roles r ON r.id = u.role_id
+      LEFT JOIN employee_profiles ep ON ep.user_id = u.id
       LEFT JOIN customers c
         ON c.user_id = u.id
         AND c.is_active = TRUE
@@ -54,8 +57,7 @@ export const CustomerPricingService = {
       LIMIT 1`, [userId]);
     const row = result.rows[0];
 
-    if (!row || row.role_name !== "CLIENT") {
-      const priceGroups = row
+    const priceGroups = row?.active_staff
         ? (await db.query(`
             SELECT id, name, discount_percent, pricing_mode
             FROM price_groups
@@ -74,14 +76,9 @@ export const CustomerPricingService = {
             pricingMode: group.pricing_mode,
           }))
         : [];
-
-      return {
-        discountPercent: 0,
-        isVip: false,
-        priceGroupName: "Guest",
-        showAllPrices: Boolean(row),
-        priceGroups,
-      };
+    const staffPresentation = {showAllPrices:Boolean(row?.active_staff),priceGroups};
+    if (!row || (row.role_name !== "CLIENT" && !row.customer_id)) {
+      return {discountPercent:0,isVip:false,priceGroupName:"Guest",...staffPresentation};
     }
 
     if (!row.customer_id) {
@@ -89,6 +86,7 @@ export const CustomerPricingService = {
         discountPercent: 5,
         isVip: false,
         priceGroupName: "Registered",
+        ...staffPresentation,
       };
     }
 
@@ -96,6 +94,7 @@ export const CustomerPricingService = {
       discountPercent: Number(row.discount_percent ?? 5),
       isVip: row.pricing_mode === "MINIMUM",
       priceGroupName: row.name || "Registered",
+      ...staffPresentation,
     };
   },
 

@@ -15,11 +15,12 @@ export function staffBotEnabled() { return enabled(); }
 export async function resolveMakatronStaff({ chatId, telegramUserId }, db = pool) {
   if (!enabled() || !isPositiveId(chatId) || String(chatId) !== String(telegramUserId)) return null;
   const result = await db.query(
-    "SELECT l.user_id, r.name AS role_name, u.first_name " +
+    "SELECT l.user_id, ep.staff_role AS role_name, u.first_name " +
     "FROM makatron_staff_links l JOIN users u ON u.id=l.user_id " +
-    "JOIN roles r ON r.id=u.role_id " +
+    "JOIN employee_profiles ep ON ep.user_id=u.id " +
     "WHERE l.telegram_chat_id=$1 AND l.telegram_user_id=$2 " +
-    "AND u.is_active=TRUE AND r.name IN ('ADMIN','MANAGER') LIMIT 2",
+    "AND u.is_active=TRUE AND ep.access_enabled=TRUE AND ep.telegram_allowed=TRUE " +
+    "AND ep.removed_at IS NULL AND ep.staff_role IN ('ADMIN','MANAGER') LIMIT 2",
     [chatId, telegramUserId]
   );
   if (result.rows.length !== 1) return null;
@@ -30,8 +31,10 @@ export async function resolveMakatronStaff({ chatId, telegramUserId }, db = pool
 export async function issueMakatronStaffLink(userId, db = pool) {
   if (!isPositiveId(userId)) throw new Error("Invalid staff user ID");
   const staff = await db.query(
-    "SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id " +
-    "WHERE u.id=$1 AND u.is_active=TRUE AND r.name IN ('ADMIN','MANAGER')",
+    "SELECT u.id FROM users u JOIN employee_profiles ep ON ep.user_id=u.id " +
+    "WHERE u.id=$1 AND u.is_active=TRUE AND ep.access_enabled=TRUE " +
+    "AND ep.telegram_allowed=TRUE AND ep.removed_at IS NULL " +
+    "AND ep.staff_role IN ('ADMIN','MANAGER')",
     [userId]
   );
   if (staff.rows.length !== 1) throw new Error("Only active ADMIN or MANAGER can link");
@@ -49,11 +52,13 @@ export async function connectMakatronStaff({ token,chatId,telegramUserId }, db =
   try {
     await client.query("BEGIN");
     const link = await client.query(
-      "SELECT t.id,t.user_id,r.name FROM makatron_staff_link_tokens t " +
-      "JOIN users u ON u.id=t.user_id JOIN roles r ON r.id=u.role_id " +
+      "SELECT t.id,t.user_id,ep.staff_role AS name FROM makatron_staff_link_tokens t " +
+      "JOIN users u ON u.id=t.user_id JOIN employee_profiles ep ON ep.user_id=u.id " +
       "WHERE t.token_hash=$1 AND t.used_at IS NULL " +
       "AND t.expires_at>CURRENT_TIMESTAMP AND u.is_active=TRUE " +
-      "AND r.name IN ('ADMIN','MANAGER') FOR UPDATE OF t", [hash(token)]
+      "AND ep.access_enabled=TRUE AND ep.telegram_allowed=TRUE " +
+      "AND ep.removed_at IS NULL AND ep.staff_role IN ('ADMIN','MANAGER') " +
+      "FOR UPDATE OF t", [hash(token)]
     );
     if (link.rows.length !== 1) {
       await client.query("ROLLBACK");
@@ -119,9 +124,11 @@ export async function sendPendingStaffOrderNotifications(api, deps = {}) {
   const getOrder = deps.getOrder || GetManagerOrder.execute;
   const staff = await db.query(
     "SELECT l.user_id,l.telegram_chat_id FROM makatron_staff_links l " +
-    "JOIN users u ON u.id=l.user_id JOIN roles r ON r.id=u.role_id " +
+    "JOIN users u ON u.id=l.user_id JOIN employee_profiles ep ON ep.user_id=u.id " +
     "WHERE l.notifications_enabled=TRUE AND u.is_active=TRUE " +
-    "AND r.name IN ('ADMIN','MANAGER') ORDER BY l.user_id"
+    "AND ep.access_enabled=TRUE AND ep.telegram_allowed=TRUE " +
+    "AND ep.order_notifications_enabled=TRUE AND ep.removed_at IS NULL " +
+    "AND ep.staff_role IN ('ADMIN','MANAGER') ORDER BY l.user_id"
   );
   if (!staff.rows.length) return { recipients: 0, sent: 0 };
   const cursor = await db.query(
