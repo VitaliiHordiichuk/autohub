@@ -24,7 +24,7 @@ test("missing and wrong server secret reveal neither staff prices nor user recor
 });
 test("guest cannot impersonate staff, and normal client receives no incoming cost",async()=>{
  process.env.MAKATRON_SEARCH_BRIDGE_SECRET=secret;
- const db={query:async()=>({rows:[{name:"CLIENT"}]})};
+ const db={query:async()=>({rows:[{is_client:true,is_staff:false}]})};
  const unauthorized=makeRes();
  await searchForMakatron(req(secret,{article:"A2966808206",mode:"staff",userId:2}),unauthorized,{db});
  assert.equal(unauthorized.statusCode,403);
@@ -46,7 +46,7 @@ test("verified staff alone receives server-computed private price data",async()=
  process.env.MAKATRON_SEARCH_BRIDGE_SECRET=secret;
  const res=makeRes();
  await searchForMakatron(req(secret,{article:"A2966808206",mode:"staff",userId:2}),res,{
-  db:{query:async()=>({rows:[{name:"ADMIN"}]})},
+  db:{query:async()=>({rows:[{is_client:false,is_staff:true}]})},
   read:async()=>({found:true,response:{success:true,productCard:null,family:[]}}),
   staffPrices:async()=>({"9":{retail:200,incoming:"100.123456",vip:150}})
  });
@@ -54,10 +54,19 @@ test("verified staff alone receives server-computed private price data",async()=
  assert.equal(res.body.staffPrices["9"].vip,150);
  const quote=makeRes();
  await quoteForMakatron(req(secret,{offerId:9,group:"VIP",userId:2}),quote,{
-  db:{query:async()=>({rows:[{name:"ADMIN"}]})},
+  db:{query:async()=>({rows:[{is_client:false,is_staff:true}]})},
   quote:async()=>({text:"A2966808206 — 150 грн"})
  });
  assert.equal(quote.body.text,"A2966808206 — 150 грн");
+});
+test("disabled staff Telegram cannot request prices even for a customer account",async()=>{
+ process.env.MAKATRON_SEARCH_BRIDGE_SECRET=secret;
+ const denied=makeRes();
+ await searchForMakatron(req(secret,{article:"A2966808206",mode:"staff",userId:2}),denied,{
+  db:{query:async()=>({rows:[{is_client:true,is_staff:false}]})},
+  read:async()=>{throw Error("Disabled staff cannot fetch prices");}
+ });
+ assert.equal(denied.statusCode,403);
 });
 test.after(()=>{if(old===undefined)delete process.env.MAKATRON_SEARCH_BRIDGE_SECRET;
  else process.env.MAKATRON_SEARCH_BRIDGE_SECRET=old;});

@@ -88,6 +88,11 @@ before(async () => {
     userResult.rows[0].id
   );
 
+  await pool.query(
+    "INSERT INTO employee_profiles(user_id, staff_role, access_enabled) VALUES($1, 'ADMIN', TRUE)",
+    [userId]
+  );
+
   const eventResult =
     await pool.query(
       `
@@ -326,6 +331,7 @@ after(async () => {
   }
 
   if (userId) {
+    await pool.query("DELETE FROM employee_profiles WHERE user_id = $1", [userId]);
     await pool.query(
       `
         DELETE FROM users

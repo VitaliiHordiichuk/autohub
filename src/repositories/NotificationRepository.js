@@ -16,9 +16,10 @@ export const NotificationRepository = {
       INSERT INTO user_notifications(user_id, event_key, type, order_id, payload)
       SELECT u.id, $1 || ':' || u.id, $2, $3, $4::jsonb
       FROM users u
-      JOIN roles r ON r.id = u.role_id
+      JOIN employee_profiles ep ON ep.user_id = u.id
       WHERE u.is_active = TRUE
-        AND r.name IN ('ADMIN', 'MANAGER')
+        AND ep.access_enabled = TRUE AND ep.removed_at IS NULL
+        AND ep.staff_role IN ('ADMIN', 'MANAGER')
       ON CONFLICT (user_id, event_key) DO NOTHING
       RETURNING *;
     `, [eventKey, type, orderId, JSON.stringify(payload)]);

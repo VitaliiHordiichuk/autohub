@@ -127,10 +127,11 @@ export const TelegramNotificationService = {
           c.preferred_locale
         FROM user_telegram_connections c
         JOIN users u ON u.id = c.user_id
-        JOIN roles r ON r.id = u.role_id
+        JOIN employee_profiles ep ON ep.user_id = u.id
         WHERE c.notifications_enabled = TRUE
           AND u.is_active = TRUE
-          AND r.name IN ('ADMIN', 'MANAGER')
+          AND ep.access_enabled = TRUE AND ep.telegram_allowed = TRUE
+          AND ep.removed_at IS NULL AND ep.staff_role IN ('ADMIN', 'MANAGER')
         ORDER BY c.telegram_chat_id, c.user_id`),
       db.query(`
         SELECT
@@ -201,9 +202,11 @@ export const TelegramNotificationService = {
       SELECT DISTINCT c.telegram_chat_id
       FROM user_telegram_connections c
       JOIN users u ON u.id = c.user_id
-      JOIN roles r ON r.id = u.role_id
+      JOIN employee_profiles ep ON ep.user_id = u.id
       WHERE c.notifications_enabled = TRUE AND u.is_active = TRUE
-        AND r.name IN ('ADMIN', 'MANAGER')`);
+        AND ep.access_enabled = TRUE AND ep.telegram_allowed = TRUE
+        AND ep.order_notifications_enabled = TRUE AND ep.removed_at IS NULL
+        AND ep.staff_role IN ('ADMIN', 'MANAGER')`);
     if (!result.rows.length) return;
 
     const frontendUrl = String(process.env.FRONTEND_PUBLIC_URL || "http://localhost:3000").replace(/\/$/, "");

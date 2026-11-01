@@ -496,8 +496,8 @@ export const CustomerManagementService = {
             WHERE mp.user_id = u.id AND mp.permission_code = $1
           ) AS can_manage_customer_pricing
         FROM users u
-        JOIN roles r ON r.id = u.role_id
-        WHERE r.name = 'MANAGER'
+        JOIN employee_profiles ep ON ep.user_id = u.id
+        WHERE ep.staff_role = 'MANAGER' AND ep.removed_at IS NULL
         ORDER BY u.first_name, u.last_name, u.email;
       `,
       [CUSTOMER_PRICING_PERMISSION]
@@ -508,8 +508,9 @@ export const CustomerManagementService = {
   async setManagerPermission({ managerUserId, enabled, grantedBy }, db = pool) {
     const id = positiveId(managerUserId, "managerUserId");
     const manager = await db.query(
-      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-       WHERE u.id = $1 AND r.name = 'MANAGER' LIMIT 1`,
+      `SELECT u.id FROM users u JOIN employee_profiles ep ON ep.user_id=u.id
+       WHERE u.id=$1 AND ep.staff_role='MANAGER'
+       AND ep.removed_at IS NULL LIMIT 1`,
       [id]
     );
     if (!manager.rows[0]) throw createError("Менеджера не знайдено", 404);

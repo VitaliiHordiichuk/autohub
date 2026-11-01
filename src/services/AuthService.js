@@ -152,6 +152,7 @@ function createToken(user) {
       sub: String(user.id),
       role: user.roleName,
       authVersion: Number(user.authVersion || 0),
+      staffAuthVersion: Number(user.staffAuthVersion || 0),
       mustChangePassword: Boolean(user.mustChangePassword),
     },
     getJwtSecret(),
@@ -172,6 +173,11 @@ function mapAuthResult(row) {
       phone: row.phone,
       email: row.email,
       role: row.role_name,
+      hasCustomerProfile: Boolean(row.customer_id && row.customer_is_active),
+      staff: row.employee_user_id && !row.employee_removed_at ? {
+        role: row.staff_role,
+        accessEnabled: Boolean(row.staff_access_enabled),
+      } : null,
       isActive: row.is_active,
       staffNumber: row.staff_number || null,
       mustChangePassword: Boolean(row.must_change_password),
@@ -210,8 +216,17 @@ async function findAuthUserByEmail(
       u.must_change_password,
       u.last_login_at,
       u.auth_version,
-      r.name AS role_name,
+      CASE WHEN ep.access_enabled = TRUE AND ep.removed_at IS NULL
+        THEN ep.staff_role
+        WHEN c.id IS NOT NULL OR r.name = 'CLIENT' THEN 'CLIENT'
+        ELSE 'NO_ACCESS' END AS role_name,
+      ep.user_id AS employee_user_id,
+      ep.staff_role,
+      ep.access_enabled AS staff_access_enabled,
+      ep.removed_at AS employee_removed_at,
+      ep.staff_auth_version,
       c.id AS customer_id,
+      c.is_active AS customer_is_active,
       c.customer_number,
       c.customer_type,
       c.price_group_id,
@@ -220,6 +235,8 @@ async function findAuthUserByEmail(
     FROM users u
     JOIN roles r
       ON r.id = u.role_id
+    LEFT JOIN employee_profiles ep
+      ON ep.user_id = u.id
     LEFT JOIN customers c
       ON c.user_id = u.id
     LEFT JOIN price_groups pg
@@ -250,8 +267,17 @@ async function findAuthUserById(
       u.must_change_password,
       u.last_login_at,
       u.auth_version,
-      r.name AS role_name,
+      CASE WHEN ep.access_enabled = TRUE AND ep.removed_at IS NULL
+        THEN ep.staff_role
+        WHEN c.id IS NOT NULL OR r.name = 'CLIENT' THEN 'CLIENT'
+        ELSE 'NO_ACCESS' END AS role_name,
+      ep.user_id AS employee_user_id,
+      ep.staff_role,
+      ep.access_enabled AS staff_access_enabled,
+      ep.removed_at AS employee_removed_at,
+      ep.staff_auth_version,
       c.id AS customer_id,
+      c.is_active AS customer_is_active,
       c.customer_number,
       c.customer_type,
       c.price_group_id,
@@ -260,6 +286,8 @@ async function findAuthUserById(
     FROM users u
     JOIN roles r
       ON r.id = u.role_id
+    LEFT JOIN employee_profiles ep
+      ON ep.user_id = u.id
     LEFT JOIN customers c
       ON c.user_id = u.id
     LEFT JOIN price_groups pg
@@ -434,6 +462,7 @@ export const AuthService = {
           id: authUser.id,
           roleName: authUser.role_name,
           authVersion: authUser.auth_version,
+          staffAuthVersion: authUser.staff_auth_version,
           mustChangePassword: authUser.must_change_password,
         }),
       };
@@ -487,6 +516,10 @@ export const AuthService = {
         throw createError("Неправильний email або пароль", 401);
       }
 
+      if (authUser.role_name === "NO_ACCESS") {
+        throw createError("Доступ до облікового запису вимкнено", 403);
+      }
+
       await client.query(
         `UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1`,
         [authUser.id]
@@ -507,6 +540,7 @@ export const AuthService = {
           id: refreshed.id,
           roleName: refreshed.role_name,
           authVersion: refreshed.auth_version,
+          staffAuthVersion: refreshed.staff_auth_version,
           mustChangePassword: refreshed.must_change_password,
         }),
       };
@@ -518,7 +552,7 @@ export const AuthService = {
     }
   },
 
-  async getCurrentUser(userId) {
+  async getCurrentUser(userId, sessionRole = null) {
     const authUser =
       await findAuthUserById(userId);
 
@@ -529,7 +563,9 @@ export const AuthService = {
       );
     }
 
-    return mapAuthResult(authUser);
+    const result = mapAuthResult(authUser);
+    if (sessionRole) result.user.role = sessionRole;
+    return result;
   },
 
   async updateProfile(userId, input) {
@@ -638,9 +674,17 @@ export const AuthService = {
           u.is_active,
           u.auth_version,
           u.must_change_password,
-          r.name AS role_name
+          r.name AS base_role_name,
+          c.id AS customer_id,
+          c.is_active AS customer_is_active,
+          ep.staff_role,
+          ep.access_enabled AS staff_access_enabled,
+          ep.staff_auth_version,
+          ep.removed_at AS employee_removed_at
         FROM users u
         JOIN roles r ON r.id = u.role_id
+        LEFT JOIN customers c ON c.user_id = u.id
+        LEFT JOIN employee_profiles ep ON ep.user_id = u.id
         WHERE u.id = $1
         LIMIT 1;
       `,
@@ -657,9 +701,19 @@ export const AuthService = {
       throw createError("Сесія недійсна або завершилася", 401);
     }
 
+    const hasCustomerProfile = Boolean(user.customer_id && user.customer_is_active);
+    const staffSessionCurrent = Number(user.staff_auth_version || 0) ===
+      Number(payload.staffAuthVersion || 0);
+    const role = user.staff_access_enabled && !user.employee_removed_at && staffSessionCurrent
+      ? user.staff_role
+      : (hasCustomerProfile || user.base_role_name === "CLIENT" ? "CLIENT" : "NO_ACCESS");
+    if (role === "NO_ACCESS") {
+      throw createError("Сесія недійсна або завершилася", 401);
+    }
     return {
       userId: Number(user.id),
-      role: user.role_name,
+      role,
+      hasCustomerProfile,
       authVersion: Number(user.auth_version || 0),
       mustChangePassword: Boolean(user.must_change_password),
     };
@@ -672,12 +726,17 @@ export const AuthService = {
       throw createError("Користувача не знайдено або заблоковано", 401);
     }
 
+    if (authUser.role_name === "NO_ACCESS") {
+      throw createError("Доступ до облікового запису вимкнено", 403);
+    }
+
     return {
       ...mapAuthResult(authUser),
       token: createToken({
         id: authUser.id,
         roleName: authUser.role_name,
         authVersion: authUser.auth_version,
+        staffAuthVersion: authUser.staff_auth_version,
         mustChangePassword: authUser.must_change_password,
       }),
     };

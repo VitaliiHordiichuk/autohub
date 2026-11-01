@@ -32,9 +32,13 @@ async function ensureUser(role) {
     SELECT u.id, u.auth_version
     FROM users u
     JOIN roles role ON role.id = u.role_id
+    JOIN employee_profiles ep ON ep.user_id = u.id
     WHERE role.name = $1
       AND u.is_active = TRUE
       AND u.must_change_password = FALSE
+      AND ep.access_enabled = TRUE
+      AND ep.removed_at IS NULL
+      AND ep.staff_role = role.name
     ORDER BY u.id
     LIMIT 1
   `, [role]);
@@ -46,6 +50,10 @@ async function ensureUser(role) {
     RETURNING id, auth_version
   `, [`taxonomy-${role.toLowerCase()}-${Date.now()}@autohub.local`, roleResult.rows[0].id]);
   createdUserIds.push(Number(inserted.rows[0].id));
+  await pool.query(
+    "INSERT INTO employee_profiles(user_id, staff_role, access_enabled) VALUES($1, $2, TRUE)",
+    [inserted.rows[0].id, role]
+  );
   return inserted.rows[0];
 }
 
@@ -113,6 +121,7 @@ after(async () => {
     await pool.query("DELETE FROM products WHERE id = $1", [productId]);
   }
   if (createdUserIds.length) {
+    await pool.query("DELETE FROM employee_profiles WHERE user_id = ANY($1::integer[])", [createdUserIds]);
     await pool.query("DELETE FROM users WHERE id = ANY($1::integer[])", [createdUserIds]);
   }
   await pool.end();

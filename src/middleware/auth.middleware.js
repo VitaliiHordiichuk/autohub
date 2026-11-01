@@ -154,7 +154,8 @@ export function requireRole(...allowedRoles) {
   ) {
     if (
       !req.auth ||
-      !allowedRoles.includes(req.auth.role)
+      !allowedRoles.includes(req.auth.role) &&
+      !(allowedRoles.includes("CLIENT") && req.auth.hasCustomerProfile)
     ) {
       return res.status(403).json({
         success: false,

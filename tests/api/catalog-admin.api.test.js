@@ -34,9 +34,13 @@ before(async () => {
       SELECT DISTINCT ON (r.name) u.id, u.auth_version, r.name AS role
       FROM users u
       JOIN roles r ON r.id = u.role_id
+      JOIN employee_profiles ep ON ep.user_id = u.id
       WHERE r.name IN ('ADMIN', 'MANAGER')
         AND u.is_active = TRUE
         AND u.must_change_password = FALSE
+        AND ep.access_enabled = TRUE
+        AND ep.removed_at IS NULL
+        AND ep.staff_role = r.name
       ORDER BY r.name, u.id;
     `
   );
@@ -51,6 +55,10 @@ before(async () => {
       [`catalog-manager-${Date.now()}@autohub.local`, role.rows[0].id]
     );
     createdManagerId = Number(inserted.rows[0].id);
+    await pool.query(
+      "INSERT INTO employee_profiles(user_id, staff_role, access_enabled) VALUES($1, 'MANAGER', TRUE)",
+      [createdManagerId]
+    );
     authUsers.set("MANAGER", { ...inserted.rows[0], role: "MANAGER" });
   }
 
@@ -67,6 +75,7 @@ after(async () => {
     });
   }
   if (createdManagerId) {
+    await pool.query("DELETE FROM employee_profiles WHERE user_id = $1", [createdManagerId]);
     await pool.query("DELETE FROM users WHERE id = $1", [createdManagerId]);
   }
   await pool.end();

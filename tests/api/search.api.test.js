@@ -81,6 +81,10 @@ before(async () => {
     managerRole.rows[0].id,
   ]);
   managerUserId = Number(manager.rows[0].id);
+  await pool.query(
+    "INSERT INTO employee_profiles(user_id, staff_role, access_enabled) VALUES($1, 'MANAGER', TRUE)",
+    [managerUserId]
+  );
   managerToken = jwt.sign(
     {
       sub: String(managerUserId),
@@ -132,6 +136,7 @@ after(async () => {
 
   if (managerUserId) {
     await pool.query("DELETE FROM search_events WHERE user_id = $1", [managerUserId]);
+    await pool.query("DELETE FROM employee_profiles WHERE user_id = $1", [managerUserId]);
     await pool.query("DELETE FROM users WHERE id = $1", [managerUserId]);
   }
 

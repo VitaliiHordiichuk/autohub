@@ -28,12 +28,17 @@ async function authorized(req,res,{mode,userId},deps={}) {
     return false;
   }
   const db=deps.db||pool;
-  const role=(await db.query(
-    "SELECT r.name FROM users u JOIN roles r ON r.id=u.role_id "+
+  const access=(await db.query(
+    "SELECT (c.id IS NOT NULL OR r.name='CLIENT') AS is_client,"+
+    "(ep.user_id IS NOT NULL AND ep.access_enabled=TRUE AND ep.telegram_allowed=TRUE "+
+    "AND ep.removed_at IS NULL) AS is_staff "+
+    "FROM users u JOIN roles r ON r.id=u.role_id "+
+    "LEFT JOIN customers c ON c.user_id=u.id AND c.is_active=TRUE "+
+    "LEFT JOIN employee_profiles ep ON ep.user_id=u.id "+
     "WHERE u.id=$1 AND u.is_active=TRUE LIMIT 1",[uid]
-  )).rows[0]?.name;
-  if(mode==="client"&&role==="CLIENT"||
-     mode==="staff"&&["ADMIN","MANAGER"].includes(role))return true;
+  )).rows[0];
+  if(mode==="client"&&access?.is_client ||
+     mode==="staff"&&access?.is_staff)return true;
   res.status(403).json({success:false,error:"Role not allowed"});
   return false;
 }

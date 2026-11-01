@@ -100,7 +100,8 @@ export async function me(req, res) {
   try {
     const result =
       await AuthService.getCurrentUser(
-        req.auth.userId
+        req.auth.userId,
+        req.auth.role
       );
 
     return res.json({
@@ -126,7 +127,8 @@ export async function session(req, res) {
   try {
     const result =
       await AuthService.getCurrentUser(
-        req.auth.userId
+        req.auth.userId,
+        req.auth.role
       );
 
     return res.json({
