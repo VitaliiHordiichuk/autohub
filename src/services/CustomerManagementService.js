@@ -230,9 +230,23 @@ export const CustomerManagementService = {
           "SELECT id FROM roles WHERE name = 'CLIENT' LIMIT 1"
         );
         if (!roleResult.rows[0]) throw createError("Роль CLIENT не знайдено", 500);
+        const defaultPriceGroupId = await getDefaultPriceGroup(db);
         const priceGroupId = input.priceGroupId
           ? positiveId(input.priceGroupId, "priceGroupId")
-          : await getDefaultPriceGroup(db);
+          : defaultPriceGroupId;
+
+        if (
+          actorRole === "MANAGER" &&
+          priceGroupId !== defaultPriceGroupId &&
+          !(await CustomerManagementService.hasPricingAccess(
+            actorUserId, actorRole, db
+          ))
+        ) {
+          throw createError(
+            "Немає права призначати іншу цінову групу",
+            403
+          );
+        }
 
         const group = await db.query(
           "SELECT id FROM price_groups WHERE id = $1 LIMIT 1",
