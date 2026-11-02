@@ -1,0 +1,42 @@
+name: Staff-only Mercedes unit cost import checks
+on:
+  push:
+    branches:
+      - feat/mercedes-private-cost-import-2026-10-26
+    paths:
+      - "migrations/116_add_private_offer_cost_import.sql"
+      - "src/services/PrivateCostImportService*"
+      - "src/repositories/PrivateCostRepository.js"
+      - "src/services/EmailImportService.js"
+      - "src/controllers/admin-import.controller.js"
+      - "src/services/ImportService.js"
+      - "src/services/ImportReviewService.js"
+      - "src/services/WarehouseImportProfileService.js"
+      - ".github/workflows/private-cost-import-checks.yml"
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Node syntax
+        run: |
+          node --check src/services/PrivateCostImportService.js
+          node --check src/repositories/PrivateCostRepository.js
+          node --check src/services/EmailImportService.js
+          node --check src/controllers/admin-import.controller.js
+          node --check src/services/ImportService.js
+          node --check src/services/ImportReviewService.js
+          node --check src/services/WarehouseImportProfileService.js
+      - name: Parser and existing pricing invariants
+        run: |
+          node --test src/services/PrivateCostImportService.test.js \
+            src/services/ImportFileParserService.test.js \
+            src/services/ImportNumericService.test.js \
+            src/services/WarehousePricingService.test.js \
+            src/services/CustomerPricingService.test.js

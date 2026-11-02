@@ -48,7 +48,7 @@ export const TelegramConnectionService = {
   async connectFromTelegram({ token, chatId, telegramUserId, username, firstName }) {
     return transaction(async (db) => {
       const result = await db.query(`
-        SELECT t.id, t.user_id, t.locale, u.phone, u.phone_verified_at, u.phone_verified_value, r.name AS role_name
+        SELECT t.id, t.user_id, t.locale, u.phone, u.first_name AS registered_first_name, u.phone_verified_at, u.phone_verified_value, r.name AS role_name
         FROM telegram_link_tokens t
         JOIN users u ON u.id = t.user_id
         JOIN roles r ON r.id = u.role_id
@@ -75,6 +75,7 @@ export const TelegramConnectionService = {
         userId:link.user_id,
         locale:normalizeLocale(link.locale),
         role:link.role_name,
+        firstName: link.role_name === "CLIENT" ? (String(link.registered_first_name || "").trim() || null) : null,
         phoneVerified:Boolean(link.phone_verified_at && normalizePhone(link.phone) === normalizePhone(link.phone_verified_value)),
       };
     });

@@ -122,32 +122,56 @@ export const WarehouseRepository = {
   async findPickupAvailable(
     db = pool
   ) {
+    // Public API + Telegram: never show warehouse.name, warehouse.city,
+    // or implicitly expose OWN warehouses. The public pickup configuration
+    // is independent of internal warehouse/supplier inventory structure.
     const sql = `
       SELECT
         id,
-        name,
-        city,
-        type,
+        public_pickup_name AS name,
+        public_pickup_city AS city,
+        public_pickup_address AS address,
         delivery_days
       FROM warehouses
       WHERE is_active = TRUE
-        AND (
-          pickup_available = TRUE
-          OR type = 'OWN'
-        )
+        AND pickup_available = TRUE
+        AND public_pickup_enabled = TRUE
+        AND NULLIF(BTRIM(public_pickup_name), '') IS NOT NULL
+        AND NULLIF(BTRIM(public_pickup_city), '') IS NOT NULL
+        AND NULLIF(BTRIM(public_pickup_address), '') IS NOT NULL
       ORDER BY
-        CASE
-          WHEN type = 'OWN' THEN 0
-          ELSE 1
-        END,
-        city NULLS LAST,
-        name;
+        public_pickup_city,
+        public_pickup_name,
+        id;
     `;
 
     const result =
       await db.query(sql);
 
     return result.rows;
+  },
+
+  async findPublicPickupById(
+    warehouseId,
+    db = pool
+  ) {
+    const result = await db.query(`
+      SELECT
+        id,
+        public_pickup_name AS name,
+        public_pickup_city AS city,
+        public_pickup_address AS address
+      FROM warehouses
+      WHERE id = $1
+        AND is_active = TRUE
+        AND pickup_available = TRUE
+        AND public_pickup_enabled = TRUE
+        AND NULLIF(BTRIM(public_pickup_name), '') IS NOT NULL
+        AND NULLIF(BTRIM(public_pickup_city), '') IS NOT NULL
+        AND NULLIF(BTRIM(public_pickup_address), '') IS NOT NULL
+      LIMIT 1
+    `, [warehouseId]);
+    return result.rows[0] ?? null;
   },
 
   async findById(

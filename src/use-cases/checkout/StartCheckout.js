@@ -6,6 +6,7 @@ export const StartCheckout = {
     itemIds = null,
     userId = null,
     guestToken = null,
+    pricingUserId = null,
   }) {
     if (!cartId) {
       throw new Error("cartId є обов’язковим");
@@ -17,6 +18,7 @@ export const StartCheckout = {
         itemIds,
         userId,
         guestToken,
+        pricingUserId,
       });
 
     const expiresAt = result.checkoutSession.expires_at

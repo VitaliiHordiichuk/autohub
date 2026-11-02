@@ -27,15 +27,15 @@ test("формирует полное и безопасное уведомлен
     frontendUrl: "https://maka.com.ua/",
   });
 
-  assert.match(notification.text, /Новый VIN-запрос №42/);
-  assert.match(notification.text, /Клиент: Іван &amp; Олена/);
+  assert.match(notification.text, /Новий VIN-запит №42/);
+  assert.match(notification.text, /Клієнт: Іван &amp; Олена/);
   assert.match(notification.text, /Телефон: <code>\+380671234567<\/code>/);
   assert.match(notification.text, /Марка: Mercedes-Benz/);
   assert.match(notification.text, /VIN: <code>WDD2120471A387679<\/code>/);
   assert.ok(notification.text.includes("Потрібні &lt;передні&gt; колодки"));
   assert.equal(
     notification.reply_markup.inline_keyboard[0][0].url,
-    "https://maka.com.ua/ru/admin/vin-requests?request=42"
+    "https://maka.com.ua/uk/admin/vin-requests?request=42"
   );
 });
 
@@ -69,8 +69,10 @@ test("отправляет гостевой VIN-запрос всем подкл
   assert.deepEqual(sent.map((delivery) => delivery.chatId), [101, 202]);
   assert.match(sent[0].payload.text, /Новий VIN-запит №42/);
   assert.match(sent[1].payload.text, /New VIN request №42/);
+  assert.match(queries[0], /telegram_bot_locales/);
   assert.match(queries[0], /ep\.staff_role IN \('ADMIN', 'MANAGER'\)/);
   assert.match(queries[0], /ep\.access_enabled = TRUE AND ep\.telegram_allowed = TRUE/);
+  assert.match(queries[0], /ep\.removed_at IS NULL/);
   assert.match(queries[0], /u\.is_active = TRUE/);
   assert.match(queries[1], /LEFT JOIN users u ON u\.id = vr\.user_id/);
   assert.deepEqual(result, {
