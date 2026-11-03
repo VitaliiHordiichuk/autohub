@@ -89,3 +89,18 @@ test("bad or incomplete lines are rejected without lookup", () => {
   assert.deepEqual(parseSpecialOrderTxtLine(fixedRow({price:"0"})),
     {ok:false,reason:"INVALID_PRICE"});
 });
+
+test("duplicate with spaced terminal W is discarded without hiding normal article", () => {
+  const plain = parseSpecialOrderTxtLine(fixedRow({
+    article:"A0001112233", secondGroup:"20", price:"1000,00",
+  }));
+  const suffixed = parseSpecialOrderTxtLine(fixedRow({
+    article:"A0001112233    W", secondGroup:"20", price:"1000,00",
+  }));
+  assert.equal(plain.ok, true);
+  assert.equal(plain.record.articleNormalized, "A0001112233");
+  assert.deepEqual(suffixed, {
+    ok:false, reason:"INVALID_OR_TRAILING_W_ARTICLE",
+  });
+  assert.equal(specialOrderArticle("a0001112233    W"), null);
+});
