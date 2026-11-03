@@ -28,6 +28,7 @@
 - Read-only lookup candidate helper: `src/services/SpecialOrderLookupService.js`.
 - Article filter: `src/services/SpecialOrderArticlePolicy.js` (terminal W excluded, W-prefix tool allowed).
 - Fixed-width sample parser: `src/services/SpecialOrderTxtParser.js` (decoded Unicode field positions, not split-on-whitespace).
+- Read-only streaming file preview: `node scripts/preview-special-order-txt.mjs --file PATH [--encoding utf-8|windows-1251]`. Reads the real file incrementally, reports accepted/rejected counts and tool-code statistics, **never writes to DB**. This is NOT yet a database importer.
 - No changes to existing search endpoints or frontend; feature is **NOT LIVE**.
 
 ## Next safe engineering steps
