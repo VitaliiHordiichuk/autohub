@@ -45,3 +45,20 @@ test("unapproved returned groups are omitted even if importer made a mistake", a
   assert.equal(result[0].priceUah,1128);
   assert.equal(result[0].name,"Part");
 });
+
+test("lookup never queries a terminal-W article; W-prefix tools are searchable", async () => {
+  const queries = [];
+  const db = {
+    async query(sql, params) {
+      queries.push(params);
+      return { rows: [] };
+    }
+  };
+  for (const article of ["A000123456W","W123456W","a000123456w"]) {
+    assert.deepEqual(await lookupSpecialOrderArticle({article, db}), [], article);
+  }
+  assert.equal(queries.length, 0);
+  assert.deepEqual(await lookupSpecialOrderArticle({article:"W000123456", db}), []);
+  assert.equal(queries.length, 1);
+  assert.equal(queries[0][1],"W000123456");
+});
