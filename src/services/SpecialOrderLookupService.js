@@ -1,5 +1,5 @@
 import { pool } from "../config/db.js";
-import { normalizeArticle } from "./articleEngine/normalize.js";
+import { specialOrderArticle } from "./SpecialOrderArticlePolicy.js";
 import {
   calculateSpecialOrderPrice,
   specialOrderAllowedGroups,
@@ -21,8 +21,9 @@ export async function lookupSpecialOrderArticle({
   priceGroupName = "Guest",
   db = pool,
 }) {
-  const normalized = normalizeArticle(article);
-  if (!/^[A-Z0-9]{2,120}$/.test(normalized)) return [];
+  const eligible = specialOrderArticle(article);
+  if (!eligible) return [];
+  const normalized = eligible.normalized;
 
   const result = await db.query(
     `SELECT e.article, e.title, e.discount_group, e.retail_ex_vat_uah
