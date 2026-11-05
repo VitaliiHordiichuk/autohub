@@ -38,10 +38,11 @@ try {
   const check = await client.query(
     `SELECT current_database() AS db_name,
          to_regclass('public.special_order_entries') AS entries,
-         to_regclass('public.special_order_import_runs') AS runs`
+         to_regclass('public.special_order_import_runs') AS runs,
+         to_regclass('public.special_order_sources') AS sources`
   );
   const row = check.rows[0];
-  if (row?.db_name !== database || !row.entries || !row.runs) {
+  if (row?.db_name !== database || !row.entries || !row.runs || !row.sources) {
     throw new Error("Isolated database or migration 125 not verified; no import started");
   }
   console.error("ISOLATED STAGE DB:", row.db_name);
