@@ -21,6 +21,11 @@ test("lookup uses parameterized exact article, approved groups and active READY 
   assert.match(calls[0].sql,/s\.active_import_id/);
   assert.match(calls[0].sql,/i\.status = 'READY'/);
   assert.match(calls[0].sql,/e\.article_normalized = \$2/);
+  assert.match(calls[0].sql, /NOT EXISTS/);
+  assert.match(calls[0].sql, /other\.retail_ex_vat_uah IS DISTINCT FROM e\.retail_ex_vat_uah/);
+  assert.match(calls[0].sql, /other\.discount_group IS DISTINCT FROM e\.discount_group/);
+  assert.match(calls[0].sql, /COALESCE\(BTRIM\(other\.title\), ''\) IS DISTINCT FROM/);
+  assert.match(calls[0].sql, /ORDER BY e\.line_number ASC\s+LIMIT 1/);
   assert.deepEqual(calls[0].parameters.slice(0,2),["mercedes-txt","A4058819501"]);
   assert.ok(calls[0].parameters[2].includes("20"));
   assert.ok(!calls[0].parameters[2].includes("evo220"));
