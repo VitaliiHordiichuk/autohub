@@ -175,12 +175,12 @@ export function formatTelegramHelp({ firstName = null, locale = "uk" } = {}) {
     ? "🤖 <b>" + greeting + " I'm MAKAtron, your MAKA.com.ua parts assistant.</b>\n"
       + "Send a part number or a list of up to 20 numbers, one per line (or separated by comma or ;).\n"
       + "I'll check MAKA stock, supplier offers, replacements and alternatives.\n"
-      + "Your personal price is available after connecting Telegram to your MAKA account.\n"
+      + "Send /register to connect your MAKA account from this Telegram chat.\n"
       + "🌐 Change language: /language"
     : "🤖 <b>" + greeting + " Я MAKAtron — робот-помічник MAKA.com.ua.</b>\n"
       + "Надішліть артикул або список до 20 артикулів — по одному в рядку (або через кому чи ;).\n"
       + "Перевірю склад MAKA, пропозиції постачальників, заміни й аналоги.\n"
-      + "Персональна ціна доступна після прив’язки Telegram у профілі MAKA.\n"
+      + "Надішліть /register, щоб зареєструватися або прив’язати MAKA до цього Telegram.\n"
       + "🌐 Змінити мову: /language" };
 }
 
