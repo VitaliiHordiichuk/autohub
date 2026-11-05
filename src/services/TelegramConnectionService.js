@@ -47,6 +47,9 @@ export const TelegramConnectionService = {
   },
 
   async connectFromTelegram({ token, chatId, telegramUserId, username, firstName }) {
+    // Never accept a link token forwarded from a group or another sender.
+    if (!chatId || !telegramUserId || String(chatId) !== String(telegramUserId))
+      return null;
     return transaction(async (db) => {
       const result = await db.query(`
         SELECT t.id, t.user_id, t.locale, u.phone, u.first_name AS registered_first_name, u.phone_verified_at, u.phone_verified_value, r.name AS role_name
