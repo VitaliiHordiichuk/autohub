@@ -85,7 +85,7 @@ test("price must come from 196 column, not earlier source price", () => {
 });
 
 test("bad or incomplete lines are rejected without lookup", () => {
-  assert.equal(parseSpecialOrderTxtLine("a000123"), {ok:false,reason:"INVALID_LINE"});
+  assert.deepEqual(parseSpecialOrderTxtLine("a000123"), {ok:false,reason:"INVALID_LINE"});
   assert.deepEqual(parseSpecialOrderTxtLine(fixedRow({price:"0"})),
     {ok:false,reason:"INVALID_PRICE"});
 });
