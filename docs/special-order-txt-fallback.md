@@ -81,6 +81,6 @@ node scripts/audit-special-order-duplicates.mjs \
 - Identical duplicate: `QALES9150103`.
 - Therefore **1,543,386** unique articles have unambiguous terms under the current source snapshot.
 - `SpecialOrderLookupService` has a SQL `NOT EXISTS` guard against any article whose duplicate price, discount group or nonblank normalized name differs. Identical duplicates collapse to one search-only inquiry result. No arbitrary lowest-price selection.
-- Draft staging service `SpecialOrderStageImportService.js` and CLI `scripts/stage-special-order-txt.mjs` now write only to an explicit local test/preview database, enforce an exact source SHA-256, expected row counts and price-conflict count, and never set `special_order_sources.active_import_id`. **Not yet executed on PostgreSQL.**
+- Draft staging service `SpecialOrderStageImportService.js` and CLI `scripts/stage-special-order-txt.mjs` now write only to an explicit local test/preview database, enforce an exact source SHA-256, expected row count, expected **1,543,392 unique articles**, and **six price conflicts**, and never set `special_order_sources.active_import_id`. **Not yet executed on PostgreSQL.**
 - Confirmed source SHA-256 from previous Mac/VPS checksum: `1458b65df43b28eb072e2e91ac7676ff1bca1dadcb8dc124f0b943e40bc821b3`.
 - Next: run stage importer unit tests, create isolated disposable database and apply migration 125 to it only, then test full 1.54m-row stage. **Do not apply migration, import, or activate on production yet.**
