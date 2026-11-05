@@ -103,7 +103,7 @@ export async function createTelegramRegistrationLink({
     alreadyLinked: false,
     expiresInMinutes: 15,
     url: "https://maka.com.ua/" + safeLocale(locale) +
-      "/register?tg=" + encodeURIComponent(token),
+      "/register#tg=" + encodeURIComponent(token),
   };
 }
 
