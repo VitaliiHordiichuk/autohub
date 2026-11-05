@@ -16,7 +16,7 @@ function row(article, price, group = "20") {
   return a.join("");
 }
 
-function database() {
+function database({ delayRunMs = 0 } = {}) {
   const statements = [];
   const records = [];
   let status = null;
@@ -28,6 +28,7 @@ function database() {
       if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
       if (sql.includes("pg_advisory_unlock")) return { rows: [{ unlocked: true }] };
       if (sql.includes("INSERT INTO special_order_import_runs")) {
+        if (delayRunMs) await new Promise(resolve => setTimeout(resolve, delayRunMs));
         status = "IMPORTING";
         return { rows: [{ id: "42" }] };
       }
@@ -80,7 +81,7 @@ async function withFile(text, fn) {
   }
 }
 
-test("stage importer stores revision but NEVER activates it", async () => {
+test("stage importer never misses initial TXT rows during slow DB setup and NEVER activates", async () => {
   const text = [
     row("A0000011111", "1000,00"),
     row("A0000011111", "2000,00"),
@@ -88,7 +89,7 @@ test("stage importer stores revision but NEVER activates it", async () => {
     row("A0000033333", "4000,00", "drt116"),
   ].join("\r\n") + "\r\n";
   await withFile(text, async (filename, sha) => {
-    const db = database();
+    const db = database({ delayRunMs: 100 });
     const result = await stageSpecialOrderTxt({
       client: db.client, filename,
       expectedSha256: sha,
