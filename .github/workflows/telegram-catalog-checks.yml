@@ -30,6 +30,7 @@ jobs:
           node --check src/services/TelegramCatalogFormatter.js
           node --check src/services/TelegramCatalogService.js
           node --check src/services/TelegramIdentityLinkService.js
+          node --check scripts/test-makatron-identity-postgres.mjs
           node --check src/services/AuthService.js
           node --check src/services/TelegramConnectionService.js
           node --check src/controllers/telegram-connection.controller.js
