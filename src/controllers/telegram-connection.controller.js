@@ -30,6 +30,10 @@ export async function claimTelegramFromBot(req, res) {
     });
     return res.json({ success: true, connected: true });
   } catch (error) {
-    return fail(res.status(Number(error.statusCode) || 400), error);
+    return res.status(Number(error.statusCode) || 400).json({
+      success: false,
+      ...(error.apiCode ? { code: error.apiCode } : {}),
+      error: error.message,
+    });
   }
 }
