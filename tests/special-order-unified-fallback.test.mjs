@@ -194,3 +194,28 @@ test("found existing family without inventory: preserve catalog cards and append
   assert.equal(result.response.productCard.offers.length, 0);
   assert.equal(result.response.specialOrder.checkoutEligible, false);
 });
+
+
+test("shared website read model never calls TXT when MAKA or partners have offers", async () => {
+  const original = { id: 7, article };
+  const result = await readWebsiteArticleSearch({
+    article, requestedLocale: "uk",
+  }, {
+    specialOrderEnabled: true,
+    search: async () => ({
+      found: true, query: article, normalized: article, rule: "MERCEDES",
+      exactProduct: original, family: [original], replacementPath: [],
+    }),
+    pricing: async () => ({ priceGroupName: "Guest" }),
+    buildCard: async product => ({
+      product, offers: [eligibleOffer()], analogs: [], replacements: [],
+    }),
+    present: async ({ productCard }) => ({
+      locale: "uk", productCard, family: [], replacementSourceCard: null,
+    }),
+    specialOrder: async () => { throw Error("TXT fallback must not be called"); },
+  });
+  assert.equal(result.found, true);
+  assert.equal(result.response.productCard.offers[0].isAvailable, true);
+  assert.equal(result.response.specialOrder, undefined);
+});
