@@ -76,22 +76,8 @@ export async function stageSpecialOrderTxt({
   const rejectedReasons = {};
   const pending = [];
   const digest = createHash("sha256");
-  const input = createReadStream(filename, { highWaterMark: 1024 * 1024 });
-  const decoded = input.pipe(new Transform({
-    transform(chunk, unused, callback) {
-      try {
-        digest.update(chunk);
-        callback(null, decoder.decode(chunk, { stream: true }));
-      } catch (error) {
-        callback(error);
-      }
-    },
-    final(callback) {
-      try { callback(null, decoder.decode()); }
-      catch (error) { callback(error); }
-    },
-  }));
-  const reader = readline.createInterface({ input: decoded, crlfDelay: Infinity });
+  let input = null;
+  let reader = null;
 
   async function flush() {
     if (!pending.length) return;
@@ -114,6 +100,27 @@ export async function stageSpecialOrderTxt({
     if (!Number.isSafeInteger(importId)) throw new Error("Invalid run ID");
     await client.query("COMMIT");
 
+    // IMPORTANT: Only open the file and create readline after the last
+    // awaited DB setup operation. readline starts consuming immediately;
+    // opening it earlier can silently discard initial rows while awaiting
+    // BEGIN/INSERT/COMMIT. There must be no await between creation and loop.
+    input = createReadStream(filename, { highWaterMark: 1024 * 1024 });
+    const decoded = input.pipe(new Transform({
+      transform(chunk, unused, callback) {
+        try {
+          digest.update(chunk);
+          callback(null, decoder.decode(chunk, { stream: true }));
+        } catch (error) {
+          callback(error);
+        }
+      },
+      final(callback) {
+        try { callback(null, decoder.decode()); }
+        catch (error) { callback(error); }
+      },
+    }));
+    reader = readline.createInterface({ input: decoded, crlfDelay: Infinity });
+
     for await (const line of reader) {
       lineNumber++;
       if (lineNumber > expectedLines) throw new Error("More source rows than expected");
@@ -130,7 +137,12 @@ export async function stageSpecialOrderTxt({
     await flush();
 
     if (lineNumber !== expectedLines || accepted !== expectedAccepted) {
-      throw new Error("Input counters differ from approved dry-run");
+      throw new Error(
+        `Input counters differ from approved dry-run: ` +
+        `lines=${lineNumber} (expected ${expectedLines}); ` +
+        `accepted=${accepted} (expected ${expectedAccepted}); ` +
+        `rejected=${lineNumber - accepted}`
+      );
     }
     const actualSha256 = digest.digest("hex");
     if (actualSha256 !== expectedSha256) {
@@ -197,8 +209,8 @@ export async function stageSpecialOrderTxt({
     }
     throw error;
   } finally {
-    reader.close();
-    input.destroy();
+    reader?.close();
+    input?.destroy();
     try {
       await client.query("SELECT pg_advisory_unlock(204839812, 125)");
     } catch { /* release on client disconnect */ }
