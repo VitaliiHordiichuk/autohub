@@ -21,6 +21,7 @@ export async function resolveTelegramPricingIdentity({ chatId, telegramUserId },
     + "FROM user_telegram_connections c "
     + "JOIN users u ON u.id = c.user_id "
     + "JOIN roles r ON r.id = u.role_id "
+    + "JOIN customers customer ON customer.user_id = u.id AND customer.is_active = TRUE "
     + "WHERE c.telegram_chat_id = $1 AND c.telegram_user_id = $2 "
     + "AND u.is_active = TRUE AND r.name = 'CLIENT' LIMIT 2",
     [chatId, telegramUserId],
