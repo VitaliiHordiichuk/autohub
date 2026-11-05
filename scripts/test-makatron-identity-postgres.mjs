@@ -159,9 +159,11 @@ try {
   // Stage-only cleanup. No data in autohub are ever read or written.
   if (seeded) {
     try {
+      // The application role has TRUNCATE rights on staging tables, but it
+      // does not own the sequences copied by pg_dump. Never RESTART IDENTITY:
+      // that would require sequence ownership and is unnecessary for tests.
       await pool.query(
-        "TRUNCATE roles, users, price_groups, telegram_registration_claims " +
-        "RESTART IDENTITY CASCADE",
+        "TRUNCATE roles, users, price_groups, telegram_registration_claims CASCADE",
       );
       if (passed) {
         assert.equal(await count("SELECT COUNT(*) AS n FROM users"), 0);
