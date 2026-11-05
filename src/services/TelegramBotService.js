@@ -1,4 +1,5 @@
 import { TelegramConnectionService } from "./TelegramConnectionService.js";
+import { createTelegramRegistrationLink } from "./TelegramIdentityLinkService.js";
 import { searchTelegramCatalog } from "./TelegramCatalogService.js";
 import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLanguageService.js";
 import { handleTelegramOrderMessage, handleTelegramOrderCallback, telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
@@ -156,6 +157,51 @@ async function poll() {
             : {remove_keyboard:true},
         });
         if(pilot)menuShownInThisProcess.add(String(message.chat.id));
+        continue;
+      }
+      // Guest-first onboarding: the proof is generated inside this verified
+      // Telegram chat, then consumed by website registration or login.
+      // No email/phone/name matching is trusted to infer the Telegram ID.
+      if (message?.chat?.type === "private" &&
+          String(message.chat.id) === String(message.from?.id) &&
+          /^\/(?:register|account)(?:@maka_com_ua_bot)?$/i.test(String(message.text || "").trim())) {
+        const locale = await TelegramLanguageService.get(message.chat.id);
+        if (!linkingEnabled()) {
+          await api("sendMessage", { chat_id: message.chat.id,
+            text: locale === "en" ? "Account linking is temporarily unavailable."
+              : "Прив’язка акаунта тимчасово недоступна." });
+          continue;
+        }
+        try {
+          const link = await createTelegramRegistrationLink({
+            chatId: message.chat.id,
+            telegramUserId: message.from.id,
+            username: message.from.username || null,
+            firstName: message.from.first_name || null,
+            locale,
+          });
+          if (link.alreadyLinked || link.ambiguous) {
+            await api("sendMessage", { chat_id: message.chat.id,
+              text: locale === "en"
+                ? "Your Telegram is already connected to a MAKA account, or has an old conflicting link. Manage it in your MAKA account."
+                : "Telegram уже прив’язано до акаунта MAKA або є стара суперечлива прив’язка. Керуйте прив’язкою в кабінеті MAKA." });
+          } else {
+            await api("sendMessage", { chat_id: message.chat.id,
+              text: locale === "en"
+                ? "Register or sign in through this personal link. Your Telegram will connect automatically. The link expires in 15 minutes."
+                : "Зареєструйтесь або увійдіть за персональним посиланням. Telegram підключиться автоматично. Посилання діє 15 хвилин.",
+              reply_markup: { inline_keyboard: [[{
+                text: locale === "en" ? "🔐 Open MAKA account" : "🔐 Відкрити MAKA",
+                url: link.url,
+              }]] },
+            });
+          }
+        } catch (error) {
+          console.error("MAKAtron registration link:", error.message);
+          await api("sendMessage", { chat_id: message.chat.id,
+            text: locale === "en" ? "Account linking is temporarily unavailable."
+              : "Не вдалося створити посилання. Спробуйте пізніше." });
+        }
         continue;
       }
       const match = String(message?.text || "").match(/^\/start\s+([a-f0-9]{48})$/i);
