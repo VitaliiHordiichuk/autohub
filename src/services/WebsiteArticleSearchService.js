@@ -7,6 +7,7 @@ import { CustomerPricingService } from "./CustomerPricingService.js";
 import {
   readSpecialOrderFallback,
   specialOrderFallbackEnabled,
+  hasEligibleWebsiteOffers,
 } from "./SpecialOrderFallbackService.js";
 
 // SINGLE SOURCE OF TRUTH for website article search and both MAKAtron modes.
@@ -76,7 +77,8 @@ export async function readWebsiteArticleSearch({
     }):[];
   const publicResult=await present({requestedLocale,family:familyCards,
     productCard,replacementSourceCard,includeSourceDetails});
-  const inquiry=specialOrderEnabled
+  // An available MAKA, partner, related or replacement offer always wins.
+  const inquiry=specialOrderEnabled && !hasEligibleWebsiteOffers(publicResult)
     ?await specialOrder({article,requestedLocale:publicResult.locale,
         pricingContext,searchResult,publicResult})
     :null;
