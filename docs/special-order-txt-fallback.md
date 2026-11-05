@@ -43,3 +43,24 @@
 9. Dry-run on an isolated DB; backup Production before any migration or import; inspect resource/DB impact.
 
 No deployment or DB import is authorized by this branch alone.
+
+## Full-source inspection (2026-11-05, verified VPS output)
+- Uploaded TXT: `/home/ubuntu/maka-special-order/incoming/special_order_full.txt` (657,912,080 bytes, 1,901,480 rows).
+- Full read-only Windows-1251 streaming preview results:
+  - accepted: **1,543,399** source rows;
+  - rejected: **358,081**;
+  - `DISCOUNT_GROUP_EXCLUDED`: **355,366**;
+  - `INVALID_OR_TRAILING_W_ARTICLE`: **2,715**;
+  - eligible tool rows starting with `W`: **6,976**;
+  - no additional rejection reasons in this run.
+- **These are source rows, not distinct articles.** No deterministic duplicate-price rule has been approved.
+- `scripts/audit-special-order-duplicates.mjs` analyzes normalized-article duplicates using external GNU sort (`--buffer-size=64M --parallel=1`), keeping RAM bounded. The temporary TSV and sort data are written into a private folder under `--tmp-dir` and removed afterward.
+- Example read-only diagnostic command:
+```bash
+node scripts/audit-special-order-duplicates.mjs \
+  --file /home/ubuntu/maka-special-order/incoming/special_order_full.txt \
+  --encoding windows-1251 \
+  --tmp-dir /home/ubuntu/maka-special-order
+```
+- Inspect `duplicateAudit.uniqueArticles`, `articlesWithMultipleRows`, `articlesWithDifferentPrices`, `articlesWithDifferentGroups`, `articlesWithDifferentNames`, and `pricingConflicts` before writing a final import/lookup selection policy.
+- This tool does **not** access PostgreSQL, deploy code, activate a feature flag, or select any selling price.
