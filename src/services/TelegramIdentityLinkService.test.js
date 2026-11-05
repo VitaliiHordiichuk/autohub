@@ -48,8 +48,8 @@ test("a private bot registration link is single-use proof, not a self-reported I
     chatId: 1001, telegramUserId: 1001, locale: "uk",
   }, db);
   assert.equal(link.alreadyLinked, false);
-  assert.match(link.url, /^https:\/\/maka.com.ua\/uk\/register\?tg=[a-f0-9]{48}$/);
-  const token = new URL(link.url).searchParams.get("tg");
+  assert.match(link.url, /^https:\/\/maka.com.ua\/uk\/register#tg=[a-f0-9]{48}$/);
+  const token = new URLSearchParams(new URL(link.url).hash.slice(1)).get("tg");
   assert.equal(inserts[1].args[5].length, 64, "Only a SHA256 hash is persisted");
   assert.ok(!inserts.some(row => row.args?.includes(token)));
   await claimTelegramRegistrationLink({ token, userId: 42 }, db);
