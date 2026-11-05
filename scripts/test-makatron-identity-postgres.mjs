@@ -53,6 +53,7 @@ try {
   assert.equal(await count("SELECT COUNT(*) AS n FROM user_telegram_connections"), 0);
   assert.equal(await count("SELECT COUNT(*) AS n FROM roles"), 0);
   assert.equal(await count("SELECT COUNT(*) AS n FROM price_groups"), 0);
+  seeded = true;
 
   const role = (await pool.query(
     "INSERT INTO roles(name) VALUES ('CLIENT') RETURNING id",
@@ -69,8 +70,6 @@ try {
       "VALUES('Staging Administrator','staging-admin@example.invalid','!disabled!',$1,true) RETURNING id",
     [adminRole],
   )).rows[0];
-  seeded = true;
-
   let result = await priceForCurrentSender();
   assert.equal(result.viewer, null);
   assert.equal(result.price, 1000);
