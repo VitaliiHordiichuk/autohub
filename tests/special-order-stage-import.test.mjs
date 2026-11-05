@@ -92,7 +92,7 @@ test("stage importer stores revision but NEVER activates it", async () => {
     const result = await stageSpecialOrderTxt({
       client: db.client, filename,
       expectedSha256: sha,
-      expectedLines: 4, expectedAccepted: 3,
+      expectedLines: 4, expectedAccepted: 3, expectedUniqueArticles: 2,
       expectedPricingConflicts: 1,
       batchSize: 2,
     });
@@ -116,7 +116,7 @@ test("stage importer marks FAILED if source digest is not the approved one", asy
     await assert.rejects(() => stageSpecialOrderTxt({
       client: db.client, filename,
       expectedSha256: "0".repeat(64),
-      expectedLines: 1, expectedAccepted: 1,
+      expectedLines: 1, expectedAccepted: 1, expectedUniqueArticles: 1,
       expectedPricingConflicts: 0,
     }), /SHA-256 mismatch/);
     assert.equal(db.status, "FAILED");
@@ -130,9 +130,22 @@ test("stage importer never promotes when expected conflict count disagrees", asy
     const db = database();
     await assert.rejects(() => stageSpecialOrderTxt({
       client: db.client, filename, expectedSha256: sha,
-      expectedLines: 1, expectedAccepted: 1,
+      expectedLines: 1, expectedAccepted: 1, expectedUniqueArticles: 1,
       expectedPricingConflicts: 1,
     }), /Conflict count differs/);
+    assert.equal(db.status, "FAILED");
+  });
+});
+
+test("stage importer refuses a wrong distinct-article count", async () => {
+  const text = row("A0000011111", "1000,00") + "\n";
+  await withFile(text, async (filename, sha) => {
+    const db = database();
+    await assert.rejects(() => stageSpecialOrderTxt({
+      client: db.client, filename, expectedSha256: sha,
+      expectedLines: 1, expectedAccepted: 1, expectedUniqueArticles: 2,
+      expectedPricingConflicts: 0,
+    }), /unique-article counts/);
     assert.equal(db.status, "FAILED");
   });
 });
