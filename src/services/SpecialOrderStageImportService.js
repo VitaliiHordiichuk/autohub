@@ -44,7 +44,7 @@ export function makeSpecialOrderInsertBatch(importId, rows) {
 
 export async function stageSpecialOrderTxt({
   client, filename, encoding = "windows-1251",
-  expectedSha256, expectedLines, expectedAccepted,
+  expectedSha256, expectedLines, expectedAccepted, expectedUniqueArticles,
   expectedPricingConflicts, batchSize = 750,
   onProgress = () => {},
 }) {
@@ -52,7 +52,7 @@ export async function stageSpecialOrderTxt({
   if (!filename || !/^[0-9a-f]{64}$/.test(expectedSha256 || "")) {
     throw new Error("Filename and exact SHA-256 are mandatory");
   }
-  for (const number of [expectedLines, expectedAccepted, expectedPricingConflicts]) {
+  for (const number of [expectedLines, expectedAccepted, expectedUniqueArticles, expectedPricingConflicts]) {
     if (!Number.isSafeInteger(number) || number < 0) {
       throw new Error("Expected counts must be safe non-negative integers");
     }
@@ -144,8 +144,8 @@ export async function stageSpecialOrderTxt({
     );
     const rowsStored = Number(stored.rows[0]?.rows);
     const uniqueArticles = Number(stored.rows[0]?.unique_articles);
-    if (rowsStored !== accepted || !Number.isSafeInteger(uniqueArticles)) {
-      throw new Error("Database counts do not match the source");
+    if (rowsStored !== accepted || uniqueArticles !== expectedUniqueArticles) {
+      throw new Error("Database row/unique-article counts do not match the approved audit");
     }
     const conflictsResult = await client.query(
       `SELECT COUNT(*)::bigint AS conflicts FROM (
