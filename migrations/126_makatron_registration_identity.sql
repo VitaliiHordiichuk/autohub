@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS telegram_registration_claims (
 );
 CREATE INDEX IF NOT EXISTS idx_telegram_registration_claims_expiration
   ON telegram_registration_claims (expires_at);
+-- Production API and MAKAtron workers use this application role, not postgres.
+-- Match the privileges of existing Telegram link tables.
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON telegram_registration_claims TO autohub_app;
 INSERT INTO schema_migrations(version)
 VALUES ('126_makatron_registration_identity')
 ON CONFLICT (version) DO NOTHING;
