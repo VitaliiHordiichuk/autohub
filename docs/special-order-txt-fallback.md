@@ -43,3 +43,44 @@
 9. Dry-run on an isolated DB; backup Production before any migration or import; inspect resource/DB impact.
 
 No deployment or DB import is authorized by this branch alone.
+
+## Full-source inspection (2026-11-05, verified VPS output)
+- Uploaded TXT: `/home/ubuntu/maka-special-order/incoming/special_order_full.txt` (657,912,080 bytes, 1,901,480 rows).
+- Full read-only Windows-1251 streaming preview results:
+  - accepted: **1,543,399** source rows;
+  - rejected: **358,081**;
+  - `DISCOUNT_GROUP_EXCLUDED`: **355,366**;
+  - `INVALID_OR_TRAILING_W_ARTICLE`: **2,715**;
+  - eligible tool rows starting with `W`: **6,976**;
+  - no additional rejection reasons in this run.
+- **These are source rows, not distinct articles.** No deterministic duplicate-price rule has been approved.
+- `scripts/audit-special-order-duplicates.mjs` analyzes normalized-article duplicates using external GNU sort (`--buffer-size=64M --parallel=1`), keeping RAM bounded. The temporary TSV and sort data are written into a private folder under `--tmp-dir` and removed afterward.
+- Example read-only diagnostic command:
+```bash
+node scripts/audit-special-order-duplicates.mjs \
+  --file /home/ubuntu/maka-special-order/incoming/special_order_full.txt \
+  --encoding windows-1251 \
+  --tmp-dir /home/ubuntu/maka-special-order
+```
+- Inspect `duplicateAudit.uniqueArticles`, `articlesWithMultipleRows`, `articlesWithDifferentPrices`, `articlesWithDifferentGroups`, `articlesWithDifferentNames`, and `pricingConflicts` before writing a final import/lookup selection policy.
+- This tool does **not** access PostgreSQL, deploy code, activate a feature flag, or select any selling price.
+
+## Full-source duplicate audit: 2026-11-05 (VPS-verified)
+- 1,543,399 accepted rows = **1,543,392 normalized unique articles**.
+- Only **7** articles repeat (each exactly twice); 7 extra rows.
+- **6** articles have different source prices; **0** differ in discount group; 2 also differ in names.
+- 1 article repeats with entirely identical terms.
+- Source record widths: zero mismatches. All 17 targeted audit/parser/pricing tests passed.
+- Price-conflict articles requiring quarantine, **not a minimum-price rule**:
+  - `A22268027293E19`
+  - `C93401212122902`
+  - `QALES3004CASCOCLI`
+  - `QALES90418902`
+  - `QALES90418903`
+  - `QSICHERBOXXLBAT13`
+- Identical duplicate: `QALES9150103`.
+- Therefore **1,543,386** unique articles have unambiguous terms under the current source snapshot.
+- `SpecialOrderLookupService` has a SQL `NOT EXISTS` guard against any article whose duplicate price, discount group or nonblank normalized name differs. Identical duplicates collapse to one search-only inquiry result. No arbitrary lowest-price selection.
+- Draft staging service `SpecialOrderStageImportService.js` and CLI `scripts/stage-special-order-txt.mjs` now write only to an explicit local test/preview database, enforce an exact source SHA-256, expected row count, expected **1,543,392 unique articles**, and **six price conflicts**, and never set `special_order_sources.active_import_id`. **Not yet executed on PostgreSQL.**
+- Confirmed source SHA-256 from previous Mac/VPS checksum: `1458b65df43b28eb072e2e91ac7676ff1bca1dadcb8dc124f0b943e40bc821b3`.
+- Next: run stage importer unit tests, create isolated disposable database and apply migration 125 to it only, then test full 1.54m-row stage. **Do not apply migration, import, or activate on production yet.**

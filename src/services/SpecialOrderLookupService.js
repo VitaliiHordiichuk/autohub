@@ -14,7 +14,9 @@ const SOURCE_KEY = "mercedes-txt";
  * The importer must load a complete revision, validate it, mark it READY,
  * and atomically update special_order_sources.active_import_id.
  *
- * This method does not create a product, public page, cart item or order.
+ * Conflicting duplicates are hidden entirely, not silently priced by minimum.
+ * Exact duplicate rows return only one result. This method does not create a
+ * product, public page, cart item or order.
  */
 export async function lookupSpecialOrderArticle({
   article,
@@ -37,8 +39,20 @@ export async function lookupSpecialOrderArticle({
      WHERE s.source_key = $1
        AND e.article_normalized = $2
        AND e.discount_group = ANY($3::varchar[])
-     ORDER BY e.retail_ex_vat_uah ASC, e.line_number ASC
-     LIMIT 20`,
+       AND NOT EXISTS (
+         SELECT 1
+         FROM special_order_entries AS other
+         WHERE other.import_id = e.import_id
+           AND other.article_normalized = e.article_normalized
+           AND (
+             other.discount_group IS DISTINCT FROM e.discount_group
+             OR other.retail_ex_vat_uah IS DISTINCT FROM e.retail_ex_vat_uah
+             OR COALESCE(BTRIM(other.title), '') IS DISTINCT FROM
+                COALESCE(BTRIM(e.title), '')
+           )
+       )
+     ORDER BY e.line_number ASC
+     LIMIT 1`,
     [SOURCE_KEY, normalized, specialOrderAllowedGroups()]
   );
 
