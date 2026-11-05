@@ -4,6 +4,11 @@ import { MercedesFamilyOfferService } from "./MercedesFamilyOfferService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { ArticleNumberRepository } from "../repositories/ArticleNumberRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
+import {
+  readSpecialOrderFallback,
+  specialOrderFallbackEnabled,
+  hasEligibleWebsiteOffers,
+} from "./SpecialOrderFallbackService.js";
 
 // SINGLE SOURCE OF TRUTH for website article search and both MAKAtron modes.
 // The site and the internal Telegram bridge call this same function.
@@ -18,12 +23,37 @@ export async function readWebsiteArticleSearch({
   const buildFamily=deps.buildFamily || (args=>MercedesFamilyOfferService.build(args));
   const findSource=deps.findSource || (args=>ArticleNumberRepository.findSearchProductByBrandAndArticle(args));
   const present=deps.present || (args=>PublicSearchPresenterService.present(args));
+  const specialOrder=deps.specialOrder || (args=>readSpecialOrderFallback(args,{enabled:true}));
+  const specialOrderEnabled=deps.specialOrderEnabled===undefined
+    ?specialOrderFallbackEnabled():deps.specialOrderEnabled===true;
   const searchResult=await search(article);
-  if(!searchResult?.found) return {
-    found:false,searchResult,
-    response:{success:false,query:article,normalized:searchResult?.normalized||"",
-      message:"Товар не знайдено"},
-  };
+  if(!searchResult?.found){
+    if(specialOrderEnabled){
+      const pricingContext=await pricing(userId);
+      const inquiry=await specialOrder({
+        article,requestedLocale,pricingContext,searchResult,publicResult:null
+      });
+      if(inquiry){
+        const locale=["uk","ru","en"].includes(requestedLocale)?requestedLocale:"uk";
+        return {
+          found:true,searchResult,productCard:null,familyCards:[],publicResult:null,
+          specialOrderOnly:true,
+          response:{
+            success:true,locale,query:article,
+            normalized:searchResult?.normalized||"",
+            searchedArticle:searchResult?.normalized||"",
+            rule:"SPECIAL_ORDER_TXT",parsed:null,family:[],productCard:null,
+            replacement:null,specialOrder:inquiry,
+          },
+        };
+      }
+    }
+    return {
+      found:false,searchResult,
+      response:{success:false,query:article,normalized:searchResult?.normalized||"",
+        message:"Товар не знайдено"},
+    };
+  }
   const pricingContext=await pricing(userId);
   const productCard=searchResult.exactProduct
     ?await buildCard(searchResult.exactProduct,pricingContext,availabilityContext):null;
@@ -47,6 +77,11 @@ export async function readWebsiteArticleSearch({
     }):[];
   const publicResult=await present({requestedLocale,family:familyCards,
     productCard,replacementSourceCard,includeSourceDetails});
+  // An available MAKA, partner, related or replacement offer always wins.
+  const inquiry=specialOrderEnabled && !hasEligibleWebsiteOffers(publicResult)
+    ?await specialOrder({article,requestedLocale:publicResult.locale,
+        pricingContext,searchResult,publicResult})
+    :null;
   return {
     found:true,searchResult,productCard,familyCards,publicResult,
     response:{
@@ -62,6 +97,7 @@ export async function readWebsiteArticleSearch({
         targetArticle:finalReplacementLink?.targetArticle,
         sourceProductCard:publicResult.replacementSourceCard
       }:null,
+      ...(inquiry?{specialOrder:inquiry}:{}),
     }
   };
 }
