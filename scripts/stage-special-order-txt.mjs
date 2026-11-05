@@ -12,6 +12,7 @@ function get(name) {
 }
 const expectedLines = Number(get("--expected-lines"));
 const expectedAccepted = Number(get("--expected-accepted"));
+const expectedUniqueArticles = Number(get("--expected-unique"));
 const expectedPricingConflicts = Number(get("--expected-conflicts"));
 const filename = get("--file");
 const expectedSha256 = get("--sha256");
@@ -25,7 +26,7 @@ if (explicitConfirmation !== "I_CONFIRM_ISOLATED_TEST_DB" ||
     !process.env.DB_USER || !process.env.DB_PORT ||
     !filename || !/^[0-9a-f]{64}$/.test(expectedSha256 || "") ||
     !get("--expected-lines") || !get("--expected-accepted") ||
-    !get("--expected-conflicts")) {
+    !get("--expected-unique") || !get("--expected-conflicts")) {
   console.error(
     "REFUSED: Supply --confirm-stage-only I_CONFIRM_ISOLATED_TEST_DB, " +
     "local DB_HOST, DB_NAME ending _preview/_test and explicit source counts/SHA-256."
@@ -50,7 +51,7 @@ try {
   const summary = await stageSpecialOrderTxt({
     client, filename,
     encoding: get("--encoding") || "windows-1251",
-    expectedSha256, expectedLines, expectedAccepted,
+    expectedSha256, expectedLines, expectedAccepted, expectedUniqueArticles,
     expectedPricingConflicts,
     onProgress: ({ lines, accepted }) => console.error("STAGED:", lines, accepted),
   });
