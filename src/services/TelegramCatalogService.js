@@ -96,6 +96,12 @@ export async function searchTelegramCatalog({ text, chatId, telegramUserId }, ov
             " — пошук тимчасово недоступний")});
       }
     }
+    // Bot-first onboarding keeps Telegram and website customer identity aligned.
+    if (!viewer && results.length) {
+      results[0].text += locale === "en"
+        ? "\n\n🔐 Send /register to link MAKA and see personal prices."
+        : "\n\n🔐 Надішліть /register, щоб прив’язати MAKA та бачити особисті ціни.";
+    }
     return results.length===1?[{parse_mode:"HTML",...results[0]}]:
       formatTelegramBatch(results,locale);
   }
