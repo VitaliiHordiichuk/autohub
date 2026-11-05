@@ -63,6 +63,9 @@ export async function stageSpecialOrderTxt({
   const fileStat = await stat(filename);
   if (!fileStat.isFile() || fileStat.size < 100) throw new Error("Invalid input file");
 
+  // Validate the decoder before taking the session advisory lock.
+  const decoder = new TextDecoder(encoding, { fatal: true });
+
   const lock = await client.query(
     "SELECT pg_try_advisory_lock(204839812, 125) AS locked"
   );
@@ -73,7 +76,6 @@ export async function stageSpecialOrderTxt({
   const rejectedReasons = {};
   const pending = [];
   const digest = createHash("sha256");
-  const decoder = new TextDecoder(encoding, { fatal: true });
   const input = createReadStream(filename, { highWaterMark: 1024 * 1024 });
   const decoded = input.pipe(new Transform({
     transform(chunk, unused, callback) {
@@ -163,13 +165,14 @@ export async function stageSpecialOrderTxt({
     }
 
     await client.query("BEGIN");
-    await client.query(
+    const readyResult = await client.query(
       `UPDATE special_order_import_runs
        SET status = 'READY', total_lines = $2, eligible_lines = $3,
            rejected_lines = $4, finished_at = NOW()
        WHERE id = $1 AND status = 'IMPORTING'`,
       [importId, lineNumber, accepted, lineNumber - accepted]
     );
+    if (readyResult.rowCount !== 1) throw new Error("Run status transition failed");
     // Intentionally DO NOT touch special_order_sources.active_import_id.
     await client.query("COMMIT");
 
