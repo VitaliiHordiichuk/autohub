@@ -278,10 +278,6 @@ function formatTelegramStockBatch(results, locale) {
   const maxLength = 3900;
   for (let start = 0; start < results.length; start += 5) {
     const subset = results.slice(start, start + 5);
-    const cities = new Set(subset.flatMap(result =>
-      (result.stockEntries || []).map(entry => entry.city)
-    ));
-    const singleCity = cities.size === 1;
     const header = "<b>MAKAtron · " + t.results + " " + (start + 1)
       + "–" + Math.min(start + 5, results.length) + " " + t.of
       + " " + results.length + "</b>\n\n";
