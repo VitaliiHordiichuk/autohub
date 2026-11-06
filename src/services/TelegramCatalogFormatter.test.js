@@ -206,3 +206,26 @@ test("Telegram batch safely splits many in-stock variants without dropping HTML 
   }
   assert.equal((allText.match(/🔎/g) || []).length, 70);
 });
+
+test("warehouse city is consistently localized from stored Kharkiv variants without inventing missing locations", () => {
+  const cards = [
+    { product: { article: "A2711800109", name: "Масляний фільтр" },
+      offers: [{ sourceType: "OWN_STOCK", warehouseCity: "Харьков",
+        isAvailable: true, quantity: 4, displayQuantity: "4", retailPrice: 1380.96 }] },
+    { product: { article: "A271180010990", name: "Фільтр оливи" },
+      offers: [{ sourceType: "OWN_STOCK", warehouseCity: "Харків",
+        isAvailable: true, quantity: 4, displayQuantity: "4", retailPrice: 1035.36 }] },
+    { product: { article: "HU718/5X", name: "Фільтр" },
+      offers: [{ sourceType: "SUPPLIER", warehouseCity: "Харьков",
+        isAvailable: true, quantity: 3, retailPrice: 500 }] },
+  ];
+  const uk = formatTelegramOwnStockVariants({ query: "2711800109", cards, locale: "uk" }).text;
+  assert.equal((uk.match(/🏬/g) || []).length, 1);
+  assert.match(uk, /🏬 <b>Склад Харків<\/b>/);
+  assert.doesNotMatch(uk, /Харьков|HU718\/5X/);
+  assert.equal((uk.match(/🔎/g) || []).length, 2);
+  const en = formatTelegramOwnStockVariants({ query: "2711800109", cards, locale: "en" }).text;
+  assert.equal((en.match(/🏬/g) || []).length, 1);
+  assert.match(en, /🏬 <b>Warehouse Kharkiv<\/b>/);
+  assert.doesNotMatch(en, /Харьков|Харків/);
+});
