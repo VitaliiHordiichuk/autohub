@@ -142,10 +142,10 @@ async function poll() {
         const locale = await TelegramLanguageService.get(message.chat.id);
         const copy = {
           uk:verification.verified
-            ? "✅ Номер підтверджено. Тепер можна надсилати VIN-запити та спілкуватися з менеджером."
+            ? "Дякую! Номер телефону успішно підтверджено. ✅\n\nТепер можете перевірити, як працює MAKAtron.\n\nНадішліть каталожний номер запчастини, наприклад: A2711800109"
             : "Ой, цей номер не збігається з номером у вашому акаунті MAKA. Перевірте номер у профілі або поділіться власним контактом.",
           en:verification.verified
-            ? "✅ Phone number confirmed. You can now send VIN requests and chat with a manager."
+            ? "Thank you! Your phone number has been successfully verified. ✅\n\nYou can now try MAKAtron.\n\nSend a part number, for example: A2711800109"
             : "This number does not match the phone number in your MAKA account. Check your profile number or share your own contact.",
         };
         const pilot=telegramInlineCheckoutEnabled(message.chat.id);
