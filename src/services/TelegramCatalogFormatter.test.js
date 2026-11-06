@@ -229,3 +229,79 @@ test("warehouse city is consistently localized from stored Kharkiv variants with
   assert.match(en, /🏬 <b>Warehouse Kharkiv<\/b>/);
   assert.doesNotMatch(en, /Харьков|Харків/);
 });
+
+
+test("one city heading per whole batch, no blank lines between variants, one blank between requested numbers", () => {
+  const offer = (article, price, city = "Харьков") => ({
+    product: { article, name: "Запчастина" },
+    offers: [{ sourceType: "OWN_STOCK", warehouseCity: city, isAvailable: true,
+      quantity: 2, displayQuantity: "2", retailPrice: price }],
+  });
+  const first = formatTelegramOwnStockVariants({
+    query: "2711800109",
+    cards: [offer("A2711800109", 759.53), offer("A271180010990", 797.23, "Харків")],
+  });
+  const second = formatTelegramOwnStockVariants({
+    query: "A1673200503",
+    cards: [offer("A1673200503", 161280.1), offer("A167320050380", 90563.3, "Харків"),
+      offer("A167320050390", 100000)],
+  });
+  const out = formatTelegramBatch([first, second]);
+  assert.equal(out.length, 1);
+  const text = out[0].text;
+  assert.equal((text.match(/🏬/g) || []).length, 1);
+  assert.equal((text.match(/🔎/g) || []).length, 5);
+  assert.match(text, /🏬 <b>Склад Харків<\/b>/);
+  assert.doesNotMatch(text, /Склад Харьков/);
+  assert.match(text, /759,53 грн<\/b>  🟢 <b>В наявності: 2 шт\.<\/b>\n🔎 <a href="https:\/\/maka\.com\.ua\/uk\/product\/A271180010990"/);
+  assert.match(text, /797,23 грн<\/b>  🟢 <b>В наявності: 2 шт\.<\/b>\n\n🔎 <a href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200503"/);
+  assert.match(text, /161[\s\u00a0]280,1 грн<\/b>  🟢 <b>В наявності: 2 шт\.<\/b>\n🔎 <a href="https:\/\/maka\.com\.ua\/uk\/product\/A167320050380"/);
+  assert.match(text, /90[\s\u00a0]563,3 грн<\/b>  🟢 <b>В наявності: 2 шт\.<\/b>\n🔎 <a href="https:\/\/maka\.com\.ua\/uk\/product\/A167320050390"/);
+  assert.ok(!text.includes("\n\n\n"));
+  assert.equal(out[0].parse_mode, "HTML");
+});
+
+test("one query has no extra variant gaps, mixed warehouse cities keep accurate separate headings", () => {
+  const offers = [
+    { sourceType: "OWN_STOCK", warehouseCity: "Харьков",
+      isAvailable: true, quantity: 1, retailPrice: 150 },
+    { sourceType: "OWN_STOCK", warehouseCity: "Київ",
+      isAvailable: true, quantity: 1, retailPrice: 180 },
+  ];
+  const one = formatTelegramOwnStockVariants({
+    query: "A1111111111", cards: [{ product: { article: "A1111111111", name: "Товар" }, offers }]
+  });
+  assert.match(one.text, /Склад Харків/);
+  assert.match(one.text, /Склад Київ/);
+  assert.doesNotMatch(one.text, /\n\n/);
+  const two = formatTelegramOwnStockVariants({
+    query: "A2222222222", cards: [{
+      product: { article: "A2222222222", name: "Товар" },
+      offers: [{ sourceType: "OWN_STOCK", warehouseCity: "Харків",
+        isAvailable: true, quantity: 1, retailPrice: 250 }]
+    }]
+  });
+  const text = formatTelegramBatch([one, two])[0].text;
+  assert.equal((text.match(/Склад Харків/g) || []).length, 2);
+  assert.equal((text.match(/Склад Київ/g) || []).length, 1);
+  assert.ok(!text.includes("\n\n\n"));
+});
+
+test("long in-stock batches split only between complete offers, preserving all clickable article links", () => {
+  const cards = Array.from({ length: 90 }, (_, i) => ({
+    product: { article: "A" + String(i).padStart(10, "0"),
+      name: "Масляний фільтр ".repeat(10) },
+    offers: [{ sourceType: "OWN_STOCK", warehouseCity: "Харків",
+      isAvailable: true, quantity: 1, retailPrice: 123.45 }]
+  }));
+  const one = formatTelegramOwnStockVariants({query: "A0000000000", cards});
+  const chunks = formatTelegramBatch([one]);
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every(c => c.text.length < 3901 && c.parse_mode === "HTML"));
+  const all = chunks.map(c => c.text).join("\n");
+  assert.equal((all.match(/🔎/g) || []).length, 90);
+  assert.equal((all.match(/💰/g) || []).length, 90);
+  assert.equal((all.match(/<a href=/g) || []).length, 90);
+  assert.equal((all.match(/<\/a>/g) || []).length, 90);
+  assert.ok(chunks.every(c => c.text.includes("🏬 <b>Склад Харків</b>")));
+});
