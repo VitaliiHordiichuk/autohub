@@ -252,16 +252,44 @@ export function formatTelegramInputError(error, locale = "uk") {
   return { text: "⚠️ " + message };
 }
 
+// Five queried articles per batch, splitting into additional messages when
+// all in-stock variants cannot fit Telegram's 4096-character message limit.
+// Split between complete HTML paragraphs so clickable article tags stay intact.
 export function formatTelegramBatch(results, locale = "uk") {
   const t = COPY[lang(locale)];
   const chunks = [];
+  const maxLength = 3900;
   for (let i = 0; i < results.length; i += 5) {
-    chunks.push({
-      text: "<b>MAKAtron · " + t.results + " " + (i + 1) + "–" + Math.min(i + 5, results.length)
-        + " " + t.of + " " + results.length + "</b>\n\n"
-        + results.slice(i, i + 5).map((r) => r.text).join("\n\n"),
-      parse_mode: "HTML",
-    });
+    const header = "<b>MAKAtron · " + t.results + " " + (i + 1) + "–"
+      + Math.min(i + 5, results.length) + " " + t.of + " "
+      + results.length + "</b>\n\n";
+    let text = header;
+    const flush = () => {
+      if (text !== header) chunks.push({ text, parse_mode: "HTML" });
+      text = header;
+    };
+    for (const result of results.slice(i, i + 5)) {
+      const parts = String(result.text || "").split(/\n\n+/).filter(Boolean);
+      for (const part of parts) {
+        const candidate = (text === header ? "" : "\n\n") + part;
+        if (text.length + candidate.length > maxLength) flush();
+        if (header.length + part.length > maxLength) {
+          // A legacy result might have an unusually large paragraph.
+          // Always split at newline boundaries, never in an HTML link.
+          for (const line of part.split("\n").filter(Boolean)) {
+            const lineCandidate = (text === header ? "" : "\n") + line;
+            if (text.length + lineCandidate.length > maxLength) flush();
+            if (header.length + line.length > maxLength) {
+              throw new Error("Telegram catalog line exceeds message limit");
+            }
+            text += (text === header ? "" : "\n") + line;
+          }
+        } else {
+          text += (text === header ? "" : "\n\n") + part;
+        }
+      }
+    }
+    flush();
   }
   return chunks;
 }
