@@ -85,6 +85,18 @@ export function telegramProductUrl(article, locale = "uk") {
 const articleUrl = telegramProductUrl;
 
 
+// Warehouse cities are stored in source data, sometimes in different
+// languages. Only normalize known equivalents for display/grouping: do not
+// assign a city when the site has none or infer locations from product data.
+function localizedWarehouseCity(value, locale) {
+  const raw = typeof value === "string" ? value.trim().slice(0, 90) : "";
+  if (!raw) return "";
+  if (/^(?:харків|харьков|kharkiv|kharkov)$/iu.test(raw)) {
+    return lang(locale) === "en" ? "Kharkiv" : "Харків";
+  }
+  return raw;
+}
+
 // Shared website mode: present ONLY real, eligible warehouse offers from the
 // site read model. Do not infer replacements, prices, or availability here.
 export function formatTelegramOwnStockVariants({ query, cards, locale = "uk" }) {
@@ -113,9 +125,7 @@ export function formatTelegramOwnStockVariants({ query, cards, locale = "uk" }) 
         offer.displayQuantity.trim()
         ? offer.displayQuantity.trim()
         : String(quantity);
-      const city = typeof offer.warehouseCity === "string"
-        ? offer.warehouseCity.trim().slice(0, 90)
-        : "";
+      const city = localizedWarehouseCity(offer.warehouseCity, locale);
       const key = city.toLocaleLowerCase();
       if (!groups.has(key)) groups.set(key, { city, rows: [] });
 
