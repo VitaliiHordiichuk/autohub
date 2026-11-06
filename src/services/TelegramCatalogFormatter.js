@@ -143,11 +143,17 @@ export function formatTelegramOwnStockVariants({ query, cards, locale = "uk" }) 
   }
 
   return {
+    // Preserve each variant as one indivisible item. The batch formatter
+    // can then keep requested-number groups intact and print a shared city
+    // heading only once across those groups.
+    stockEntries: [...groups.values()].flatMap(({ city, rows }) =>
+      rows.map(text => ({ city, text }))
+    ),
     text: [...groups.values()].map(({ city, rows }) =>
       "🏬 <b>" + t.ownByCity
       + (city ? " " + escapeTelegramHtml(city) : "") + "</b>\n"
-      + rows.join("\n\n")
-    ).join("\n\n"),
+      + rows.join("\n")
+    ).join("\n"),
   };
 }
 
@@ -262,10 +268,86 @@ export function formatTelegramInputError(error, locale = "uk") {
   return { text: "⚠️ " + message };
 }
 
+// The website may return several real, in-stock variants for each submitted
+// article. Keep related variants consecutive, with exactly one blank line
+// between the distinct submitted queries. The warehouse label is shared
+// across all queries when their stock is in the same city.
+function formatTelegramStockBatch(results, locale) {
+  const t = COPY[lang(locale)];
+  const chunks = [];
+  const maxLength = 3900;
+  for (let start = 0; start < results.length; start += 5) {
+    const subset = results.slice(start, start + 5);
+    const cities = new Set(subset.flatMap(result =>
+      (result.stockEntries || []).map(entry => entry.city)
+    ));
+    const singleCity = cities.size === 1;
+    const header = "<b>MAKAtron · " + t.results + " " + (start + 1)
+      + "–" + Math.min(start + 5, results.length) + " " + t.of
+      + " " + results.length + "</b>\n\n";
+    let text = header;
+    let lastRequest = null;
+    let lastCity = null;
+
+    const cityHeading = city => "🏬 <b>" + t.ownByCity
+      + (city ? " " + escapeTelegramHtml(city) : "") + "</b>\n";
+
+    const flush = () => {
+      if (text !== header) chunks.push({
+        text, parse_mode: "HTML",
+      });
+      text = header;
+      lastRequest = null;
+      lastCity = null;
+    };
+
+    // One complete offer line includes both the linked number and its price.
+    // Never split that line, which could otherwise break Telegram HTML.
+    const append = (body, requestIndex, city = null, stock = false) => {
+      const build = () => {
+        const separator = lastRequest === null ? ""
+          : lastRequest === requestIndex ? "\n" : "\n\n";
+        const warehouse = stock && (lastCity === null || lastCity !== city)
+          ? cityHeading(city) : "";
+        return separator + warehouse + body;
+      };
+      let addition = build();
+      if (text.length + addition.length > maxLength) {
+        flush();
+        addition = build();
+      }
+      if (text.length + addition.length > maxLength) {
+        throw new Error("Telegram stock variant exceeds message limit");
+      }
+      text += addition;
+      lastRequest = requestIndex;
+      if (stock) lastCity = city;
+      else lastCity = null;
+    };
+
+    for (let i = 0; i < subset.length; i++) {
+      const result = subset[i];
+      const requestIndex = start + i;
+      if (Array.isArray(result.stockEntries) && result.stockEntries.length) {
+        for (const { city, text: row } of result.stockEntries) {
+          append(row, requestIndex, city, true);
+        }
+      } else {
+        append(String(result.text || ""), requestIndex);
+      }
+    }
+    flush();
+  }
+  return chunks;
+}
+
 // Five queried articles per batch, splitting into additional messages when
 // all in-stock variants cannot fit Telegram's 4096-character message limit.
 // Split between complete HTML paragraphs so clickable article tags stay intact.
 export function formatTelegramBatch(results, locale = "uk") {
+  if (results.some(result => Array.isArray(result.stockEntries))) {
+    return formatTelegramStockBatch(results, locale);
+  }
   const t = COPY[lang(locale)];
   const chunks = [];
   const maxLength = 3900;
