@@ -51,6 +51,8 @@ const COPY = {
     invalidLength: "Занадто довге або порожнє повідомлення.",
     invalidArticle: "Надішліть артикул (літери й цифри) або список артикулів, по одному в рядку.",
     results: "Результати", of: "з",
+    ownByCity: "Склад", inStock: "В наявності",
+    noOwnStock: "немає в наявності на наших складах.",
   },
   en: {
     own: "MAKA warehouse", partner: "Suppliers (on order)",
@@ -62,6 +64,8 @@ const COPY = {
     invalidLength: "This message is empty or too long.",
     invalidArticle: "Send a part number (letters and digits), or a list of part numbers, one per line.",
     results: "Results", of: "of",
+    ownByCity: "Warehouse", inStock: "In stock",
+    noOwnStock: "not available in our warehouses.",
   },
 };
 
@@ -79,6 +83,63 @@ export function telegramProductUrl(article, locale = "uk") {
   return "https://maka.com.ua/" + lang(locale) + "/product/" + encodeURIComponent(article);
 }
 const articleUrl = telegramProductUrl;
+
+
+// Shared website mode: present ONLY real, eligible warehouse offers from the
+// site read model. Do not infer replacements, prices, or availability here.
+export function formatTelegramOwnStockVariants({ query, cards, locale = "uk" }) {
+  const t = COPY[lang(locale)];
+  const groups = new Map();
+
+  for (const card of cards || []) {
+    const article = String(card?.product?.article || "").trim();
+    const url = articleUrl(article, locale);
+    if (!url) continue;
+
+    const name = escapeTelegramHtml(String(card.product.name || t.part).slice(0, 180));
+    const articleLink = '<a href="' + escapeTelegramHtml(url) + '">'
+      + escapeTelegramHtml(article) + '</a>';
+
+    for (const offer of card.offers || []) {
+      const quantity = Number(offer?.quantity);
+      const price = currency(offer?.retailPrice, locale);
+      if (offer?.sourceType !== "OWN_STOCK" ||
+          offer?.isAvailable !== true ||
+          !Number.isFinite(quantity) || quantity <= 0 || !price) continue;
+
+      // The public site deliberately renders >5 for larger stock quantities.
+      // Respect its displayQuantity rather than leaking the raw DB count.
+      const count = typeof offer.displayQuantity === "string" &&
+        offer.displayQuantity.trim()
+        ? offer.displayQuantity.trim()
+        : String(quantity);
+      const city = typeof offer.warehouseCity === "string"
+        ? offer.warehouseCity.trim().slice(0, 90)
+        : "";
+      const key = city.toLocaleLowerCase();
+      if (!groups.has(key)) groups.set(key, { city, rows: [] });
+
+      groups.get(key).rows.push(
+        "🔎 " + articleLink + " — " + name + "\n"
+        + "💰 <b>" + price + "</b>  🟢 <b>" + t.inStock + ": "
+        + escapeTelegramHtml(count) + " " + t.pcs + "</b>"
+      );
+    }
+  }
+
+  if (!groups.size) {
+    return { text: "❌ <code>" + escapeTelegramHtml(query)
+      + "</code> — " + t.noOwnStock };
+  }
+
+  return {
+    text: [...groups.values()].map(({ city, rows }) =>
+      "🏬 <b>" + t.ownByCity
+      + (city ? " " + escapeTelegramHtml(city) : "") + "</b>\n"
+      + rows.join("\n\n")
+    ).join("\n\n"),
+  };
+}
 
 function available(offers) {
   return (offers || []).filter((offer) =>
