@@ -302,6 +302,9 @@ async function poll() {
         const showLanguages = /^\/(start|help)(?:\s|$)/i.test(text);
         await api("sendMessage", { chat_id: message.chat.id,
           ...reply,
+          // Article links stay clickable; suppress Telegram's large website
+          // card/image preview for catalog results only.
+          link_preview_options: { is_disabled: true },
           ...(showLanguages ? { reply_markup: telegramLanguageKeyboard(await TelegramLanguageService.get(message.chat.id)) } : {}),
         });
       }
