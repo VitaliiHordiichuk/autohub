@@ -216,3 +216,65 @@ test("shared mode uses the live website backend for CLIENT and never runs Telegr
   else process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED=previous;
  }
 });
+
+
+test("shared website lookup returns every actually stocked variant for two requested articles, not supplier-only HU718/5X", async () => {
+  const previous = process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED;
+  process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED = "true";
+  const calls = [];
+  try {
+    const replies = await searchTelegramCatalog({
+      text: "2711800109\nA1673200503", chatId: 0, telegramUserId: 0,
+    }, {
+      getLocale: async () => "uk",
+      resolveViewer: async () => null,
+      search: async () => { throw Error("Must search shared site, not legacy"); },
+      searchWebsite: async req => {
+        calls.push(req);
+        if (req.article === "2711800109") {
+          return { success: true, locale: "uk",
+            productCard: { product: { id: 101, article: "A2711800109", name: "Масляний фільтр" },
+              offers: [{ id: 1, sourceType: "OWN_STOCK", warehouseCity: "Харків",
+                isAvailable: true, quantity: 4, retailPrice: 1380.96 }] },
+            family: [
+              { product: { id: 102, article: "A271180010990", name: "Фільтр масляний" },
+                offers: [{ id: 2, sourceType: "OWN_STOCK", warehouseCity: "Харків",
+                  isAvailable: true, quantity: 2, retailPrice: 1500 }] },
+              { product: { id: 103, article: "HU718/5X", name: "Фільтр, тільки постачальник" },
+                offers: [{ id: 3, sourceType: "SUPPLIER",
+                  isAvailable: true, quantity: 10, retailPrice: 700 }] },
+            ] };
+        }
+        return { success: true, locale: "uk",
+          productCard: { product: { id: 201, article: "A1673200503", name: "Стійка амортизаційна підвіски" },
+            offers: [{ id: 4, sourceType: "OWN_STOCK", warehouseCity: "Харків",
+              isAvailable: true, quantity: 1, retailPrice: 189741.3 }] },
+          replacement: { targetArticle: "A167320050380" },
+          family: [{ product: { id: 202, article: "A167320050380", name: "Заміна стійки" },
+            offers: [{ id: 5, sourceType: "OWN_STOCK", warehouseCity: "Харків",
+              isAvailable: false, quantity: 0, retailPrice: 1000 }] }],
+        };
+      },
+    });
+    assert.deepEqual(calls, [
+      { article: "2711800109", locale: "uk", mode: "guest", userId: null },
+      { article: "A1673200503", locale: "uk", mode: "guest", userId: null },
+    ]);
+    assert.equal(replies.length, 1);
+    const msg = replies[0].text;
+    assert.match(msg, /MAKAtron · Результати 1–2 з 2/);
+    assert.match(msg, /🏬 <b>Склад Харків<\/b>/);
+    assert.match(msg, /href="https:\/\/maka\.com\.ua\/uk\/product\/A2711800109"/);
+    assert.match(msg, /href="https:\/\/maka\.com\.ua\/uk\/product\/A271180010990"/);
+    assert.match(msg, /href="https:\/\/maka\.com\.ua\/uk\/product\/A1673200503"/);
+    assert.match(msg, /🟢 <b>В наявності: 4 шт\.<\/b>/);
+    assert.match(msg, /🟢 <b>В наявності: 2 шт\.<\/b>/);
+    assert.match(msg, /189[\s\u00a0]741,3 грн/);
+    assert.doesNotMatch(msg, /HU718\/5X|A167320050380|Фільтр, тільки постачальник|Інші номери|Надішліть \/register|Склад MAKA/);
+    assert.equal((msg.match(/🔎/g) || []).length, 3);
+    assert.equal(replies[0].parse_mode, "HTML");
+  } finally {
+    if (previous === undefined) delete process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED;
+    else process.env.MAKATRON_SHARED_SITE_SEARCH_ENABLED = previous;
+  }
+});
