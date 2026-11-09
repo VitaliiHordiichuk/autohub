@@ -14,6 +14,7 @@ import { publicProductName } from "./ProductNameService.js";
 
 const IMAGE_FIELDS = ["desktop", "tablet", "mobile"];
 const HOMEPAGE_TIME_ZONE = "Europe/Kyiv";
+const BANNER_SELECTION_LOCK = 73100582;
 const MIME_EXTENSIONS = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -222,14 +223,17 @@ function bannerPeriod(data, current = null) {
 
 async function readDailyBannerSelection(displayDate, db) {
   const result = await db.query(`
-    SELECT selection.banner_id AS daily_banner_id, banner.*
+    SELECT selection.banner_id AS daily_banner_id,
+      selection.selection_type AS daily_selection_type, banner.*
     FROM homepage_banner_daily_selections selection
     LEFT JOIN homepage_banners banner ON banner.id = selection.banner_id
     WHERE selection.display_date = $1::date`, [displayDate]);
   const row = result.rows[0];
-  if (!row) return { exists: false, banner: null };
+  if (!row) return { exists: false, bannerId: null, selectionType: null, banner: null };
   return {
     exists: true,
+    bannerId: row.daily_banner_id,
+    selectionType: row.daily_selection_type,
     banner: row.daily_banner_id === null ? null : row,
   };
 }
@@ -286,30 +290,130 @@ async function selectNextRotatingHomepageBanner(displayDate, db) {
   return result.rows[0] || null;
 }
 
+async function withBannerSelectionLock(db, work) {
+  if (typeof db.connect !== "function") return work(db);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [BANNER_SELECTION_LOCK]);
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function dailySelectionIsCurrent(selection, scheduled, displayDate, db) {
+  if (!selection.exists) return false;
+  if (selection.selectionType === "EMPTY") {
+    if (selection.banner || scheduled) return false;
+    return !(await selectNextRotatingHomepageBanner(displayDate, db));
+  }
+  const banner = selection.banner;
+  if (!banner || banner.is_active !== true) return false;
+  if (scheduled) {
+    return selection.selectionType === "SCHEDULED"
+      && Number(banner.id) === Number(scheduled.id);
+  }
+  return selection.selectionType === "ROTATION"
+    && !banner.starts_on && !banner.ends_on && !banner.repeats_annually;
+}
+
 export async function selectHomepageBanner(displayDate, db = pool) {
   const storedSelection = await readDailyBannerSelection(displayDate, db);
-  if (storedSelection.exists) return storedSelection.banner;
+  if (storedSelection.exists) {
+    const scheduled = await selectScheduledHomepageBanner(displayDate, db);
+    if (await dailySelectionIsCurrent(storedSelection, scheduled, displayDate, db)) {
+      return storedSelection.banner;
+    }
+  }
 
-  const scheduled = await selectScheduledHomepageBanner(displayDate, db);
-  const candidate = scheduled || await selectNextRotatingHomepageBanner(displayDate, db);
-  const selectionType = scheduled ? "SCHEDULED" : candidate ? "ROTATION" : "EMPTY";
-  const inserted = await db.query(`
-    INSERT INTO homepage_banner_daily_selections(
-      display_date, banner_id, selection_type, rotation_position
-    )
-    VALUES ($1::date, $2, $3, $4)
-    ON CONFLICT (display_date) DO NOTHING
-    RETURNING banner_id`, [
-      displayDate,
-      candidate?.id ?? null,
-      selectionType,
-      selectionType === "ROTATION" ? candidate.id : null,
-    ]);
+  return withBannerSelectionLock(db, async (client) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const selection = await readDailyBannerSelection(displayDate, client);
+      const scheduled = await selectScheduledHomepageBanner(displayDate, client);
+      if (await dailySelectionIsCurrent(selection, scheduled, displayDate, client)) {
+        return selection.banner;
+      }
+      if (selection.exists) {
+        await client.query(`
+          DELETE FROM homepage_banner_daily_selections
+          WHERE display_date = $1::date
+            AND banner_id IS NOT DISTINCT FROM $2::bigint
+            AND selection_type = $3`, [
+          displayDate, selection.bannerId, selection.selectionType,
+        ]);
+      }
+      const candidate = scheduled || await selectNextRotatingHomepageBanner(displayDate, client);
+      const selectionType = scheduled ? "SCHEDULED" : candidate ? "ROTATION" : "EMPTY";
+      const inserted = await client.query(`
+        INSERT INTO homepage_banner_daily_selections(
+          display_date, banner_id, selection_type, rotation_position
+        )
+        VALUES ($1::date, $2, $3, $4)
+        ON CONFLICT (display_date) DO NOTHING
+        RETURNING banner_id`, [
+        displayDate,
+        candidate?.id ?? null,
+        selectionType,
+        selectionType === "ROTATION" ? candidate.id : null,
+      ]);
+      if (inserted.rows[0]) return candidate;
+    }
+    throw new Error("Не вдалося погодити вибір банера на сьогодні");
+  });
+}
 
-  if (inserted.rows[0]) return candidate;
+function bannerSelectionState(row) {
+  if (!row) return null;
+  const active = Boolean(row.is_active ?? row.isActive);
+  const startsOn = storedDate(row.starts_on ?? row.startsOn ?? row.scheduled_date ?? row.scheduledDate);
+  const endsOn = storedDate(row.ends_on ?? row.endsOn ?? row.scheduled_date ?? row.scheduledDate);
+  const repeatsAnnually = Boolean(row.repeats_annually ?? row.repeatsAnnually);
+  return {
+    active,
+    startsOn,
+    endsOn,
+    repeatsAnnually,
+    kind: !active ? null : startsOn && endsOn ? "SCHEDULED" : "ROTATION",
+  };
+}
 
-  const concurrentSelection = await readDailyBannerSelection(displayDate, db);
-  return concurrentSelection.banner;
+function scheduledOnDate(state, displayDate) {
+  if (state?.kind !== "SCHEDULED") return false;
+  return state.repeatsAnnually
+    ? annualDateIsWithin(displayDate, state.startsOn, state.endsOn)
+    : state.startsOn <= displayDate && displayDate <= state.endsOn;
+}
+
+async function invalidateAffectedDailySelections(beforeRow, afterRow, bannerId, db) {
+  const before = bannerSelectionState(beforeRow);
+  const after = bannerSelectionState(afterRow);
+  if (before && after
+    && before.active === after.active
+    && before.startsOn === after.startsOn
+    && before.endsOn === after.endsOn
+    && before.repeatsAnnually === after.repeatsAnnually) return;
+
+  const existing = await db.query(`
+    SELECT display_date, banner_id, selection_type
+    FROM homepage_banner_daily_selections
+    WHERE display_date >= $1::date`, [homepageDateInKyiv()]);
+  const affectedDates = existing.rows.filter((row) => {
+    const date = storedDate(row.display_date);
+    if (Number(row.banner_id) === Number(bannerId)) return true;
+    if (scheduledOnDate(before, date) || scheduledOnDate(after, date)) return true;
+    return after?.kind === "ROTATION" && before?.kind !== "ROTATION"
+      && row.selection_type === "EMPTY";
+  }).map((row) => storedDate(row.display_date));
+  if (affectedDates.length) {
+    await db.query(`DELETE FROM homepage_banner_daily_selections
+      WHERE display_date = ANY($1::date[])`, [affectedDates]);
+  }
 }
 
 function storageConfig() {
@@ -702,7 +806,9 @@ export const HomepageContentService = {
     const uploaded = {};
     try {
       for (const slot of IMAGE_FIELDS) uploaded[slot] = await uploadBannerImage(bySlot[slot], slot);
-      const result = await db.query(`
+      const result = await withBannerSelectionLock(db, async (client) => {
+        await ensureBannerPeriodAvailable(values, null, client);
+        const inserted = await client.query(`
         INSERT INTO homepage_banners(
           scheduled_date, starts_on, ends_on, repeats_annually,
           title_uk, description_uk, title_en, description_en,
@@ -719,7 +825,10 @@ export const HomepageContentService = {
         uploaded.desktop.url, uploaded.tablet.url, uploaded.mobile.url,
         uploaded.desktop.storageKey, uploaded.tablet.storageKey, uploaded.mobile.storageKey,
         values.isActive, values.showDailyFactLabel, positiveId(userId, "користувач"),
-      ]);
+        ]);
+        await invalidateAffectedDailySelections(null, values, inserted.rows[0].id, client);
+        return inserted;
+      });
       return presentAdminBanner(result.rows[0]);
     } catch (error) {
       await removeStorageObjects(Object.values(uploaded).map((item) => item?.storageKey));
@@ -740,7 +849,9 @@ export const HomepageContentService = {
       for (const slot of IMAGE_FIELDS) {
         if (bySlot[slot]) uploaded[slot] = await uploadBannerImage(bySlot[slot], slot);
       }
-      const result = await db.query(`
+      const result = await withBannerSelectionLock(db, async (client) => {
+        await ensureBannerPeriodAvailable(values, id, client);
+        const updated = await client.query(`
         UPDATE homepage_banners SET
           scheduled_date=$2, starts_on=$3, ends_on=$4, repeats_annually=$5,
           title_uk=$6, description_uk=$7,
@@ -762,7 +873,10 @@ export const HomepageContentService = {
         uploaded.tablet?.storageKey || current.tablet_storage_key,
         uploaded.mobile?.storageKey || current.mobile_storage_key,
         values.isActive, values.showDailyFactLabel, positiveId(userId, "користувач"),
-      ]);
+        ]);
+        await invalidateAffectedDailySelections(current, values, id, client);
+        return updated;
+      });
       await removeStorageObjects(IMAGE_FIELDS
         .filter((slot) => uploaded[slot])
         .map((slot) => current[`${slot}_storage_key`]));
@@ -774,11 +888,13 @@ export const HomepageContentService = {
   },
 
   async deleteBanner(bannerId, db = pool) {
-    const result = await db.query("DELETE FROM homepage_banners WHERE id=$1 RETURNING *", [
-      positiveId(bannerId, "номер банера"),
-    ]);
-    const row = result.rows[0];
-    if (!row) throw new Error("Банер не знайдено");
+    const id = positiveId(bannerId, "номер банера");
+    const row = await withBannerSelectionLock(db, async (client) => {
+      const current = (await client.query("SELECT * FROM homepage_banners WHERE id = $1", [id])).rows[0];
+      if (!current) throw new Error("Банер не знайдено");
+      await invalidateAffectedDailySelections(current, null, id, client);
+      return (await client.query("DELETE FROM homepage_banners WHERE id=$1 RETURNING *", [id])).rows[0];
+    });
     await removeStorageObjects(IMAGE_FIELDS.map((slot) => row[`${slot}_storage_key`]));
   },
 

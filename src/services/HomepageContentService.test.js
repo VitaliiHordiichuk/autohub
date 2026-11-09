@@ -22,7 +22,7 @@ test("банер активного періоду має пріоритет н�
   };
 
   assert.equal(await selectHomepageBanner("2026-08-25", db), scheduled);
-  assert.equal(queryCount, 3);
+  assert.equal(queryCount, 4);
 });
 
 test("поза активним періодом вибирається тільки банер без дат", async () => {
@@ -43,7 +43,7 @@ test("поза активним періодом вибирається тіль
   };
 
   assert.equal(await selectHomepageBanner("2026-08-25", db), nextBanner);
-  assert.equal(queryCount, 5);
+  assert.equal(queryCount, 6);
   assert.deepEqual(insertValues, ["2026-08-25", 5, "ROTATION", 5]);
 });
 
@@ -95,16 +95,27 @@ test("банер з датою не пересуває звичайну черг
 test("вибраний банер не змінюється протягом київської календарної дати", async () => {
   const stored = {
     daily_banner_id: 19,
+    daily_selection_type: "ROTATION",
+    is_active: true,
+    starts_on: null,
+    ends_on: null,
+    repeats_annually: false,
     id: 19,
     title_uk: "Зафіксований факт дня",
   };
   let queryCount = 0;
   const db = {
     async query(sql, values) {
-      queryCount += 1;
-      assert.ok(sql.includes("FROM homepage_banner_daily_selections selection"));
-      assert.deepEqual(values, ["2026-09-16"]);
-      return { rows: [stored] };
+      if (sql.includes("FROM homepage_banner_daily_selections selection")) {
+        queryCount += 1;
+        assert.deepEqual(values, ["2026-09-16"]);
+        return { rows: [stored] };
+      }
+      if (sql.includes("starts_on <= $1::date") ||
+          sql.includes("repeats_annually = TRUE")) {
+        return { rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
     },
   };
 
@@ -115,7 +126,15 @@ test("вибраний банер не змінюється протягом к�
 
 test("одночасні запити використовують перший зафіксований банер", async () => {
   const candidate = { id: 2 };
-  const concurrent = { daily_banner_id: 9, id: 9 };
+  const concurrent = {
+    daily_banner_id: 9,
+    daily_selection_type: "ROTATION",
+    is_active: true,
+    starts_on: null,
+    ends_on: null,
+    repeats_annually: false,
+    id: 9,
+  };
   let dailyReads = 0;
   const db = {
     async query(sql) {
@@ -201,6 +220,10 @@ test("період банера можна повністю очистити б�
       if (sql.includes("UPDATE homepage_banners")) {
         updateValues = values;
         return { rows: [{ ...current, scheduled_date: null, starts_on: null, ends_on: null }] };
+      }
+      if (sql.includes("FROM homepage_banner_daily_selections") &&
+          sql.includes("WHERE display_date >= $1::date")) {
+        return { rows: [] };
       }
       throw new Error(`Unexpected query: ${sql}`);
     },
