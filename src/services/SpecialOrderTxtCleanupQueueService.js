@@ -105,7 +105,8 @@ export async function processNextTxtCleanup({
         String(row.old_file_id || "").toLowerCase() !==
           String(job.old_upload_file_id).toLowerCase() ||
         row.old_status !== "READY" ||
-        row.active_status !== "READY"
+        row.active_status !== "READY" ||
+        !UUID_V4.test(String(row.active_file_id || ""))
       ) {
         result = await finish(db, job.id, "SKIPPED", "REVISION_MISMATCH");
       } else if (String(row.active_import_id) === String(job.old_import_id)) {
