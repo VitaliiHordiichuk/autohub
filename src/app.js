@@ -9,12 +9,15 @@ import {
 
 import { pool } from "./config/db.js";
 import { searchRouter } from "./routes/search.routes.js";
+import { specialOrderInquiryRouter } from "./routes/special-order-inquiry.routes.js";
+import { specialOrderInquiryManagerRouter } from "./routes/special-order-inquiry-manager.routes.js";
 import { catalogRouter } from "./routes/catalog.routes.js";
 import { cartRouter } from "./routes/cart.routes.js";
 import { checkoutRouter } from "./routes/checkout.routes.js";
 import { managerOrderRouter } from "./routes/manager-order.routes.js";
 import { adminWarehouseRouter } from "./routes/admin-warehouse.routes.js";
 import { adminSupplierRouter } from "./routes/admin-supplier.routes.js";
+import { adminMercedesTxtOnlyRouter } from "./routes/admin-mercedes-txt-only.routes.js";
 import { adminBrandRouter } from "./routes/admin-brand.routes.js";
 import { adminSearchAnalyticsRouter } from "./routes/admin-search-analytics.routes.js";
 import { funnelAnalyticsRouter } from "./routes/funnel-analytics.routes.js";
@@ -217,6 +220,8 @@ app.get("/test", async (req, res) => {
 });
 
 app.use("/api/search", searchRouter);
+app.use("/api/special-orders/inquiries", specialOrderInquiryRouter);
+app.use("/api/manager/special-order-inquiries", specialOrderInquiryManagerRouter);
 app.use("/api/analytics/funnel", funnelAnalyticsRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/cart", cartRouter);
@@ -226,6 +231,7 @@ app.use("/api/manager/vin-requests", managerVinRequestRouter);
 app.use("/api/management", customerManagementRouter);
 app.use("/api/admin/warehouses", adminWarehouseRouter);
 app.use("/api/admin/warehouses", adminWarehouseOfferRouter);
+app.use("/api/admin/suppliers", adminMercedesTxtOnlyRouter);
 app.use("/api/admin/suppliers", adminSupplierRouter);
 app.use("/api/admin/brands", adminBrandRouter);
 app.use("/api/admin/search-analytics", adminSearchAnalyticsRouter);

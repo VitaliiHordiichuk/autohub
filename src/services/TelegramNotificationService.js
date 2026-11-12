@@ -16,7 +16,7 @@ function formatMoney(value) {
 }
 
 function localeOf(value) {
-  return value === "en" ? "en" : "uk";
+  return value === "en" || value === "ru" ? value : "uk";
 }
 
 async function sendMessage(chatId, payload) {
@@ -58,6 +58,16 @@ export function buildVinStaffNotification({
       missing: "Not provided",
       noText: "No message",
       open: "Open VIN request",
+    },
+    ru: {
+      newRequest: "Новый VIN-запрос",
+      newMessage: "Новое сообщение в VIN-запросе",
+      customer: "Клиент",
+      phone: "Телефон",
+      brand: "Марка",
+      missing: "Не указано",
+      noText: "Без текста",
+      open: "Открыть VIN-запрос",
     },
   }[normalizedLocale];
   const customerName = [request.first_name, request.last_name]
@@ -243,6 +253,7 @@ export const TelegramNotificationService = {
     const copy = {
       uk:{ CONFIRMED:"✅ Ваше замовлення підтверджено", COMPLETED:"🎉 Ваше замовлення завершено", CANCELLED:"↩️ Ваше замовлення скасовано", order:"Замовлення", total:"Сума", more:"і ще", open:"Переглянути замовлення" },
       en:{ CONFIRMED:"✅ Your order has been confirmed", COMPLETED:"🎉 Your order has been completed", CANCELLED:"↩️ Your order has been cancelled", order:"Order", total:"Total", more:"more", open:"View order" },
+      ru:{ CONFIRMED:"✅ Ваш заказ подтверждён", COMPLETED:"🎉 Ваш заказ завершён", CANCELLED:"↩️ Ваш заказ отменён", order:"Заказ", total:"Сумма", more:"и ещё", open:"Посмотреть заказ" },
     }[locale];
     const labels = { CONFIRMED:copy.CONFIRMED, COMPLETED:copy.COMPLETED, CANCELLED:copy.CANCELLED };
     const title = labels[status];
@@ -284,6 +295,7 @@ export const TelegramNotificationService = {
     const text = {
       uk:`🚚 <b>Замовлення №${Number(orderId)} вже має ТТН</b>\nНова пошта: <code>${escapeHtml(trackingNumber)}</code>\n\nМожна копіювати номер і стежити за посилкою 💙`,
       en:`🚚 <b>Order №${Number(orderId)} now has a tracking number</b>\nNova Poshta: <code>${escapeHtml(trackingNumber)}</code>\n\nCopy the number to track your parcel 💙`,
+      ru:`🚚 <b>У заказа №${Number(orderId)} появилась ТТН</b>\nНовая почта: <code>${escapeHtml(trackingNumber)}</code>\n\nСкопируйте номер, чтобы следить за посылкой 💙`,
     }[locale];
     await sendMessage(result.rows[0].telegram_chat_id, {
       text,
@@ -305,6 +317,7 @@ export const TelegramNotificationService = {
     const copy = {
       uk:{title:`✏️ <b>Замовлення №${Number(orderId)} оновлено</b>`,total:"Разом",open:"Переглянути замовлення"},
       en:{title:`✏️ <b>Order №${Number(orderId)} was updated</b>`,total:"Total",open:"View order"},
+      ru:{title:`✏️ <b>Заказ №${Number(orderId)} обновлён</b>`,total:"Итого",open:"Посмотреть заказ"},
     }[locale];
     const items = itemsResult.rows.map((item) =>
       `• <b>${escapeHtml(item.article)}</b>${item.name ? ` — ${escapeHtml(item.name)}` : ""} × ${Number(item.quantity)} = <b>${escapeHtml(formatMoney(Number(item.quantity) * Number(item.price_at_purchase)))}</b>`
@@ -327,6 +340,7 @@ export const TelegramNotificationService = {
     const copy={
       uk:{title:`↩️ <b>Повернення за замовленням №${Number(orderId)} підтверджено</b>`,items:"Повернені позиції"},
       en:{title:`↩️ <b>Return for order №${Number(orderId)} confirmed</b>`,items:"Returned items"},
+      ru:{title:`↩️ <b>Возврат по заказу №${Number(orderId)} подтверждён</b>`,items:"Возвращённые позиции"},
     }[locale];
     const rows=(items||[]).map((item)=>`• <b>${escapeHtml(item.article)}</b>${item.name?` — ${escapeHtml(item.name)}`:""} × ${Number(item.quantity)}`);
     await sendMessage(result.rows[0].telegram_chat_id,{text:[copy.title,"",copy.items+":",...rows].join("\n")});

@@ -146,6 +146,9 @@ async function poll() {
           en:verification.verified
             ? "✅ Phone number confirmed. You can now send VIN requests and chat with a manager."
             : "This number does not match the phone number in your MAKA account. Check your profile number or share your own contact.",
+          ru:verification.verified
+            ? "✅ Номер подтверждён. Теперь можно отправлять VIN-запросы и общаться с менеджером."
+            : "Ой, этот номер не совпадает с номером в вашем аккаунте MAKA. Проверьте номер в профиле или поделитесь своим контактом.",
         };
         const pilot=telegramInlineCheckoutEnabled(message.chat.id);
         await api("sendMessage", {
@@ -176,12 +179,14 @@ async function poll() {
       const connectedCopy = {
         uk:"✅ Telegram успішно підключено до MAKA. Тут надходитимуть сповіщення про замовлення.",
         en:"✅ Telegram is now connected to MAKA. Order notifications will arrive here.",
+        ru:"✅ Telegram успешно подключён к MAKA. Здесь будут приходить уведомления о заказах.",
       };
       const verifyCopy = {
         uk:"\n\nЩоб захистити VIN-чат від ботів, підтвердьте номер кнопкою нижче.",
         en:"\n\nTo protect the VIN chat from bots, confirm your phone number using the button below.",
+        ru:"\n\nЧтобы защитить VIN-чат от ботов, подтвердите номер кнопкой ниже.",
       };
-      const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number"};
+      const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number",ru:"📱 Поделиться моим номером"};
       const linkedName = connection?.role === "CLIENT"
         ? String(connection.firstName || "").trim().replace(/[\r\n\t]/g, " ").slice(0, 60)
         : "";

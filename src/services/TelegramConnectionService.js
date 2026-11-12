@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { pool } from "../config/db.js";
 import { transaction } from "../db/transaction.js";
+import { bindVerifiedTelegramClient } from "./TelegramIdentityLinkService.js";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const normalizeLocale = (value) => value === "en" ? "en" : "uk";
@@ -46,6 +47,9 @@ export const TelegramConnectionService = {
   },
 
   async connectFromTelegram({ token, chatId, telegramUserId, username, firstName }) {
+    // Never accept a link token forwarded from a group or another sender.
+    if (!chatId || !telegramUserId || String(chatId) !== String(telegramUserId))
+      return null;
     return transaction(async (db) => {
       const result = await db.query(`
         SELECT t.id, t.user_id, t.locale, u.phone, u.first_name AS registered_first_name, u.phone_verified_at, u.phone_verified_value, r.name AS role_name
@@ -58,18 +62,34 @@ export const TelegramConnectionService = {
         FOR UPDATE`, [hash(token)]);
       const link = result.rows[0];
       if (!link) return null;
-      await db.query(`
-        INSERT INTO user_telegram_connections(
-          user_id, telegram_chat_id, telegram_user_id, telegram_username, telegram_first_name, preferred_locale
-        ) VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (user_id) DO UPDATE SET
-          telegram_chat_id = EXCLUDED.telegram_chat_id,
-          telegram_user_id = EXCLUDED.telegram_user_id,
-          telegram_username = EXCLUDED.telegram_username,
-          telegram_first_name = EXCLUDED.telegram_first_name,
-          preferred_locale = EXCLUDED.preferred_locale,
-          notifications_enabled = TRUE,
-          updated_at = CURRENT_TIMESTAMP`, [link.user_id, chatId, telegramUserId || null, username || null, firstName || null, normalizeLocale(link.locale)]);
+      if (link.role_name === "CLIENT") {
+        // Telegram and site must have one current client identity. The
+        // user explicitly approved this account via the private bot link.
+        await bindVerifiedTelegramClient({
+          userId: link.user_id,
+          chatId,
+          telegramUserId,
+          username,
+          firstName,
+          locale: link.locale,
+        }, db);
+      } else {
+        // An employee may share a chat with their own CLIENT account,
+        // but must never inherit that client's prices or permissions.
+        await db.query(`
+          INSERT INTO user_telegram_connections(
+            user_id, telegram_chat_id, telegram_user_id, telegram_username, telegram_first_name, preferred_locale
+          ) VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (user_id) DO UPDATE SET
+            telegram_chat_id = EXCLUDED.telegram_chat_id,
+            telegram_user_id = EXCLUDED.telegram_user_id,
+            telegram_username = EXCLUDED.telegram_username,
+            telegram_first_name = EXCLUDED.telegram_first_name,
+            preferred_locale = EXCLUDED.preferred_locale,
+            notifications_enabled = TRUE,
+            updated_at = CURRENT_TIMESTAMP`,
+          [link.user_id, chatId, telegramUserId || null, username || null, firstName || null, normalizeLocale(link.locale)]);
+      }
       await db.query("UPDATE telegram_link_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = $1", [link.id]);
       return {
         userId:link.user_id,
