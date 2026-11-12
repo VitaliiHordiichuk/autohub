@@ -73,4 +73,9 @@ GRANT SELECT, INSERT, UPDATE
 GRANT USAGE, SELECT
   ON SEQUENCE public.special_order_txt_cleanup_jobs_id_seq TO autohub_app;
 
+-- Keep the migration journal in sync with the other numbered migrations.
+INSERT INTO schema_migrations(version)
+VALUES ('130_special_order_txt_cleanup_queue')
+ON CONFLICT (version) DO NOTHING;
+
 COMMIT;
