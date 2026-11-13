@@ -1,3 +1,4 @@
+import { detectApprovedExactPartType } from "./CustomerProductTypeDetector.js";
 import { CustomerTaxonomyRepository } from "../repositories/CustomerTaxonomyRepository.js";
 import { CustomerTaxonomyAssignmentService } from "./CustomerTaxonomyAssignmentService.js";
 import { buildCustomerTaxonomyBatch2Coverage } from "./CustomerTaxonomyBatchPreviewService.js";
@@ -75,7 +76,54 @@ function reviewedRows(product) {
   ].filter((item) => item.row);
 }
 
-function safeTopLevelDisposition({ product, resolution, existingMemberships, rules, assignmentOrigin }) {
+function ambiguousLeafReason(product, resolution) {
+  const names = [product.name, ...(product.translations || []).map((item) => item?.name)]
+    .filter(Boolean).join(" ").normalize("NFKC");
+  const slugs = new Set((resolution.proposals || []).map((item) => item.category?.slug));
+  if (slugs.has("brakes-sensors")
+    && /(?:держател|тримач|holder)/iu.test(names)
+    && /(?:датч|sensor)/iu.test(names)) return "SENSOR_HOLDER_NOT_SENSOR";
+  if (slugs.has("steering-tie-rods")
+    && /(?:пильник|пыльник|dust\s+boot)/iu.test(names)) return "TIE_ROD_BOOT_NOT_ROD";
+  if (slugs.has("exhaust-mounts")
+    && /(?:хомут|затискач|зажим|clamp)/iu.test(names)
+    && !/(?:вихлоп|выпуск|випуск|exhaust|глуш)/iu.test(names)) {
+    return "GENERIC_CLAMP_WITH_EPC_ONLY";
+  }
+  if (slugs.has("body-mouldings-trims")
+    && /(?:накладк|облицюв|облицов|trim|moulding|molding)/iu.test(names)
+    && /(?:бампер|bumper)/iu.test(names)) return "BUMPER_TRIM_CATEGORY_CONFLICT";
+  return null;
+}
+
+function safeTopLevelDisposition({
+  product,
+  resolution,
+  existingMemberships,
+  reviewedPhase3FBrakeFallback = false,
+  rules,
+  assignmentOrigin,
+}) {
+  const audited = reviewedRows(product);
+  const realReview = audited.filter(({ row }) => row.finalBucket === "REAL_REVIEW");
+  const approvedType = detectApprovedExactPartType(product);
+  const exactProposal = primaryProposal(resolution.proposals);
+  const approvedLeaf = { EXHAUST_SENSOR: "exhaust-sensors", ADBLUE_SCR_COMPONENT: "exhaust-adblue-scr", EXHAUST_ADBLUE_INJECTOR: "exhaust-adblue-scr", ENGINE_SENSOR: "engine-sensors", SUSPENSION_SUBFRAME_MOUNT: "suspension-subframes" }[approvedType];
+  // A newer explicit owner-approved rule can supersede historical review.
+  // Arbitrary matching rules and generic EPC fallbacks cannot.
+  const supersedesReview = approvedLeaf && exactProposal?.category.slug === approvedLeaf
+    && exactProposal.confidence === "HIGH" && exactProposal.assignmentSource === "RULE";
+  if (realReview.length && !supersedesReview) {
+    return {
+      section: null,
+      requiresReview: true,
+      reason: realReview.map(({ phase }) => `${phase}_REAL_REVIEW`).join(";"),
+    };
+  }
+  const ambiguousLeaf = ambiguousLeafReason(product, resolution);
+  if (ambiguousLeaf) {
+    return { section: null, requiresReview: true, reason: ambiguousLeaf };
+  }
   const isNewImport = assignmentOrigin === CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT;
   const technicalEpc = [...new Set((product.technicalEpcGroups || []).map(String))];
   if (isNewImport && resolution.numberFamily === "A" && technicalEpc.length === 0) {
@@ -97,6 +145,7 @@ function safeTopLevelDisposition({ product, resolution, existingMemberships, rul
     if (isNewImport && conflictingNameSections(resolution.typeCodes, rules, section).length) {
       return { section: null, requiresReview: true, reason: "EPC_NAME_SECTION_CONFLICT" };
     }
+
     return { section: null, requiresReview: false, reason: null };
   }
 
@@ -118,16 +167,35 @@ function safeTopLevelDisposition({ product, resolution, existingMemberships, rul
     evaluations: [evaluation],
     additions,
   });
-  const audited = reviewedRows(product);
   const phase2g3Review = audited.some(({ phase, row }) => (
     phase === "PHASE_2G3" && row.finalBucket === "REAL_REVIEW"
   ));
-  const safeSections = new Set(batch2.safeTopLevel.map((item) => item.section));
-  for (const epc of product.technicalEpcGroups || []) {
-    const section = REVIEWED_TECHNICAL_EPC_SAFE_ROOT[String(epc)];
-    if (section) safeSections.add(section);
-    if (isNewImport && resolution.numberFamily === "A") {
-      const approvedSection = APPROVED_UNAMBIGUOUS_EPC_ROOT[String(epc)];
+  // Batch 2 can label a dedicated EPC as SAFE_TOPLEVEL with no part semantics.
+  // That is useful for a reviewed historical batch, but is not enough to
+  // auto-assign an unseen product arriving through an import.
+  const safeSections = new Set(batch2.safeTopLevel
+    .filter((item) => item.detectedTypeCodes.length > 0)
+    .map((item) => item.section));
+  const epc = new Set((product.technicalEpcGroups || []).map(String));
+  if ((epc.has("42") || epc.has("43"))
+    && resolution.typeCodes.some((typeCode) => typeCode.startsWith("BRAKE_"))) {
+    safeSections.add("brakes");
+  }
+  // Phase 3F is a separately reviewed, count-guarded historical backfill.
+  // Preserve its approved EPC-only candidates without enabling this fallback
+  // for new imports or the general uncategorized backfill.
+  if (reviewedPhase3FBrakeFallback && (epc.has("42") || epc.has("43"))) {
+    safeSections.add("brakes");
+  }
+  // Rear lamps have no approved narrow leaf. Explicit wording plus lighting EPC
+  // is sufficient for the existing root, whereas EPC alone is not.
+  if (["54", "82", "90"].some((group) => epc.has(group))
+    && resolution.typeCodes.includes("LIGHTING_REAR_LAMP")) {
+    safeSections.add("electrical-electronics-lighting");
+  }
+  if (isNewImport && resolution.numberFamily === "A") {
+    for (const group of epc) {
+      const approvedSection = APPROVED_UNAMBIGUOUS_EPC_ROOT[group];
       if (approvedSection) safeSections.add(approvedSection);
     }
   }
@@ -211,8 +279,12 @@ async function evaluateProduct({
   repository,
   resolver,
   assignmentOrigin,
+  reviewedPhase3FBrakeFallback,
 }) {
   assertEvaluationOrigin(assignmentOrigin);
+  if (reviewedPhase3FBrakeFallback && assignmentOrigin !== CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL) {
+    throw new Error("Reviewed Phase 3F brake fallback is only available to backfill");
+  }
   const rules = context?.rules || await repository.listActiveRules(db);
   const resolution = resolver({
     product,
@@ -224,10 +296,11 @@ async function evaluateProduct({
     product,
     resolution,
     existingMemberships,
+    reviewedPhase3FBrakeFallback,
     rules,
     assignmentOrigin,
   });
-  const proposals = (resolution.proposals || []).filter((proposal) => (
+  const proposals = (disposition.requiresReview ? [] : resolution.proposals || []).filter((proposal) => (
     proposal.approvalStatus === CUSTOMER_APPROVAL_STATUS.AUTO_APPROVED
     && (assignmentOrigin !== CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT || !disposition.requiresReview)
   ));
@@ -317,6 +390,7 @@ export const CustomerTaxonomyImportService = {
     repository = CustomerTaxonomyRepository,
     resolver = resolveCustomerTaxonomy,
     assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+    reviewedPhase3FBrakeFallback = false,
   } = {}) {
     if (!db) throw new Error("Customer taxonomy import transaction client is required");
     if (!product) throw new Error("Product is required for customer taxonomy evaluation");
@@ -329,6 +403,7 @@ export const CustomerTaxonomyImportService = {
       repository,
       resolver,
       assignmentOrigin,
+      reviewedPhase3FBrakeFallback,
     });
   },
 
@@ -338,6 +413,7 @@ export const CustomerTaxonomyImportService = {
     resolver = resolveCustomerTaxonomy,
     assignmentService = CustomerTaxonomyAssignmentService,
     assignmentOrigin = CUSTOMER_ASSIGNMENT_ORIGIN.IMPORT,
+    reviewedPhase3FBrakeFallback = false,
   } = {}) {
     if (!db) throw new Error("Customer taxonomy import transaction client is required");
     const normalizedProductId = Number(productId);
@@ -361,6 +437,7 @@ export const CustomerTaxonomyImportService = {
       repository,
       resolver,
       assignmentOrigin,
+      reviewedPhase3FBrakeFallback,
     });
     const {
       resolution,

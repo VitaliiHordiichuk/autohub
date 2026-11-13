@@ -19,6 +19,10 @@ loadEnv({
   override: false,
 });
 
+if ((process.env.MAKA_EMAIL_IMPORT_OWNER || "latest") !== "latest") {
+  throw new Error("Latest-only EMAIL worker is not the configured owner");
+}
+
 for (const key of [
   "GMAIL_USER", "GMAIL_APP_PASSWORD",
   "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",

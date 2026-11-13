@@ -199,6 +199,7 @@ async function scan({
       db: client,
       repository,
       assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL,
+      reviewedPhase3FBrakeFallback: true,
     });
     const kind = candidateKind(evaluation.candidate);
     report.scopeProducts += 1;
@@ -357,6 +358,7 @@ export async function runPhase3FBrakesBackfill({
         repository,
         assignmentService,
         assignmentOrigin: CUSTOMER_ASSIGNMENT_ORIGIN.BACKFILL,
+        reviewedPhase3FBrakeFallback: true,
       });
       const expectedDecision = target.kind === "HIGH"
         ? CUSTOMER_TAXONOMY_DECISION.ASSIGNED_NEW_HIGH

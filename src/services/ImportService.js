@@ -33,7 +33,7 @@ import {
   ArticleNumberService,
 } from "./ArticleNumberService.js";
 import { WarehousePricingService } from "./WarehousePricingService.js";
-import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
+import { attemptCustomerTaxonomyImport } from "./CustomerTaxonomyImportAttemptService.js";
 import { isCustomerTaxonomyImportEnabled } from "../config/featureFlags.js";
 import {
   databaseNumberOrNull,
@@ -423,6 +423,7 @@ export const ImportService = {
       const taxonomyImportEnabled =
         isCustomerTaxonomyImportEnabled();
       let taxonomyContext = null;
+      let taxonomyUnavailable = false;
 
       const importedOfferIds =
         new Set();
@@ -892,18 +893,20 @@ export const ImportService = {
             );
           }
 
-          if (taxonomyImportEnabled) {
+          // Existing catalog rows are handled by the explicit backfill. A price
+          // reload must not re-run classification for thousands of old items.
+          if (taxonomyImportEnabled && productWasCreated && !taxonomyUnavailable) {
             result.taxonomyProcessed += 1;
-            try {
-              taxonomyContext ||= await CustomerTaxonomyImportService.createContext({ db });
-              const taxonomy = await CustomerTaxonomyImportService.classifyProduct({
-                productId: Number(product.id),
-                context: taxonomyContext,
-              }, { db });
-              recordTaxonomyDecision(result, taxonomy);
-            } catch (error) {
+            const attempt = await attemptCustomerTaxonomyImport({
+              db,
+              productId: Number(product.id),
+              context: taxonomyContext,
+            });
+            taxonomyContext = attempt.context;
+            if (attempt.taxonomy) recordTaxonomyDecision(result, attempt.taxonomy);
+            if (attempt.error) {
               result.taxonomyErrors += 1;
-              throw error;
+              if (!attempt.context) taxonomyUnavailable = true;
             }
           }
 

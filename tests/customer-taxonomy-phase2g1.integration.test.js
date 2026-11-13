@@ -137,7 +137,7 @@ test("PHASE 2G.1 leaves remain hidden and earlier rules remain historical under 
     historical_phase2g1: 55,
     historical_v8: 361,
     historical_v9: 373,
-    active_v10: 380,
+    active_v10: 381,
     duplicate_active: 0,
   });
 });
@@ -170,7 +170,7 @@ test("historical migrations 097/098 remain membership-free after the v10 generat
   assert.equal(afterResult.rows[0].historical_v7, 313);
   assert.equal(afterResult.rows[0].historical_v8, 361);
   assert.equal(afterResult.rows[0].historical_v9, 373);
-  assert.equal(afterResult.rows[0].active_v10, 380);
+  assert.equal(afterResult.rows[0].active_v10, 381);
   assert.equal(afterResult.rows[0].duplicate_active, 0);
 });
 

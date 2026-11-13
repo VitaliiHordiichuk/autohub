@@ -123,8 +123,8 @@ test("migrations 101/102 remain historical after windshield rules advance to v10
     v9_successors: 361,
     phase2g3: 12,
     historical_v9: 373,
-    active_v10: 380,
-    total: 2286,
+    active_v10: 381,
+    total: 2287,
     duplicate_active: 0,
   });
 

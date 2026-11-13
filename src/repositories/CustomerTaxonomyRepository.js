@@ -84,6 +84,7 @@ function mapProductForResolution(row) {
     article: row.article,
     articleNormalized: row.article_normalized,
     name: row.name,
+    isActive: row.is_active !== false,
     brandId: row.brand_id === null || row.brand_id === undefined
       ? null
       : Number(row.brand_id),
@@ -161,6 +162,7 @@ export const CustomerTaxonomyRepository = {
         product.article,
         product.article_normalized,
         product.name,
+        product.is_active,
         COALESCE((
           SELECT JSONB_AGG(
             JSONB_BUILD_OBJECT(
@@ -212,6 +214,7 @@ export const CustomerTaxonomyRepository = {
         product.article,
         product.article_normalized,
         product.name,
+        product.is_active,
         brand.name AS brand_name,
         COALESCE((
           SELECT JSONB_AGG(

@@ -55,7 +55,10 @@ before(async () => {
   assert.ok(brakesDiscsId);
   assert.ok(windshieldsId);
 
-  // The isolated test DB is restored from production and can already contain windshields.
+  // Seed a visible baseline so the test does not depend on the snapshot's
+  // age or on whether production already had windshield assignments.
+  const baselineWindshield = await insertProduct("baselineWindshield");
+  await insertApprovedPrimary(baselineWindshield.id, windshieldsId);
   const baselineTree = await PublicCatalogService.getTree("uk");
   const windshieldLeaf = baselineTree.find((category) => category.slug === "body-glass")
     ?.children.find((category) => category.slug === "body-windshields");

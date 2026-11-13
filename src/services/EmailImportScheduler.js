@@ -36,9 +36,10 @@ async function runSafely(source) {
 
 
 export function startEmailImportScheduler() {
-  const enabled = !["false", "0", "no", "off"].includes(
-    String(process.env.EMAIL_IMPORT_SCHEDULER_ENABLED ?? "true").trim().toLowerCase()
-  );
+  const enabled = process.env.MAKA_EMAIL_IMPORT_OWNER === "legacy"
+    && ["true", "1", "yes", "on"].includes(
+      String(process.env.EMAIL_IMPORT_SCHEDULER_ENABLED ?? "false").trim().toLowerCase()
+    );
   if (!enabled) {
     console.log("ℹ️ EMAIL-импорт: автоматическая проверка отключена настройкой");
     return;
