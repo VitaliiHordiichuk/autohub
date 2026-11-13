@@ -155,6 +155,7 @@ export const CUSTOMER_PRODUCT_TYPE_CODES = Object.freeze([
   "ELECTRICAL_CONTROL_UNIT",
   "ELECTRICAL_WIRING_HARNESS",
   "LIGHTING_HEADLIGHT",
+  "LIGHTING_REAR_LAMP",
   "ELECTRICAL_CONNECTOR",
   "ELECTRICAL_SENSOR",
   "ELECTRICAL_FUSE_BOX",
@@ -377,6 +378,68 @@ function detectWindshieldTypes(text, epcGroups) {
   if (!windshield) return [];
   const relatedPart = /(?:боков|задн|панорам|side|rear|panoramic|ущ[іи]льн|уплотн|seal|gasket|молдинг|mould|molding|trim|датчик|сенсор|sensor|креп|кр[іи]п|кронштейн|bracket|mount|support|опор|рамк|frame|накладк|cover|protector|щ[іе]тк|дв[іи]рник|дворник|wiper|омивач|омывател|washer)/iu.test(text);
   return relatedPart ? [] : ["GLASS_WINDSHIELD"];
+}
+
+function detectBodyLightingTypes(text, epcGroups) {
+  const types = [];
+  const lightingEpc = ["54", "82", "90"].some((group) => epcGroups.has(group));
+  const excludedLightingPart = /(?:лампочк|лампочка|bulb|модул|module|блок|кришк|крышк|корпус|cover|housing|рем.?комплект|repair\s+kit|ущільн|уплотн|проклад|gasket|seal|скло|стекло|lens|тримач|держател|holder|кронштейн|bracket|mount)/iu.test(text);
+  if (lightingEpc && !excludedLightingPart) {
+    const rear = /(?:(?:задн[а-яіїєґё]*|rear|tail)[\s-]*(?:ліхтар[а-яіїєґё]*|фонар[а-яіїєґё]*|lamp|light)|(?:ліхтар[а-яіїєґё]*|фонар[а-яіїєґё]*|lamp|light).*?(?:задн[а-яіїєґё]*|rear|tail))/iu.test(text);
+    const headlight = /(?:передн[а-яіїєґё]*\s+фар[а-яіїєґё]*|фар[а-яіїєґё]*\s+(?:передн[а-яіїєґё]*|головн[а-яіїєґё]*\s+св[іе]т[а-яіїєґё]*)|\bhead[\s-]*light\b|\bhead[\s-]*lamp\b)/iu.test(text);
+    if (rear) types.push("LIGHTING_REAR_LAMP");
+    else if (headlight && !/(?:протитуман|противотуман|fog)/iu.test(text)) {
+      types.push("LIGHTING_HEADLIGHT");
+    }
+  }
+
+  if (["62", "88"].some((group) => epcGroups.has(group))
+    && /(?:(?:накладк|облицюв|облицов|молдинг|trim|moulding|molding).*?(?:бампер|bumper)|(?:бампер|bumper).*?(?:накладк|облицюв|облицов|молдинг|trim|moulding|molding))/iu.test(text)
+    && !/(?:кр[іе]плен|кронштейн|bracket|mount|датчик|sensor)/iu.test(text)) {
+    types.push("BODY_EXTERIOR_TRIM");
+  }
+  return types;
+}
+
+// These existing HIGH rules need both an explicit part name and their narrow EPC
+// context. Check each translation separately so words from different names do
+// not combine into a false match; a contradictory component name vetoes it.
+const preciseUnclassifiedTypes = Object.freeze([
+  ["24", "ENGINE_MOUNT", /(?:(?:подушк|опор)[а-яіїєґё]*\s+двигун[а-яіїєґё]*|(?:подушк|опор)[а-яіїєґё]*\s+двигател[а-яіїєґё]*|engine[\s-]+mount)/iu,
+    /(?:кпп|акпп|коробк|gearbox|transmission|кронштейн|bracket)/iu],
+  ["32", "SUSPENSION_SHOCK_ABSORBER", /(?:амортизатор[а-яіїєґё]*|shock[\s-]*absorber)/iu,
+    /(?:багаж|двер|кришк|крышк|tailgate|boot\s+lid|trunk|газов|gas\s+strut|пружин|spring|двигун|двигател|engine|motor|руль|steering)/iu],
+  ["69", "BODY_WHEEL_ARCH_LINER", /(?:підкрил[а-яіїєґё]*|подкрыл[а-яіїєґё]*|wheel[\s-]*arch[\s-]*liner)/iu,
+    /(?:накладк|trim|кронштейн|bracket|mount|кріплен|креплен)/iu],
+  ["88", "BODY_FENDER", /(?:передн[а-яіїєґё]*\s+кр[иы]ло|кр[иы]ло\s+передн[а-яіїєґё]*|front[\s-]+(?:wing|fender))/iu,
+    /(?:накладк|trim|молдинг|moulding|molding|кронштейн|bracket|тримач|держател|holder|support|дзеркал|зеркал|mirror)/iu],
+  ["88", "BODY_BUMPER_MOUNT", /(?:кронштейн[а-яіїєґё]*\s+бампер[а-яіїєґё]*|бампер[а-яіїєґё]*\s+кронштейн[а-яіїєґё]*|bumper[\s-]+(?:bracket|mount)|(?:bracket|mount)[\s-]+(?:for[\s-]+)?bumper)/iu,
+    /(?:накладк|trim|молдинг|moulding|molding|датчик|sensor)/iu],
+  ["73", "BODY_LOCK_LATCH", /(?:замок[а-яіїєґё]*\s+двер[а-яіїєґё]*|двер[а-яіїєґё]*\s+замок[а-яіїєґё]*|door[\s-]+lock)/iu,
+    /(?:запал|зажиг|ignition|корпус|housing|рем.?комплект|repair\s+kit|брелок|key\s+fob|привод|actuator|motor)/iu],
+  ["54", "ELECTRICAL_FUSE_BOX", /(?:блок[а-яіїєґё]*\s+(?:запобіжник|предохранител)[а-яіїєґё]*|fuse[\s-]+(?:box|block))/iu,
+    /(?:кришк|крышк|cover|кронштейн|bracket|тримач|держател|holder|кабел|cable|провод|wire)/iu],
+  ["98", "ELECTRICAL_BATTERY", /(?=.*(?:акумулятор|аккумулятор|battery))(?=.*12\s*(?:v|в|volt|вольт))/iu,
+    /(?:кронштейн|bracket|mount|корпус|housing|кришк|крышк|cover|кабел|cable|заряд|charg)/iu],
+  ["33", "SUSPENSION_BUSHING_MOUNT", /(?=.*(?:сайлентблок|silent[\s-]*block|control[\s-]*arm[\s-]*bushing))(?=.*(?:важ[іе]л|рычаг|підвіс|подвес|suspension|control[\s-]*arm))/iu,
+    /(?:кронштейн|bracket|тримач|держател|holder)/iu],
+  ["05", "ENGINE_TIMING_COMPONENT", /(?:шестерн[а-яіїєґё]*.*(?:розпод[іи]л|распредвал|распределител)|cam[\s-]*shaft.*gear)/iu,
+    /(?:датчик|sensor|кронштейн|bracket|болт|bolt)/iu],
+  ["01", "ENGINE_OIL_SYSTEM_COMPONENT", /(?:щуп[а-яіїєґё]*.*(?:олив|масл)|(?:engine|motor)[\s-]+oil[\s-]+dipstick)/iu,
+    /(?:кпп|акпп|коробк|gearbox|transmission|трубк|трубопров|pipe|tube|направля|guide)/iu],
+]);
+
+function detectPreciseUnclassifiedTypes(product, epcGroups) {
+  if (!normalizedArticle(product).startsWith("A")) return [];
+  const names = [product.name, ...(product.translations || []).map((item) => item?.name)]
+    .filter(Boolean)
+    .map((name) => String(name).normalize("NFKC")
+      .replace(/(?<=[\u0400-\u04ff])i|i(?=[\u0400-\u04ff])/giu, "і"));
+  return preciseUnclassifiedTypes
+    .filter(([epc, , namedPart, relatedPart]) => epcGroups.has(epc)
+      && names.some((name) => namedPart.test(name))
+      && !names.some((name) => relatedPart.test(name)))
+    .map(([, typeCode]) => typeCode);
 }
 
 function detectSteeringTypes(text, epcGroups) {
@@ -683,6 +746,10 @@ function approvedExactPartType(text, epcGroups) {
   return null;
 }
 
+export function detectApprovedExactPartType(product = {}) {
+  return approvedExactPartType(searchableText(product), technicalEpcGroups(product));
+}
+
 export function detectCustomerProductTypes(product = {}) {
   const text = searchableText(product);
   if (!text) return [];
@@ -748,6 +815,8 @@ export function detectCustomerProductTypes(product = {}) {
     detected.push("STEERING_PUMP");
   }
   detected.push(...windshieldTypes);
+  detected.push(...detectBodyLightingTypes(text, epcGroups));
+  detected.push(...detectPreciseUnclassifiedTypes(product, epcGroups));
   if (isBrakeDiscComponent(text)) {
     const index = detected.indexOf("BRAKE_DISC");
     if (index >= 0) detected.splice(index, 1);

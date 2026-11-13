@@ -107,8 +107,8 @@ test("migrations 099/100 Electrical leaves and v8/v9 rules remain historical und
     v8_successors: 313,
     phase2g2: 48,
     historical_v9: 373,
-    active_v10: 380,
-    total: 2286,
+    active_v10: 381,
+    total: 2287,
     duplicate_active: 0,
   });
 

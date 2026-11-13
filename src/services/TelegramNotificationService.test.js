@@ -23,7 +23,7 @@ test("формирует полное и безопасное уведомлен
   const notification = buildVinStaffNotification({
     request: guestRequest,
     event: "NEW_REQUEST",
-    locale: "ru",
+    locale: "uk",
     frontendUrl: "https://maka.com.ua/",
   });
 
@@ -81,4 +81,22 @@ test("отправляет гостевой VIN-запрос всем подкл
     failed: 0,
     skipped: false,
   });
+});
+
+// РУССКИЙ VIN NOTIFICATION TEST
+test("формирует VIN-уведомление на русском языке", () => {
+  const notification = buildVinStaffNotification({
+    request: guestRequest,
+    event: "NEW_REQUEST",
+    locale: "ru",
+    frontendUrl: "https://maka.com.ua/",
+  });
+
+  assert.match(notification.text, /Новый VIN-запрос №42/);
+  assert.match(notification.text, /Клиент: Іван &amp; Олена/);
+  assert.match(notification.text, /VIN: <code>WDD2120471A387679<\/code>/);
+  assert.equal(
+    notification.reply_markup.inline_keyboard[0][0].url,
+    "https://maka.com.ua/ru/admin/vin-requests?request=42"
+  );
 });

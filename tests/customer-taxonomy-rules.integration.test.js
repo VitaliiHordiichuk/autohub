@@ -79,6 +79,7 @@ const currentMigrationUrl = new URL(
   "../migrations/121_classify_explicit_owner_approved_parts.sql",
   import.meta.url,
 );
+const engineAirMigrationUrl = new URL("../migrations/118_add_explicit_engine_air_filter_epc47_rule.sql", import.meta.url);
 let rules = [];
 
 const historicalExhaustMountArticles = Object.freeze([
@@ -147,7 +148,7 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     { section: "engine", count: 35 },
     { section: "exhaust", count: 17 },
     { section: "fasteners-seals-standard-parts", count: 12 },
-    { section: "filters-maintenance", count: 14 },
+    { section: "filters-maintenance", count: 15 },
     { section: "fuel-system", count: 9 },
     { section: "interior-safety", count: 13 },
     { section: "steering", count: 10 },
@@ -217,6 +218,10 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
         WHERE detector_version = 10 AND is_active = TRUE
           AND code = 'GLASS_WINDSHIELD_A_EPC67_V1'
       )::integer AS new_windshield_v1_d10,
+      COUNT(*) FILTER (
+        WHERE detector_version = 10 AND is_active = TRUE
+          AND code = 'FILTER_AIR_ENGINE_A_EPC47_V1'
+      )::integer AS new_engine_air_epc47_v1_d10,
       COUNT(*) FILTER (WHERE is_active = TRUE)::integer AS active_total,
       COUNT(*)::integer AS total
     FROM customer_classification_rules
@@ -234,8 +239,9 @@ test("migrations seed only reviewed HIGH primary RULE definitions", async () => 
     active_v10_successors: 373,
     historical_phase2g3_v1_d9: 12,
     new_windshield_v1_d10: 1,
-    active_total: 380,
-    total: 2286,
+    new_engine_air_epc47_v1_d10: 1,
+    active_total: 381,
+    total: 2287,
   });
 
   const versionDrift = await pool.query(`
@@ -293,6 +299,7 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
   const phase2g3CategorySql = await readFile(phase2g3CategoryMigrationUrl, "utf8");
   const phase2g3RuleSql = await readFile(phase2g3RuleMigrationUrl, "utf8");
   const windshieldSql = await readFile(windshieldMigrationUrl, "utf8");
+  const engineAirSql = await readFile(engineAirMigrationUrl, "utf8");
   for (const sql of [
     phase2Sql,
     categorySql,
@@ -309,6 +316,7 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
     phase2g3CategorySql,
     phase2g3RuleSql,
     windshieldSql,
+    engineAirSql,
   ]) {
     assert.doesNotMatch(
       sql,
@@ -325,6 +333,7 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
   `);
   // Historical detector migrations are immutable and never replayed after a
   // newer generation. The current migration itself remains repeat-safe.
+  await pool.query(engineAirSql);
   await pool.query(await readFile(currentMigrationUrl, "utf8"));
   const afterResult = await pool.query(`
     SELECT
@@ -334,12 +343,13 @@ test("taxonomy migrations are idempotent and cannot write memberships or old EPC
       (SELECT COUNT(*)::integer FROM product_categories) AS epc_memberships
   `);
   assert.deepEqual(afterResult.rows[0], beforeResult.rows[0]);
-  assert.equal(afterResult.rows[0].rules, 2286);
+  assert.equal(afterResult.rows[0].rules, 2287);
   assert.equal(afterResult.rows[0].memberships, beforeResult.rows[0].memberships);
 });
 
-test("inactive historical v1 membership remains valid when migration 121 is replayed", async () => {
-  const currentSql = await readFile(currentMigrationUrl, "utf8");
+for (const [label, migrationUrl] of [["118", engineAirMigrationUrl], ["121", currentMigrationUrl]]) {
+test(`inactive historical v1 membership remains valid when migration ${label} is replayed`, async () => {
+  const currentSql = await readFile(migrationUrl, "utf8");
   const fixture = await pool.query(`
     INSERT INTO products(article, article_normalized, name, is_active)
     VALUES($1, $1, 'Historical taxonomy membership', TRUE)
@@ -405,6 +415,7 @@ test("inactive historical v1 membership remains valid when migration 121 is repl
     await pool.query("DELETE FROM products WHERE id = $1", [productId]);
   }
 });
+}
 
 test("reviewed filter EPC and TYPE_CODE combinations resolve to READY leaves", () => {
   expectAutoApproved({

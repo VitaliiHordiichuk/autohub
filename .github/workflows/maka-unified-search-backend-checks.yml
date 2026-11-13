@@ -7,8 +7,28 @@ on:
     branches:
       - main
   workflow_dispatch:
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-checks-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
+    name: Backend regression checks
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DOTENV_CONFIG_PATH: /dev/null
+      DB_HOST: 127.0.0.1
+      DB_PORT: "1"
+      DB_NAME: maka_ci_test
+      DB_USER: none
+      DB_PASSWORD: none
+      BACKGROUND_JOBS_ENABLED: "false"
+      EMAIL_IMPORT_SCHEDULER_ENABLED: "false"
+      TELEGRAM_BOT_POLLING_ENABLED: "false"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,10 +36,31 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: |
           node --check src/controllers/search.controller.js
           node --check src/controllers/makatron-search-bridge.controller.js
           node --check src/services/WebsiteArticleSearchService.js
           node --check src/services/WebsiteStaffPricingService.js
+          node --check src/scripts/maka-latest-email-price-worker.mjs
+          node --check src/scripts/maka-data-retention-worker.mjs
+          node --check src/services/ImportService.js
+          node --check src/services/ImportReviewService.js
           node --test src/controllers/search.controller.test.js src/controllers/makatron-search-bridge.controller.test.js src/services/WebsiteArticleSearchService.test.js src/services/WebsiteStaffPricingService.test.js
+      - name: Classification, import, price and worker ownership regressions
+        run: |
+          node --test \
+            src/services/CustomerTaxonomyImportService.test.js \
+            src/services/CustomerTaxonomyImportAttemptService.test.js \
+            src/services/CustomerTaxonomyUncategorizedBackfillService.test.js \
+            src/services/CustomerProductTypeDetector.precise-unclassified.test.js \
+            src/services/CustomerTaxonomyClassification2026.test.js \
+            src/services/PrivateCostImportService.test.js \
+            src/services/ImportFileParserService.test.js \
+            src/services/ImportNumericService.test.js \
+            src/services/CustomerPricingService.test.js \
+            src/services/WarehousePricingService.test.js \
+            src/services/EmailImportScheduler.test.js \
+            src/services/DataRetentionScheduler.test.js \
+            src/services/SpecialOrderPublicSearchService.test.js \
+            src/services/SpecialOrderInquiryOutbox.test.js

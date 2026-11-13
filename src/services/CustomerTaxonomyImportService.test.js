@@ -47,6 +47,7 @@ const categories = [
   { id: 300, slug: "engine", parentId: null, status: "ACTIVE", isActive: true },
   { id: 400, slug: "brakes", parentId: null, status: "ACTIVE", isActive: true },
   { id: 401, slug: "brakes-pads", parentId: 400, status: "ACTIVE", isActive: true },
+  { id: 1100, slug: "wheels", parentId: null, status: "ACTIVE", isActive: true },
   { id: 500, slug: "electrical-electronics-lighting", parentId: null, status: "ACTIVE", isActive: true },
   { id: 600, slug: "interior-safety", parentId: null, status: "ACTIVE", isActive: true },
   { id: 700, slug: "body-glass", parentId: null, status: "ACTIVE", isActive: true },
@@ -270,16 +271,16 @@ test("import orchestration assigns HIGH with IMPORT provenance and is idempotent
 test("SAFE, review and unsupported are distinct normal import outcomes", async () => {
   const safeFixture = repositoryFixture({
     currentProduct: product({
-      article: "A9984600002",
-      articleNormalized: "A9984600002",
-      name: "Деталь",
-      technicalEpcGroups: ["46"],
+      article: "A9984000002",
+      articleNormalized: "A9984000002",
+      name: "Кришка запасного колеса",
+      technicalEpcGroups: ["40"],
     }),
     rules: [],
   });
   const safe = await classify(safeFixture);
   assert.equal(safe.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_SAFE);
-  assert.equal(safe.finalCategory, "steering");
+  assert.equal(safe.finalCategory, "wheels");
   assert.equal(safeFixture.state.memberships[0].assignmentSource, "EPC_FALLBACK");
   assert.equal(safeFixture.state.memberships[0].assignmentOrigin, "IMPORT");
   assert.equal(safeFixture.state.memberships[0].confidence, "MEDIUM");
@@ -511,7 +512,7 @@ test("owner-approved part semantics classify current examples and future analogu
   assert.equal(protectedFixture.state.memberships.length, 1);
 });
 
-test("reviewed EPC 42 and 43 assign only the SAFE brakes root", async () => {
+test("EPC 42 and 43 alone never assign the brakes root", async () => {
   for (const epc of ["42", "43"]) {
     const fixture = repositoryFixture({
       currentProduct: product({
@@ -523,14 +524,76 @@ test("reviewed EPC 42 and 43 assign only the SAFE brakes root", async () => {
       rules: [],
     });
     const result = await classify(fixture);
-    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_SAFE);
-    assert.equal(result.finalCategory, "brakes");
-    assert.equal(fixture.state.memberships.length, 1);
-    assert.equal(fixture.state.memberships[0].assignmentSource, "EPC_FALLBACK");
-    assert.equal(fixture.state.memberships[0].assignmentOrigin, "IMPORT");
-    assert.equal(fixture.state.memberships[0].confidence, "MEDIUM");
-    assert.equal(fixture.state.memberships[0].approvalStatus, "AUTO_APPROVED");
+    assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+    assert.equal(result.finalCategory, null);
+    assert.equal(fixture.state.memberships.length, 0);
   }
+});
+
+test("historical Phase 3F EPC fallback is opt-in and forbidden for IMPORT", async () => {
+  const fixture = repositoryFixture({
+    currentProduct: product({
+      article: "A9984200002",
+      articleNormalized: "A9984200002",
+      name: "Деталь",
+      technicalEpcGroups: ["42"],
+    }),
+    rules: [],
+  });
+  const input = {
+    product: await fixture.repository.findProductForResolution(1),
+    existingMemberships: [],
+  };
+  const options = { db, repository: fixture.repository };
+  await assert.rejects(
+    CustomerTaxonomyImportService.evaluateProduct(input, {
+      ...options,
+      assignmentOrigin: "IMPORT",
+      reviewedPhase3FBrakeFallback: true,
+    }),
+    /only available to backfill/,
+  );
+  const ordinaryBackfill = await CustomerTaxonomyImportService.evaluateProduct(input, {
+    ...options,
+    assignmentOrigin: "BACKFILL",
+  });
+  assert.equal(ordinaryBackfill.candidate, null);
+  const reviewedBackfill = await CustomerTaxonomyImportService.evaluateProduct(input, {
+    ...options,
+    assignmentOrigin: "BACKFILL",
+    reviewedPhase3FBrakeFallback: true,
+  });
+  assert.equal(reviewedBackfill.candidate?.category.slug, "brakes");
+});
+
+test("explicit brake wording plus EPC 42 safely assigns the brakes root", async () => {
+  const fixture = repositoryFixture({
+    currentProduct: product({
+      article: "A9984200003",
+      articleNormalized: "A9984200003",
+      name: "Шланг гальмівний",
+      technicalEpcGroups: ["42"],
+    }),
+    rules: [],
+  });
+  const result = await classify(fixture);
+  assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.ASSIGNED_SAFE);
+  assert.equal(result.finalCategory, "brakes");
+});
+
+test("broad steering EPC 46 without a part type remains unclassified", async () => {
+  const fixture = repositoryFixture({
+    currentProduct: product({
+      article: "A9984600007",
+      articleNormalized: "A9984600007",
+      name: "Деталь",
+      technicalEpcGroups: ["46"],
+    }),
+    rules: [],
+  });
+  const result = await classify(fixture);
+  assert.equal(result.decision, CUSTOMER_TAXONOMY_DECISION.REQUIRES_REVIEW);
+  assert.equal(fixture.state.memberships.length, 0);
 });
 
 test("a HIGH EPC 42 proposal wins before the SAFE brakes fallback", async () => {

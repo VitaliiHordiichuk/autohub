@@ -32,7 +32,9 @@ app.listen(PORT, "127.0.0.1", () => {
     startAutomaticTranslationScheduler();
     startTelegramBot();
     startProductImageProcessingScheduler();
-    startDataRetentionScheduler();
+    if ((process.env.DATA_RETENTION_OWNER || "api") === "api") {
+      startDataRetentionScheduler();
+    }
   } else {
     console.log("Background jobs disabled for this API instance");
   }

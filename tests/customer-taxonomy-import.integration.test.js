@@ -188,6 +188,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
     CustomerTaxonomyImportService.classifyProduct;
   let createContextCalls = 0;
   let classifyProductCalls = 0;
+  let injectClassificationDbError = false;
 
   CustomerTaxonomyImportService.createContext = async (...args) => {
     createContextCalls += 1;
@@ -195,13 +196,17 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
   };
   CustomerTaxonomyImportService.classifyProduct = async (...args) => {
     classifyProductCalls += 1;
+    if (injectClassificationDbError) {
+      injectClassificationDbError = false;
+      await args[1].db.query("SELECT 1/0");
+    }
     return originalClassifyProduct(...args);
   };
 
   const token = `${process.pid}${Date.now()}`;
   const model = String(100 + (Number(token.slice(-3)) % 800)).padStart(3, "0");
   const highArticle = `A${model}1800001`;
-  const safeArticle = `A${model}4600002`;
+  const safeArticle = `A${model}4000002`;
   const unclassifiedArticle = `A${model}9900003`;
   const reviewArticle = `A${model}1800004`;
   const unsupportedArticle = `PHASE3E${token}`;
@@ -209,6 +214,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
   const offReviewArticle = `A${model}1800006`;
   const offApproveAllArticleA = `A${model}1800007`;
   const offApproveAllArticleB = `A${model}1800008`;
+  const errorArticle = `A${model}1800009`;
   const dynamicArticles = [
     highArticle,
     safeArticle,
@@ -219,6 +225,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
     offReviewArticle,
     offApproveAllArticleA,
     offApproveAllArticleB,
+    errorArticle,
   ];
 
   let supplierId = null;
@@ -357,7 +364,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
       importMethod: "MANUAL",
     }, [
       { article: highArticle, name: "Фільтр масляний", price: 100, quantity: 3 },
-      { article: safeArticle, name: "Деталь", price: 110, quantity: 2 },
+      { article: safeArticle, name: "Кришка запасного колеса", price: 110, quantity: 2 },
       { article: unclassifiedArticle, name: "Деталь", price: 120, quantity: 1 },
       { article: unsupportedArticle, name: "Деталь", price: 130, quantity: 1 },
       ...historicalArticles.map((article, index) => ({
@@ -370,10 +377,10 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
 
     assert.equal(first.errors, 0);
     assert.equal(first.successRows, 15);
-    assert.equal(first.taxonomyProcessed, 15);
+    assert.equal(first.taxonomyProcessed, 4);
     assert.equal(first.taxonomyAssignedHigh, 1);
     assert.equal(first.taxonomyAssignedSafe, 1);
-    assert.equal(first.taxonomyPreservedApproved, 11);
+    assert.equal(first.taxonomyPreservedApproved, 0);
     assert.equal(first.taxonomyReview, 1);
     assert.equal(first.taxonomyUnclassified, 0);
     assert.equal(first.taxonomyUnsupported, 1);
@@ -390,7 +397,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
 
     const safeMembership = await membershipForArticle(safeArticle);
     assert.equal(safeMembership.length, 1);
-    assert.equal(safeMembership[0].category_slug, "steering");
+    assert.equal(safeMembership[0].category_slug, "wheels");
     assert.equal(safeMembership[0].assignment_source, "EPC_FALLBACK");
     assert.equal(safeMembership[0].assignment_origin, "IMPORT");
     assert.equal(safeMembership[0].confidence, "MEDIUM");
@@ -402,18 +409,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
       seededHistory,
     );
 
-    const filterCategory = await pool.query(`
-      SELECT id, is_active
-      FROM customer_categories
-      WHERE slug = 'filters-oil'
-    `);
-    assert.equal(filterCategory.rowCount, 1);
-    assert.equal(filterCategory.rows[0].is_active, true);
-    await pool.query(`
-      UPDATE customer_categories
-      SET is_active = FALSE
-      WHERE id = $1
-    `, [filterCategory.rows[0].id]);
+    injectClassificationDbError = true;
     try {
       const failedTaxonomyRow = await ImportService.importRows({
         warehouseId,
@@ -422,28 +418,25 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
         fileType: "CSV",
         importMethod: "MANUAL",
       }, [
-        { article: highArticle, name: "Фільтр масляний", price: 999, quantity: 9 },
+        { article: errorArticle, name: "Фільтр масляний", price: 999, quantity: 9 },
       ]);
-      assert.equal(failedTaxonomyRow.successRows, 0);
-      assert.equal(failedTaxonomyRow.errors, 1);
+      assert.equal(failedTaxonomyRow.successRows, 1);
+      assert.equal(failedTaxonomyRow.errors, 0);
       assert.equal(failedTaxonomyRow.taxonomyProcessed, 1);
       assert.equal(failedTaxonomyRow.taxonomyErrors, 1);
-      const rolledBackOffer = await pool.query(`
+      const savedOffer = await pool.query(`
         SELECT offer.purchase_price, offer.quantity
         FROM product_offers offer
         JOIN products product ON product.id = offer.product_id
         WHERE offer.warehouse_id = $1
           AND product.article_normalized = $2
-      `, [warehouseId, highArticle]);
-      assert.equal(rolledBackOffer.rowCount, 1);
-      assert.equal(Number(rolledBackOffer.rows[0].purchase_price), 100);
-      assert.equal(Number(rolledBackOffer.rows[0].quantity), 3);
+      `, [warehouseId, errorArticle]);
+      assert.equal(savedOffer.rowCount, 1);
+      assert.equal(Number(savedOffer.rows[0].purchase_price), 999);
+      assert.equal(Number(savedOffer.rows[0].quantity), 9);
+      assert.equal((await membershipForArticle(errorArticle)).length, 0);
     } finally {
-      await pool.query(`
-        UPDATE customer_categories
-        SET is_active = TRUE
-        WHERE id = $1
-      `, [filterCategory.rows[0].id]);
+      injectClassificationDbError = false;
     }
 
     const replacement = await ImportService.importRows({
@@ -456,7 +449,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
       { article: highArticle, name: "Інша назва фільтра", price: 105, quantity: 4 },
     ]);
     assert.equal(replacement.errors, 0);
-    assert.equal(replacement.taxonomyPreservedApproved, 1);
+    assert.equal(replacement.taxonomyProcessed, 0);
     assert.equal((await membershipForArticle(highArticle)).length, 1);
     assert.deepEqual(
       stableMembershipRows(await membershipForArticle(safeArticle)),
@@ -484,7 +477,7 @@ test("supplier and reviewed imports classify taxonomy while preserving approved 
       { article: safeArticle, name: "Деталь", price: 111, quantity: 2 },
     ]);
     assert.equal(returned.errors, 0);
-    assert.equal(returned.taxonomyPreservedApproved, 2);
+    assert.equal(returned.taxonomyProcessed, 0);
     assert.equal((await membershipForArticle(highArticle)).length, 1);
     assert.equal((await membershipForArticle(safeArticle)).length, 1);
 

@@ -7,7 +7,7 @@ import {parsePrivateUnitCost,privateCostEnabled} from "./PrivateCostImportServic
 
 import { ImportNewProductRepository }
 from "../repositories/ImportNewProductRepository.js";
-import { CustomerTaxonomyImportService } from "./CustomerTaxonomyImportService.js";
+import { attemptCustomerTaxonomyImport } from "./CustomerTaxonomyImportAttemptService.js";
 import { isCustomerTaxonomyImportEnabled } from "../config/featureFlags.js";
 import {
   resolveFulfillmentType,
@@ -162,7 +162,7 @@ function mapReportRow(row) {
 async function approveLockedRow(
   row,
   db,
-  taxonomyContext
+  taxonomyState
 ) {
   const sourceType = sourceTypeForFulfillment(
     resolveFulfillmentType({
@@ -291,12 +291,17 @@ async function approveLockedRow(
     }
   }
 
-  const taxonomy = taxonomyContext
-    ? await CustomerTaxonomyImportService.classifyProduct({
-        productId: Number(product.id),
-        context: taxonomyContext,
-      }, { db })
-    : null;
+  let taxonomy = null;
+  if (taxonomyState?.enabled) {
+    const attempt = await attemptCustomerTaxonomyImport({
+      db,
+      productId: Number(product.id),
+      context: taxonomyState.context,
+    });
+    taxonomyState.context = attempt.context;
+    taxonomy = attempt.taxonomy;
+    if (attempt.error && !attempt.context) taxonomyState.enabled = false;
+  }
 
   const resolved =
     await ImportNewProductRepository
@@ -422,14 +427,12 @@ export const ImportReviewService = {
         return mapReview(row);
       }
 
-      const taxonomyContext = isCustomerTaxonomyImportEnabled()
-        ? await CustomerTaxonomyImportService.createContext({ db })
-        : null;
+      const taxonomyState = { enabled: isCustomerTaxonomyImportEnabled(), context: null };
       const { resolved, taxonomy } =
         await approveLockedRow(
           row,
           db,
-          taxonomyContext
+          taxonomyState
         );
 
       await db.query("COMMIT");
@@ -465,16 +468,14 @@ export const ImportReviewService = {
           );
 
       const approved = [];
-      const taxonomyContext = rows.length && isCustomerTaxonomyImportEnabled()
-        ? await CustomerTaxonomyImportService.createContext({ db })
-        : null;
+      const taxonomyState = { enabled: rows.length > 0 && isCustomerTaxonomyImportEnabled(), context: null };
 
       for (const row of rows) {
         approved.push(
           await approveLockedRow(
             row,
             db,
-            taxonomyContext
+            taxonomyState
           )
         );
       }

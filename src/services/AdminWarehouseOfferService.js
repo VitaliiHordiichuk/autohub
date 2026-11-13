@@ -1,6 +1,8 @@
 import {
   transaction,
 } from "../db/transaction.js";
+import { isCustomerTaxonomyImportEnabled } from "../config/featureFlags.js";
+import { attemptCustomerTaxonomyImport } from "./CustomerTaxonomyImportAttemptService.js";
 
 import {
   AdminWarehouseOfferRepository,
@@ -803,6 +805,10 @@ export const AdminWarehouseOfferService = {
               },
               db
             );
+      }
+
+      if (productCreated && isCustomerTaxonomyImportEnabled()) {
+        await attemptCustomerTaxonomyImport({ db, productId: Number(product.id) });
       }
 
       return {

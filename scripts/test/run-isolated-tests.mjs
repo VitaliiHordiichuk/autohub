@@ -36,12 +36,16 @@ const projectRoot =
   );
 
 
-dotenv.config({
-  path: path.join(
-    projectRoot,
-    ".env"
-  ),
-});
+// Explicit test environments can bypass the project .env entirely. This keeps
+// an isolated local PostgreSQL run from loading unrelated production secrets.
+if (process.env.DOTENV_CONFIG_PATH !== "/dev/null") {
+  dotenv.config({
+    path: path.join(
+      projectRoot,
+      ".env"
+    ),
+  });
+}
 
 
 function requiredEnv(name) {
@@ -96,6 +100,10 @@ const testDatabase =
   String(
     process.env.TEST_DB_NAME || ""
   ).trim();
+
+// A UTF-8 locale is needed for case-insensitive Cyrillic ILIKE and ~* checks.
+// Leave the existing default unchanged unless the isolated run opts in.
+const testDatabaseLocale = String(process.env.TEST_DB_LOCALE || "").trim();
 
 
 function isWithin(directory, target) {
@@ -908,6 +916,7 @@ async function main() {
       "createdb",
       [
         ...localAdminDatabaseCliArgs(),
+        ...(testDatabaseLocale ? ["--template", "template0", "--locale", testDatabaseLocale] : []),
         "--owner",
         databaseConfig.user,
         "--template",
