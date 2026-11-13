@@ -7,7 +7,7 @@ import { TelegramLanguageService } from "./TelegramLanguageService.js";
 import { siteSearchEnabled,searchWebsiteArticle,websiteSearchCards } from "./MakatronSharedSiteSearchClient.js";
 import {
   parseTelegramArticles, escapeTelegramHtml, formatTelegramProduct, formatTelegramNotFound,
-  formatTelegramInputError, formatTelegramBatch, formatTelegramHelp,
+  formatTelegramInputError, formatTelegramBatch, formatTelegramHelp, formatTelegramOwnStockVariants,
 } from "./TelegramCatalogFormatter.js";
 
 // Telegram identity is trusted only when BOTH the chat and sending user
@@ -21,6 +21,7 @@ export async function resolveTelegramPricingIdentity({ chatId, telegramUserId },
     + "FROM user_telegram_connections c "
     + "JOIN users u ON u.id = c.user_id "
     + "JOIN roles r ON r.id = u.role_id "
+    + "JOIN customers customer ON customer.user_id = u.id AND customer.is_active = TRUE "
     + "WHERE c.telegram_chat_id = $1 AND c.telegram_user_id = $2 "
     + "AND u.is_active = TRUE AND r.name = 'CLIENT' LIMIT 2",
     [chatId, telegramUserId],
@@ -71,23 +72,11 @@ export async function searchTelegramCatalog({ text, chatId, telegramUserId }, ov
           continue;
         }
         const cards=websiteSearchCards(answer);
-        const card=cards.find(item=>item.offers?.some(o=>
-          o.isAvailable===true&&Number(o.quantity)>0&&Number(o.retailPrice)>0))
-          ||cards[0];
-        if(!card){
-          results.push(formatTelegramNotFound(article,locale));
-          continue;
-        }
-        const formatted=formatTelegramProduct({
-          query:article,card,locale:answer.locale||locale,
-          replacementArticle:answer.replacement?.targetArticle||null,
-          compact:parsed.articles.length>1
-        });
-        const variants=cards.filter(row=>row.product.id!==card.product.id)
-          .slice(0,3).map(row=>row.product.article);
-        if(variants.length)formatted.text+="\nІнші номери: "+
-          variants.map(escapeTelegramHtml).join(", ");
-        results.push(formatted);
+        // Use the website's exact cards, pricing and eligibility.
+        // Only own-warehouse stock belongs in the current client reply.
+        results.push(formatTelegramOwnStockVariants({
+          query:article,cards,locale:answer.locale||locale
+        }));
       }catch(error){
         console.error("MAKAtron website catalog lookup:",error.message);
         results.push({text:"⚠️ "+escapeTelegramHtml(article)+

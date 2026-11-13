@@ -1,4 +1,5 @@
 import { TelegramConnectionService } from "./TelegramConnectionService.js";
+import { createTelegramRegistrationLink } from "./TelegramIdentityLinkService.js";
 import { searchTelegramCatalog } from "./TelegramCatalogService.js";
 import { TelegramLanguageService, telegramLanguageKeyboard } from "./TelegramLanguageService.js";
 import { handleTelegramOrderMessage, handleTelegramOrderCallback, telegramInlineCheckoutEnabled } from "./TelegramOrderService.js";
@@ -146,6 +147,9 @@ async function poll() {
           en:verification.verified
             ? "✅ Phone number confirmed. You can now send VIN requests and chat with a manager."
             : "This number does not match the phone number in your MAKA account. Check your profile number or share your own contact.",
+          ru:verification.verified
+            ? "✅ Номер подтверждён. Теперь можно отправлять VIN-запросы и общаться с менеджером."
+            : "Ой, этот номер не совпадает с номером в вашем аккаунте MAKA. Проверьте номер в профиле или поделитесь своим контактом.",
         };
         const pilot=telegramInlineCheckoutEnabled(message.chat.id);
         await api("sendMessage", {
@@ -156,6 +160,51 @@ async function poll() {
             : {remove_keyboard:true},
         });
         if(pilot)menuShownInThisProcess.add(String(message.chat.id));
+        continue;
+      }
+      // Guest-first onboarding: the proof is generated inside this verified
+      // Telegram chat, then consumed by website registration or login.
+      // No email/phone/name matching is trusted to infer the Telegram ID.
+      if (message?.chat?.type === "private" &&
+          String(message.chat.id) === String(message.from?.id) &&
+          /^\/(?:register|account)(?:@maka_com_ua_bot)?$/i.test(String(message.text || "").trim())) {
+        const locale = await TelegramLanguageService.get(message.chat.id);
+        if (!linkingEnabled()) {
+          await api("sendMessage", { chat_id: message.chat.id,
+            text: locale === "en" ? "Account linking is temporarily unavailable."
+              : "Прив’язка акаунта тимчасово недоступна." });
+          continue;
+        }
+        try {
+          const link = await createTelegramRegistrationLink({
+            chatId: message.chat.id,
+            telegramUserId: message.from.id,
+            username: message.from.username || null,
+            firstName: message.from.first_name || null,
+            locale,
+          });
+          if (link.alreadyLinked || link.ambiguous) {
+            await api("sendMessage", { chat_id: message.chat.id,
+              text: locale === "en"
+                ? "Your Telegram is already connected to a MAKA account, or has an old conflicting link. Manage it in your MAKA account."
+                : "Telegram уже прив’язано до акаунта MAKA або є стара суперечлива прив’язка. Керуйте прив’язкою в кабінеті MAKA." });
+          } else {
+            await api("sendMessage", { chat_id: message.chat.id,
+              text: locale === "en"
+                ? "Register or sign in through this personal link. Your Telegram will connect automatically. The link expires in 15 minutes."
+                : "Зареєструйтесь або увійдіть за персональним посиланням. Telegram підключиться автоматично. Посилання діє 15 хвилин.",
+              reply_markup: { inline_keyboard: [[{
+                text: locale === "en" ? "🔐 Open MAKA account" : "🔐 Відкрити MAKA",
+                url: link.url,
+              }]] },
+            });
+          }
+        } catch (error) {
+          console.error("MAKAtron registration link:", error.message);
+          await api("sendMessage", { chat_id: message.chat.id,
+            text: locale === "en" ? "Account linking is temporarily unavailable."
+              : "Не вдалося створити посилання. Спробуйте пізніше." });
+        }
         continue;
       }
       const match = String(message?.text || "").match(/^\/start\s+([a-f0-9]{48})$/i);
@@ -176,12 +225,14 @@ async function poll() {
       const connectedCopy = {
         uk:"✅ Telegram успішно підключено до MAKA. Тут надходитимуть сповіщення про замовлення.",
         en:"✅ Telegram is now connected to MAKA. Order notifications will arrive here.",
+        ru:"✅ Telegram успешно подключён к MAKA. Здесь будут приходить уведомления о заказах.",
       };
       const verifyCopy = {
         uk:"\n\nЩоб захистити VIN-чат від ботів, підтвердьте номер кнопкою нижче.",
         en:"\n\nTo protect the VIN chat from bots, confirm your phone number using the button below.",
+        ru:"\n\nЧтобы защитить VIN-чат от ботов, подтвердите номер кнопкой ниже.",
       };
-      const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number"};
+      const buttonCopy = {uk:"📱 Поділитися моїм номером",en:"📱 Share my phone number",ru:"📱 Поделиться моим номером"};
       const linkedName = connection?.role === "CLIENT"
         ? String(connection.firstName || "").trim().replace(/[\r\n\t]/g, " ").slice(0, 60)
         : "";
@@ -256,6 +307,7 @@ async function poll() {
         const showLanguages = /^\/(start|help)(?:\s|$)/i.test(text);
         await api("sendMessage", { chat_id: message.chat.id,
           ...reply,
+          link_preview_options: { is_disabled: true },
           ...(showLanguages ? { reply_markup: telegramLanguageKeyboard(await TelegramLanguageService.get(message.chat.id)) } : {}),
         });
       }

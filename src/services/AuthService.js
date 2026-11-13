@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 
 import { pool } from "../config/db.js";
+import { claimTelegramRegistrationLink } from "./TelegramIdentityLinkService.js";
 import { logCustomerActivity } from "./CustomerActivityService.js";
 import {
   hashPassword,
@@ -416,6 +417,18 @@ export const AuthService = {
         `,
         [userId, priceGroupId]
       );
+
+      // Bot-first registration: the one-time proof is consumed in the same
+      // transaction that creates the website user. Subsequent searches use
+      // the current database price group; no cached Telegram discount.
+      if (input.telegramRegistrationToken !== undefined &&
+          input.telegramRegistrationToken !== null &&
+          input.telegramRegistrationToken !== "") {
+        await claimTelegramRegistrationLink({
+          token: input.telegramRegistrationToken,
+          userId,
+        }, client);
+      }
 
       await logCustomerActivity(client, {
         customerId: customerResult.rows[0].id,
