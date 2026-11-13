@@ -43,7 +43,7 @@ const { EmailImportFileRepository } =
   await import("../repositories/EmailImportFileRepository.js");
 const { EmailImportStateRepository } =
   await import("../repositories/EmailImportStateRepository.js");
-const { EmailImportService } = await import("../services/EmailImportService.js");
+const { importAttachment } = await import("../services/EmailImportService.js");
 const { ImportFileParserService: fileParser } =
   await import("../services/ImportFileParserService.js");
 const { parseImportNumber } =
@@ -376,7 +376,7 @@ async function oneCycle({ dryRun = false } = {}) {
         const record = await claimLatest(data.rule, data.latest);
         let imported;
         try {
-          imported = await EmailImportService.importAttachment(
+          imported = await importAttachment(
             data.rule, data.latest.attachment
           );
           await EmailImportFileRepository.markCompleted({
