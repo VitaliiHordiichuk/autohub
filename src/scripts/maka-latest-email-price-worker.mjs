@@ -323,6 +323,19 @@ async function oneCycle({ dryRun = false } = {}) {
       }
     }
 
+    if (!dryRun) {
+      state = await EmailImportStateRepository.findByAccount({
+        accountKey: process.env.GMAIL_USER.trim().toLowerCase(),
+        mailbox: "INBOX",
+      });
+      if (!state) throw new Error("STOP: email import state absent");
+      await EmailImportStateRepository.markStarted({
+        id: state.id,
+        source: "SCHEDULER",
+      });
+      started = true;
+    }
+
     const data = await checkMailbox({ dryRun });
     state = data.state;
     info("MAILBOX_CHECK", {
@@ -339,11 +352,6 @@ async function oneCycle({ dryRun = false } = {}) {
       return;
     }
 
-    await EmailImportStateRepository.markStarted({
-      id: state.id,
-      source: "SCHEDULER",
-    });
-    started = true;
     const summary = {
       status: "COMPLETED",
       source: "SCHEDULER",
