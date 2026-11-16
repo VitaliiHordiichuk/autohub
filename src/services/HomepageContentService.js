@@ -11,6 +11,7 @@ import { OfferService } from "./OfferService.js";
 import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
+import { rotateHomepageFeatures } from "./HomepageFeatureRotation.js";
 
 const IMAGE_FIELDS = ["desktop", "tablet", "mobile"];
 const HOMEPAGE_TIME_ZONE = "Europe/Kyiv";
@@ -660,6 +661,7 @@ function featureValues(data, current = null) {
       ? current?.ends_on ?? null
       : optionalDate(data.endsOn, "Кінець показу"),
     sortOrder,
+    isPositionFixed: optionalBoolean(data.isPositionFixed, current?.is_position_fixed !== false),
     isActive: optionalBoolean(data.isActive, current ? Boolean(current.is_active) : true),
   };
 }
@@ -675,6 +677,7 @@ function presentAdminFeature(row) {
     startsOn: row.starts_on || null,
     endsOn: row.ends_on || null,
     sortOrder: Number(row.sort_order),
+    isPositionFixed: row.is_position_fixed !== false,
     isActive: Boolean(row.is_active),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -736,7 +739,7 @@ export const HomepageContentService = {
       locale,
       availabilityContext,
     );
-    const features = featureRows.map((row) => {
+    const features = rotateHomepageFeatures(featureRows, displayDate).map((row) => {
       const offers = offersByProductId.get(Number(row.product_id)) || [];
       const availableOffer = offers
         .filter((item) => item.isAvailable && item.retailPrice !== null)
@@ -908,11 +911,11 @@ export const HomepageContentService = {
     const result = await db.query(`
       INSERT INTO homepage_product_features(
         feature_type, product_id, discount_percent, starts_on, ends_on,
-        sort_order, is_active, created_by, updated_by
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8)
+        sort_order, is_position_fixed, is_active, created_by, updated_by
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
       RETURNING id`, [
       values.featureType, product.id, values.discountPercent, values.startsOn,
-      values.endsOn, values.sortOrder, values.isActive,
+      values.endsOn, values.sortOrder, values.isPositionFixed, values.isActive,
       positiveId(userId, "користувач"),
     ]);
     const rows = await listFeatureRows("WHERE f.id=$1", [result.rows[0].id], db);
@@ -930,11 +933,11 @@ export const HomepageContentService = {
       : await findProduct(data.article, db);
     await db.query(`UPDATE homepage_product_features SET
       feature_type=$2, product_id=$3, discount_percent=$4,
-      starts_on=$5, ends_on=$6, sort_order=$7, is_active=$8,
-      updated_by=$9, updated_at=CURRENT_TIMESTAMP
+      starts_on=$5, ends_on=$6, sort_order=$7, is_position_fixed=$8, is_active=$9,
+      updated_by=$10, updated_at=CURRENT_TIMESTAMP
       WHERE id=$1`, [
       id, values.featureType, product.id, values.discountPercent,
-      values.startsOn, values.endsOn, values.sortOrder, values.isActive,
+      values.startsOn, values.endsOn, values.sortOrder, values.isPositionFixed, values.isActive,
       positiveId(userId, "користувач"),
     ]);
     const rows = await listFeatureRows("WHERE f.id=$1", [id], db);
