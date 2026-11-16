@@ -49,7 +49,7 @@ export const ACTIVE_TXT_ARTICLE_SQL = `
   JOIN special_order_entries e
     ON e.import_id = r.id
   WHERE s.source_key = 'mercedes-txt'
-    AND e.article_normalized = $1
+    AND e.article_normalized = ANY($1::text[])
   ORDER BY e.line_number ASC
   LIMIT 2
 `;
@@ -64,11 +64,17 @@ export async function readSpecialOrderPublicOffer({
   if (enabled !== true) return null;
   const valid = specialOrderArticle(article);
   if (!valid) return null;
+  // Match the catalog's A + ten digits rule without altering TXT import keys.
+  // Keep the exact number too: if both exist, LIMIT 2 rejects the ambiguity.
+  const candidates = /^\d{10}$/.test(valid.normalized)
+    ? [valid.normalized, `A${valid.normalized}`]
+    : [valid.normalized];
   const db = deps.db || (await import("../config/db.js")).pool;
-  const rows = (await db.query(ACTIVE_TXT_ARTICLE_SQL, [valid.normalized])).rows;
+  const rows = (await db.query(ACTIVE_TXT_ARTICLE_SQL, [candidates])).rows;
   if (!Array.isArray(rows) || rows.length !== 1) return null;
   const row = rows[0];
-  if (row.article_normalized !== valid.normalized) return null;
+  if (!candidates.includes(row.article_normalized) ||
+      specialOrderArticle(row.article)?.normalized !== row.article_normalized) return null;
   const importId = Number(row.import_id);
   if (!Number.isSafeInteger(importId) || importId <= 0) return null;
   // Fail closed for a missing customer context; never silently treat an
@@ -94,7 +100,7 @@ export async function readSpecialOrderPublicOffer({
     sourceKey: SOURCE_KEY,
     importId,
     article: String(row.article),
-    articleNormalized: valid.normalized,
+    articleNormalized: row.article_normalized,
     title: row.title ? String(row.title).slice(0, 250) : null,
     indicativePriceUah: price.articlePriceUah,
     currency: "UAH",
