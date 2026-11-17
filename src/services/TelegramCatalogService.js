@@ -4,10 +4,11 @@ import { ProductCardService } from "./ProductCardService.js";
 import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { TelegramLanguageService } from "./TelegramLanguageService.js";
-import { siteSearchEnabled,searchWebsiteArticle,websiteSearchCards } from "./MakatronSharedSiteSearchClient.js";
+import { siteSearchEnabled,searchWebsiteArticle,websiteSearchCards,websiteSpecialOrder } from "./MakatronSharedSiteSearchClient.js";
 import {
   parseTelegramArticles, escapeTelegramHtml, formatTelegramProduct, formatTelegramNotFound,
   formatTelegramInputError, formatTelegramBatch, formatTelegramHelp, formatTelegramOwnStockVariants,
+  formatTelegramSpecialOrder,
 } from "./TelegramCatalogFormatter.js";
 
 // Telegram identity is trusted only when BOTH the chat and sending user
@@ -74,9 +75,12 @@ export async function searchTelegramCatalog({ text, chatId, telegramUserId }, ov
         const cards=websiteSearchCards(answer);
         // Use the website's exact cards, pricing and eligibility.
         // Only own-warehouse stock belongs in the current client reply.
-        results.push(formatTelegramOwnStockVariants({
+        const stock=formatTelegramOwnStockVariants({
           query:article,cards,locale:answer.locale||locale
-        }));
+        });
+        const specialOrder=websiteSpecialOrder(answer);
+        results.push(stock.stockEntries?.length||!specialOrder?stock:
+          formatTelegramSpecialOrder({specialOrder,locale:answer.locale||locale}));
       }catch(error){
         console.error("MAKAtron website catalog lookup:",error.message);
         results.push({text:"⚠️ "+escapeTelegramHtml(article)+

@@ -1,4 +1,5 @@
-import { escapeTelegramHtml, telegramProductUrl } from "./TelegramCatalogFormatter.js";
+import { escapeTelegramHtml, telegramProductUrl, telegramSpecialOrderUrl,
+  formatTelegramSpecialOrder,telegramSpecialOrderNote } from "./TelegramCatalogFormatter.js";
 
 export function telegramOrderLocale(locale) { return locale === "en" ? "en" : "uk"; }
 const TXT = {
@@ -101,6 +102,12 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
     for (let i = page * pageSize; i < Math.min(items.length, (page + 1) * pageSize); i++) {
       const item = items[i];
       if (!item.offers?.length) {
+        const supplyUrl=stage==="EDIT"&&formatTelegramSpecialOrder({specialOrder:item.specialOrder,locale,compact:true})
+          ?telegramSpecialOrderUrl(item.specialOrder.article,locale):null;
+        if(supplyUrl)rows.push([{
+          text:(singleItem?"":"№"+(i+1)+" · ")+(locale==="en"?"Request supply":"Залишити заявку"),
+          url:supplyUrl,
+        }]);
         if(stage==="CART")rows.push([
           ...(!singleItem?[{text:"№"+(i+1),callback_data:cb(key,"a",i)}]:[]),
           {text:"🗑",callback_data:cb(key,"x",i)},
@@ -150,7 +157,8 @@ export function orderKeyboard(key,stage,draft,locale="uk") {
       rows.push(navigation);
     }
     if(stage==="EDIT") {
-      rows.push([{text:t.next,callback_data:cb(key,"next")}]);
+      if(items.some(item=>item.offers?.length)||!items.some(item=>item.specialOrder))
+        rows.push([{text:t.next,callback_data:cb(key,"next")}]);
       rows.push([{text:t.add,callback_data:cb(key,"add")}]);
     } else {
       rows.push([{text:t.cartAdd,callback_data:cb(key,"more")}]);
@@ -235,7 +243,8 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       const article=esc(String(i.article||"").slice(0,55));
       const prefix=singleItem?"":(n+1)+". ";
       if (!i.offers?.length) {
-        lines.push(prefix+"<code>"+article+"</code> — "+t.none);
+        const supply=stage==="EDIT"?formatTelegramSpecialOrder({specialOrder:i.specialOrder,locale,compact:true}):null;
+        lines.push(prefix+(supply?supply.text:"<code>"+article+"</code> — "+t.none));
         if(stage==="EDIT"&&i.alternatives?.length){
           const alternative=i.alternatives[0];
           const offer=alternative.offers?.[alternative.selectedOffer||0];
@@ -289,7 +298,10 @@ export function renderTelegramOrder({stage="EDIT",draft={},locale="uk",sessionKe
       }
     });
     lines.push("");
-    lines.push("<b>"+t.total+": "+money(total,locale)+"</b>");
+    if(stage==="EDIT"&&items.some(i=>!i.offers?.length&&i.specialOrder))
+      lines.push(telegramSpecialOrderNote(locale));
+    if(stage!=="EDIT"||selected.length||!items.some(i=>i.specialOrder))
+      lines.push("<b>"+t.total+": "+money(total,locale)+"</b>");
     if(stage==="CART"&&!items.length)lines.push(t.cartEmpty);
     if(stage==="CART"&&draft.notice)lines.push(escapeTelegramHtml(draft.notice));
     if(stage==="REVIEW") {

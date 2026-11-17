@@ -69,6 +69,20 @@ export function websiteSearchCards(data) {
   });
 }
 
+// TXT prices are informational, never stock offers or checkout items.
+// Keep only the public price calculated by the website for this identity.
+export function websiteSpecialOrder(data) {
+  const offer=data?.success===true?data.specialOrder:null;
+  if(!offer || offer.sourceType!=="SPECIAL_ORDER" ||
+     offer.currency!=="UAH" || offer.availabilityStatus!=="ON_REQUEST" ||
+     offer.checkoutEnabled!==false || offer.isAvailable!==false ||
+     offer.quantity!==null || offer.requiresConfirmation!==true ||
+     !/^[A-Z0-9]{4,40}$/.test(offer.article||"") ||
+     !Number.isFinite(offer.indicativePriceUah) || offer.indicativePriceUah<=0)
+    return null;
+  return {article:offer.article,indicativePriceUah:offer.indicativePriceUah};
+}
+
 export function websiteOrderItem(data,requestedArticle,selectOffers) {
   const original=data?.productCard||null;
   const cards=websiteSearchCards(data);
@@ -90,8 +104,10 @@ export function websiteOrderItem(data,requestedArticle,selectOffers) {
     row.offers.length>0&&row.productId!==primary?.productId
   ).slice(0,3).map(({productId,...row})=>row);
   const {productId,...publicSelected}=selected;
+  const specialOrder=!publicSelected.offers.length?websiteSpecialOrder(data):null;
   return {
     ...publicSelected,
+    ...(specialOrder?{specialOrder}:{}),
     ...(primary&&String(primary.article).toUpperCase()!==String(requestedArticle).toUpperCase()
       ?{requestedArticle}:{}),
     ...(alternatives.length

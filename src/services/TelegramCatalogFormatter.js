@@ -84,6 +84,29 @@ export function telegramProductUrl(article, locale = "uk") {
 }
 const articleUrl = telegramProductUrl;
 
+export function telegramSpecialOrderUrl(article,locale="uk") {
+  if(!ARTICLE_RE.test(String(article||"")))return null;
+  return "https://maka.com.ua/"+lang(locale)+"?article="+encodeURIComponent(article);
+}
+
+export function telegramSpecialOrderNote(locale="uk") {
+  return lang(locale)==="en"
+    ?"About 2 weeks. Our manager will confirm availability and any replacement part number."
+    :"Близько 2 тижнів. Наявність і заміну номера перевірить менеджер.";
+}
+
+export function formatTelegramSpecialOrder({specialOrder,locale="uk",compact=false}) {
+  const url=telegramSpecialOrderUrl(specialOrder?.article,locale);
+  const price=currency(specialOrder?.indicativePriceUah,locale);
+  if(!url||!price)return null;
+  const en=lang(locale)==="en";
+  const text="<code>"+escapeTelegramHtml(specialOrder.article)+"</code> — "+
+    (en?"On order":"Під замовлення")+": <b>"+price+"</b>";
+  return {text:compact?text:text+"\n"+telegramSpecialOrderNote(locale)+
+    '\n<a href="'+escapeTelegramHtml(url)+'">'+
+    (en?"Request supply":"Залишити заявку")+"</a>"};
+}
+
 
 // Warehouse cities are stored in source data, sometimes in different
 // languages. Only normalize known equivalents for display/grouping: do not
