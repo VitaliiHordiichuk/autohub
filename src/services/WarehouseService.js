@@ -351,11 +351,15 @@ export const WarehouseService = {
       throw new Error("Склад не найден");
     }
 
-    // A city-only PATCH must not revalidate or rewrite source, pricing or stock settings.
-    if (Object.keys(fields).length === 1 && Object.hasOwn(fields, "city")) {
+    // Renaming or changing the city must not revalidate or rewrite source,
+    // pricing or stock settings, including for an inactive supplier.
+    if (Object.keys(fields).length === 1 &&
+        (Object.hasOwn(fields, "city") || Object.hasOwn(fields, "name"))) {
       const updatedWarehouse = await WarehouseRepository.update(
         numericWarehouseId,
-        { city: normalizeCity(city) }
+        Object.hasOwn(fields,"name")
+          ? { name: normalizeName(name) }
+          : { city: normalizeCity(city) }
       );
       const effectiveReturnPolicy = ReturnPolicyService.resolve({
         warehouseOverride: updatedWarehouse.return_policy_override,
