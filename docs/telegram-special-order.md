@@ -16,10 +16,13 @@ environment. Keep the existing bridge secret private and unchanged.
 - Multi-article replies and the optional inline shopping flow support the same
   distinction; only real stock offers contribute to cart totals.
 
-Deployment requires only the four changed bot service modules and the bridge
+The protected staff mode can also show the website's public TXT price when no
+stock is found; incoming/VIP prices are never inferred for a TXT-only item.
+
+Deployment requires only the five changed bot service modules and the bridge
 URL correction, followed by restarting the existing MAKAtron polling process.
 Do not start another polling worker, migrate data, restart the HTTP API, or
-change the EMAIL/Data Retention/inquiry workers. Back up those four modules and
+change the EMAIL/Data Retention/inquiry workers. Back up those five modules and
 the private bot environment on the VPS with restricted permissions first;
 rollback restores them and restarts only the same MAKAtron process.
 

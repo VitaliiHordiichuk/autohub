@@ -1,6 +1,6 @@
 import { CustomerPricingService } from "./CustomerPricingService.js";
-import { searchWebsiteArticle,websiteSearchCards } from "./MakatronSharedSiteSearchClient.js";
-import { escapeTelegramHtml } from "./TelegramCatalogFormatter.js";
+import { searchWebsiteArticle,websiteSearchCards,websiteSpecialOrder } from "./MakatronSharedSiteSearchClient.js";
+import { escapeTelegramHtml,formatTelegramSpecialOrder } from "./TelegramCatalogFormatter.js";
 
 const money=value=>value===null||value===undefined||!Number.isFinite(Number(value))
   ?"—":new Intl.NumberFormat("uk-UA",{maximumFractionDigits:2}).format(Number(value))+" грн";
@@ -79,7 +79,9 @@ export async function searchMakatronStaffThroughWebsite({
         ...(buttons.length?{reply_markup:{inline_keyboard:buttons}}:{})});
     }
     if(count===0){
-      results.push({text:"<code>"+escapeTelegramHtml(requested)+
+      const specialOrder=websiteSpecialOrder(data);
+      results.push(specialOrder?formatTelegramSpecialOrder({specialOrder}):
+        {text:"<code>"+escapeTelegramHtml(requested)+
         "</code> - Немає доступних залишків."});
     }
   }

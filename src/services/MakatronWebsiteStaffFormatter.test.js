@@ -2,9 +2,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { searchMakatronStaffThroughWebsite } from "./MakatronWebsiteStaffFormatter.js";
 
+const specialOrder={sourceType:"SPECIAL_ORDER",article:"A1676703800",
+ indicativePriceUah:32085.51,currency:"UAH",availabilityStatus:"ON_REQUEST",
+ quantity:null,isAvailable:false,checkoutEnabled:false,requiresConfirmation:true};
+
+test("staff can see the website TXT price without inventing incoming or VIP prices",async()=>{
+ const run=data=>searchMakatronStaffThroughWebsite({
+  parsed:{articles:["1676703800"]},staffUserId:2,
+  searchWebsite:async()=>data,getContext:async()=>({showAllPrices:true,priceGroups:[]})
+ });
+ const data={success:true,productCard:null,family:[],staffPrices:{},specialOrder};
+ const [r]=await run(data);
+ assert.match(r.text,/<code>A1676703800<\/code> — Під замовлення: <b>32.085,51 грн/);
+ assert.match(r.text,/Залишити заявку/);
+ assert.doesNotMatch(r.text,/Вхідна|VIP|шт/);
+ assert.equal(r.reply_markup,undefined);
+ await assert.rejects(run({...data,staffPrices:null}),/Private staff price payload missing/);
+});
+
 test("staff presentation displays own retail/incoming/VIP and supplier VIP only",async()=>{
  const product={id:1,article:"A1673200603",name:"Стійка"};
- const data={success:true,productCard:{product,offers:[
+ const data={success:true,specialOrder,productCard:{product,offers:[
   {id:8,quantity:2,isAvailable:true},
   {id:9,quantity:1,isAvailable:true},
  ]},family:[],staffPrices:{
@@ -25,6 +43,7 @@ test("staff presentation displays own retail/incoming/VIP and supplier VIP only"
  assert.match(response[0].text,/Вхідна: 130/);
  assert.match(response[0].text,/Паша: 99/);
  assert.doesNotMatch(response[0].text,/Gold|Паша.*Роздріб/);
+ assert.doesNotMatch(response[0].text,/Під замовлення|32.085/);
  assert.deepEqual(response[0].reply_markup.inline_keyboard.flat().map(b=>b.callback_data),
   ["st:g:9:0","st:g:9:3","st:g:8:3"]);
 });
