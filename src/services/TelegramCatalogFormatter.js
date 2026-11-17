@@ -100,7 +100,11 @@ export function formatTelegramSpecialOrder({specialOrder,locale="uk",compact=fal
   const price=currency(specialOrder?.indicativePriceUah,locale);
   if(!url||!price)return null;
   const en=lang(locale)==="en";
+  let title=typeof specialOrder.title==="string"?specialOrder.title.slice(0,compact?24:110):"";
+  // Bound escaped titles in 20-part inline replies without cutting an entity.
+  while(compact&&escapeTelegramHtml(title).length>40)title=title.slice(0,-1);
   const text="<code>"+escapeTelegramHtml(specialOrder.article)+"</code> — "+
+    (title?escapeTelegramHtml(title)+(compact?" · ":"\n"):"")+
     (en?"On order":"Під замовлення")+": <b>"+price+"</b>";
   return {text:compact?text:text+"\n"+telegramSpecialOrderNote(locale)+
     '\n<a href="'+escapeTelegramHtml(url)+'">'+

@@ -51,6 +51,29 @@ test("real warehouse stock wins even if a response also contains TXT metadata",a
   assert.doesNotMatch(r.text,/Під замовлення|32.085/);
 });
 
+test("customer TXT reply includes an available title, escaped, without staff pricing fields",async()=>{
+ const data={...answer(),specialOrder:{...special(),title:'  Тяга <Mercedes> & опора  ',discountGroup:'18',retailPriceUah:34133.52}};
+ const [r]=await search(article,data);
+ assert.match(r.text,/<code>A1676703800<\/code> — Тяга &lt;Mercedes&gt; &amp; опора/);
+ assert.match(r.text,/32.085,51 грн/);
+ assert.doesNotMatch(r.text,/<Mercedes>|discountGroup|Роздріб|34.133,52|Група знижки/);
+ const item=websiteOrderItem(data,article,selectTelegramOffers);
+ assert.equal(item.specialOrder.title,'Тяга <Mercedes> & опора');
+ const inline=renderTelegramOrder({stage:'EDIT',draft:{items:[item]},sessionKey:'test'});
+ assert.match(inline.text,/Тяга &lt;Mercedes&gt; &amp; опора/);
+});
+
+test("empty TXT titles stay omitted and 20 escaped names keep inline replies bounded",async()=>{
+ const [empty]=await search(article,{...answer(),specialOrder:{...special(),title:'   '}});
+ assert.match(empty.text,/<\/code> — Під замовлення:/);
+ const items=Array.from({length:20},(_,i)=>websiteOrderItem({success:true,
+  specialOrder:{...special(32085.51,'A'+String(i+1).padStart(10,'0')),title:'<&>'.repeat(100)}},article,selectTelegramOffers));
+ const view=renderTelegramOrder({stage:'EDIT',draft:{items},sessionKey:'test'});
+ assert.ok(view.text.length<4096);
+ assert.equal((view.text.match(/Під замовлення/g)||[]).length,20);
+ assert.doesNotMatch(view.text,/<&>/);
+});
+
 test("an empty or unavailable catalog card does not hide the TXT fallback",async()=>{
   const [r]=await search(article,{...answer(),productCard:{...stock,
     offers:[{...stock.offers[0],quantity:0,isAvailable:false}]}});

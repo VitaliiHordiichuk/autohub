@@ -6,18 +6,26 @@ const specialOrder={sourceType:"SPECIAL_ORDER",article:"A1676703800",
  indicativePriceUah:32085.51,currency:"UAH",availabilityStatus:"ON_REQUEST",
  quantity:null,isAvailable:false,checkoutEnabled:false,requiresConfirmation:true};
 
-test("staff can see the website TXT price without inventing incoming or VIP prices",async()=>{
+test("staff sees TXT retail including VAT and its supplier group, not the discounted client price",async()=>{
  const run=data=>searchMakatronStaffThroughWebsite({
   parsed:{articles:["1676703800"]},staffUserId:2,
   searchWebsite:async()=>data,getContext:async()=>({showAllPrices:true,priceGroups:[]})
  });
- const data={success:true,productCard:null,family:[],staffPrices:{},specialOrder};
+ const data={success:true,productCard:null,family:[],staffPrices:{},specialOrder,
+  staffSpecialOrder:{article:specialOrder.article,title:'Тяга <Mercedes>',
+    retailPriceUah:34133.52,discountGroup:'18',currency:'UAH'}};
  const [r]=await run(data);
- assert.match(r.text,/<code>A1676703800<\/code> — Під замовлення: <b>32.085,51 грн/);
- assert.match(r.text,/Залишити заявку/);
+ assert.match(r.text,/<code>A1676703800<\/code> — Тяга &lt;Mercedes&gt;/);
+ assert.match(r.text,/Роздріб: <b>34.133,52 грн/);
+ assert.match(r.text,/Група знижки: <b>18<\/b>/);
+ assert.doesNotMatch(r.text,/32.085,51|<Mercedes>/);
  assert.doesNotMatch(r.text,/Вхідна|VIP|шт/);
  assert.equal(r.reply_markup,undefined);
  await assert.rejects(run({...data,staffPrices:null}),/Private staff price payload missing/);
+ await assert.rejects(run({...data,staffSpecialOrder:null}),/Staff TXT retail price payload missing/);
+ const [noName]=await run({...data,staffSpecialOrder:{...data.staffSpecialOrder,title:null}});
+ assert.doesNotMatch(noName.text,/undefined|null| — /);
+ assert.match(noName.text,/Роздріб:/);
 });
 
 test("staff presentation displays own retail/incoming/VIP and supplier VIP only",async()=>{

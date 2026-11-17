@@ -3,6 +3,7 @@ import { pool } from "../config/db.js";
 import { readWebsiteArticleSearch } from "../services/WebsiteArticleSearchService.js";
 import { websiteStaffPrices,websiteStaffClientQuote } from "../services/WebsiteStaffPricingService.js";
 import { websiteStaffVariants } from "../services/WebsiteStaffVariantService.js";
+import { readSpecialOrderStaffOffer } from "../services/SpecialOrderStaffSearchService.js";
 
 function validSecret(expected,provided) {
   const a=Buffer.from(String(expected||""),"utf8");
@@ -71,6 +72,10 @@ export async function searchForMakatron(req,res,deps={}) {
       const listVariants=deps.staffVariants||websiteStaffVariants;
       result.response.staffVariants=await listVariants(result);
       result.response.staffPrices=await privatePricing(result.response);
+      if(result.response.specialOrder){
+        const staffSpecialOrder=deps.staffSpecialOrder||readSpecialOrderStaffOffer;
+        result.response.staffSpecialOrder=await staffSpecialOrder({specialOrder:result.response.specialOrder});
+      }
     }
     return res.status(result.found?200:404).json(result.response);
   }catch(error){

@@ -68,5 +68,28 @@ test("disabled staff Telegram cannot request prices even for a customer account"
  });
  assert.equal(denied.statusCode,403);
 });
+test("TXT retail and discount group are attached only for authorized staff, never guests or clients",async()=>{
+ process.env.MAKATRON_SEARCH_BRIDGE_SECRET=secret;
+ const specialOrder={article:"A1676703800",importId:7,indicativePriceUah:1128,title:"Тяга"};
+ const detail={article:specialOrder.article,title:"Тяга",retailPriceUah:1200,discountGroup:"18",currency:"UAH"};
+ for(const mode of ["guest","client","staff"]){
+  let privateReads=0;
+  const res=makeRes();
+  await searchForMakatron(req(secret,{article:specialOrder.article,mode,userId:mode==="guest"?null:2}),res,{
+   db:{query:async()=>({rows:[{is_client:true,is_staff:true}]})},
+   read:async()=>({found:true,response:{success:true,specialOrder:{...specialOrder},productCard:null,family:[]}}),
+   staffVariants:async()=>[],staffPrices:async()=>({}),
+   staffSpecialOrder:async args=>{privateReads++;assert.deepEqual(args,{specialOrder});return detail;}
+  });
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.specialOrder.indicativePriceUah,1128,"Customer price remains unchanged");
+  if(mode==="staff"){
+   assert.equal(privateReads,1);assert.deepEqual(res.body.staffSpecialOrder,detail);
+  }else{
+   assert.equal(privateReads,0);assert.equal(res.body.staffSpecialOrder,undefined);
+   assert.doesNotMatch(JSON.stringify(res.body),/discountGroup|retailPriceUah/);
+  }
+ }
+});
 test.after(()=>{if(old===undefined)delete process.env.MAKATRON_SEARCH_BRIDGE_SECRET;
  else process.env.MAKATRON_SEARCH_BRIDGE_SECRET=old;});

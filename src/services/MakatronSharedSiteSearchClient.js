@@ -80,7 +80,9 @@ export function websiteSpecialOrder(data) {
      !/^[A-Z0-9]{4,40}$/.test(offer.article||"") ||
      !Number.isFinite(offer.indicativePriceUah) || offer.indicativePriceUah<=0)
     return null;
-  return {article:offer.article,indicativePriceUah:offer.indicativePriceUah};
+  const title=typeof offer.title==="string"?offer.title.replace(/\s+/gu," ").trim().slice(0,110):"";
+  return {article:offer.article,indicativePriceUah:offer.indicativePriceUah,
+    ...(title?{title}:{})};
 }
 
 export function websiteOrderItem(data,requestedArticle,selectOffers) {

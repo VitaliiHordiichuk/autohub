@@ -48,6 +48,14 @@ function toPriceUnits(value) {
   return units > 0n ? units : null;
 }
 
+// Staff retail: TXT excluding VAT × 1.2, with no customer/group discount.
+export function calculateSpecialOrderRetailPrice(retailPriceExVatUah) {
+  const amount=toPriceUnits(retailPriceExVatUah);
+  if(amount===null)return null;
+  const cents=(amount*120n+5000n)/10000n;
+  return Number.isSafeInteger(Number(cents))&&cents>0n?Number(cents)/100:null;
+}
+
 /**
  * @returns {null | {articlePriceUah:number, discountGroup:string,
  *   discountPercent:number, customerTier:'premium'|'standard',currency:'UAH'}}

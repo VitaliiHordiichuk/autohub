@@ -1,6 +1,6 @@
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { searchWebsiteArticle,websiteSearchCards,websiteSpecialOrder } from "./MakatronSharedSiteSearchClient.js";
-import { escapeTelegramHtml,formatTelegramSpecialOrder } from "./TelegramCatalogFormatter.js";
+import { escapeTelegramHtml } from "./TelegramCatalogFormatter.js";
 
 const money=value=>value===null||value===undefined||!Number.isFinite(Number(value))
   ?"—":new Intl.NumberFormat("uk-UA",{maximumFractionDigits:2}).format(Number(value))+" грн";
@@ -8,6 +8,18 @@ const incoming=value=>value===null||value===undefined||!Number.isFinite(Number(v
   ?"—":new Intl.NumberFormat("uk-UA",{
     minimumFractionDigits:2,maximumFractionDigits:6
   }).format(Number(value))+" грн";
+
+function staffSpecialOrderReply(specialOrder,detail) {
+  if(!detail || detail.article!==specialOrder.article || detail.currency!=="UAH" ||
+      !Number.isFinite(detail.retailPriceUah)||detail.retailPriceUah<=0 ||
+      !/^[0-9]{2,3}s?$/.test(detail.discountGroup||""))
+    throw Error("Staff TXT retail price payload missing from website backend");
+  const title=typeof detail.title==="string"?detail.title.replace(/\s+/gu," ").trim().slice(0,110):"";
+  return {text:"<code>"+escapeTelegramHtml(detail.article)+"</code>"+
+    (title?" — "+escapeTelegramHtml(title):"")+"\nПід замовлення\n"+
+    "Роздріб: <b>"+money(detail.retailPriceUah)+"</b>\n"+
+    "Група знижки: <b>"+escapeTelegramHtml(detail.discountGroup)+"</b>"};
+}
 
 // Presentation only; all catalogue matching and price calculations are
 // provided by the running MAKA backend shared with the website.
@@ -80,7 +92,7 @@ export async function searchMakatronStaffThroughWebsite({
     }
     if(count===0){
       const specialOrder=websiteSpecialOrder(data);
-      results.push(specialOrder?formatTelegramSpecialOrder({specialOrder}):
+      results.push(specialOrder?staffSpecialOrderReply(specialOrder,data.staffSpecialOrder):
         {text:"<code>"+escapeTelegramHtml(requested)+
         "</code> - Немає доступних залишків."});
     }

@@ -16,15 +16,20 @@ environment. Keep the existing bridge secret private and unchanged.
 - Multi-article replies and the optional inline shopping flow support the same
   distinction; only real stock offers contribute to cart totals.
 
-The protected staff mode can also show the website's public TXT price when no
-stock is found; incoming/VIP prices are never inferred for a TXT-only item.
+Customer replies include the TXT title when available, retaining the same
+customer price. Protected ADMIN/MANAGER replies instead show the title,
+**Роздріб** (source TXT price × 1.2, rounded half-up, without a discount), and
+the supplier's second discount-group field. These staff-only fields are attached
+only by the authorized internal bridge, never by public/client search. The
+staff lookup must match the same active READY revision and canonical article.
+Incoming/VIP prices are never inferred for a TXT-only item.
 
-Deployment requires only the five changed bot service modules and the bridge
-URL correction, followed by restarting the existing MAKAtron polling process.
-Do not start another polling worker, migrate data, restart the HTTP API, or
-change the EMAIL/Data Retention/inquiry workers. Back up those five modules and
-the private bot environment on the VPS with restricted permissions first;
-rollback restores them and restarts only the same MAKAtron process.
+The initial release corrected the private bridge URL and restarted MAKAtron.
+The staff-detail update also adds the private API metadata reader and retail
+helper, so it restarts the isolated HTTP API and the same MAKAtron process.
+Back up only the affected files first and record any newly added module for
+rollback. Do not start another polling worker, migrate data, or change the
+Frontend/EMAIL/Data Retention/inquiry workers. Secrets stay outside Git.
 
 Checks: TelegramSpecialOrder, TelegramCatalogService, TelegramCatalogFormatter,
 TelegramReleaseParity, MakatronSharedSiteSearchClient, TelegramOrderService,
