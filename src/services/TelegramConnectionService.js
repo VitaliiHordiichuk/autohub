@@ -33,7 +33,8 @@ export const TelegramConnectionService = {
 
   async createLink(userId, locale, db = pool) {
     const botUsername = String(process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "").trim();
-    if (!process.env.TELEGRAM_BOT_TOKEN || !botUsername) {
+    // The HTTP API issues a proof; only the separate bot process needs its secret.
+    if (!botUsername) {
       const error = new Error("Telegram-бот ещё не настроен");
       error.code = "TELEGRAM_NOT_CONFIGURED";
       throw error;
