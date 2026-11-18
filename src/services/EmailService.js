@@ -21,7 +21,7 @@ function greeting(firstName, locale) {
   return safeName ? `${safeName}, вітаємо!` : "Вітаємо!";
 }
 
-async function send({ to, subject, text, html }) {
+async function send({ to, subject, text, html, idempotencyKey }) {
   const apiKey = String(process.env.RESEND_API_KEY || "").trim();
   const from = String(process.env.EMAIL_FROM || DEFAULT_FROM).trim();
 
@@ -40,8 +40,10 @@ async function send({ to, subject, text, html }) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: JSON.stringify({ from, to: [to], subject, text, html }),
+    ...(idempotencyKey ? { signal: AbortSignal.timeout(8000) } : {}),
   });
 
   const data = await response.json().catch(() => null);
@@ -49,6 +51,7 @@ async function send({ to, subject, text, html }) {
   if (!response.ok) {
     const error = new Error(data?.message || `Resend HTTP ${response.status}`);
     error.code = "EMAIL_DELIVERY_FAILED";
+    error.status = response.status;
     throw error;
   }
 
@@ -58,6 +61,21 @@ async function send({ to, subject, text, html }) {
 export const EmailService = {
   isConfigured() {
     return Boolean(String(process.env.RESEND_API_KEY || "").trim());
+  },
+
+  async sendOrderNotification(input) {
+    if (!input.idempotencyKey) throw new Error("Order email requires an idempotency key");
+    // Retry the same body/key only for transient failures. Resend deduplicates
+    // accepted requests for 24h; order transitions prevent routine re-sends.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return await send(input); }
+      catch (error) {
+        const retryable = error.status === 429 || error.status >= 500 ||
+          error.name === "TimeoutError" || error.name === "AbortError" || error instanceof TypeError;
+        if (!retryable || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 400 * 2 ** attempt));
+      }
+    }
   },
 
   async sendPasswordResetLink({ to, firstName, locale, resetUrl }) {

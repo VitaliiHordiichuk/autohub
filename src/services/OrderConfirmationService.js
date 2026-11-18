@@ -4,6 +4,7 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReservationRepository } from "../repositories/ReservationRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
 import { TelegramNotificationService } from "./TelegramNotificationService.js";
+import { OrderEmailNotificationService } from "./OrderEmailNotificationService.js";
 
 export const OrderConfirmationService = {
   async confirmOrder({
@@ -112,6 +113,10 @@ export const OrderConfirmationService = {
         history,
       };
     });
+
+    // Notifications run only after the order transaction has committed.
+    void OrderEmailNotificationService.send({ orderId: numericOrderId, type: "confirmed" })
+      .catch(() => console.error("MAKA order email dispatch failed", { orderId: numericOrderId }));
 
     void TelegramNotificationService.sendOrderStatusToUser({
       userId: customerUserId,

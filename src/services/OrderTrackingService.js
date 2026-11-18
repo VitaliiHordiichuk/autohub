@@ -2,6 +2,7 @@ import { transaction } from "../db/transaction.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
 import { TelegramNotificationService } from "./TelegramNotificationService.js";
+import { OrderEmailNotificationService } from "./OrderEmailNotificationService.js";
 
 export const OrderTrackingService = {
   async update({ orderId, trackingNumber, changedBy }) {
@@ -28,6 +29,10 @@ export const OrderTrackingService = {
       }, db);
       return { order:updated.rows[0], changed:true };
     });
+    if (result.changed) {
+      void OrderEmailNotificationService.send({ orderId: numericOrderId, type: "tracking", trackingNumber: normalized })
+        .catch(() => console.error("MAKA tracking email dispatch failed", { orderId: numericOrderId }));
+    }
     let telegram = { sent:false, reason:customerUserId ? "CUSTOMER_NOT_CONNECTED" : "CUSTOMER_NOT_REGISTERED" };
     if (result.changed && customerUserId) {
       try {
