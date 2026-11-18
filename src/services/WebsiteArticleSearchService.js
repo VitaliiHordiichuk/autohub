@@ -5,6 +5,7 @@ import { PublicSearchPresenterService } from "./PublicSearchPresenterService.js"
 import { ArticleNumberRepository } from "../repositories/ArticleNumberRepository.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
 import { readSpecialOrderPublicOffer, txtPublicSearchEnabled } from "./SpecialOrderPublicSearchService.js";
+import { findPreviousArticleProducts, buildPreviousArticleCards, availablePreviousArticleCards } from "./PreviousArticleNumberService.js";
 
 async function safeSpecialOrderLookup(lookup, args) {
   // Optional fallback failure must not break the normal catalog search.
@@ -31,12 +32,23 @@ export async function readWebsiteArticleSearch({
   const present=deps.present || (args=>PublicSearchPresenterService.present(args));
   const specialOrder=deps.specialOrder || readSpecialOrderPublicOffer;
   const specialOrderEnabled=deps.specialOrderEnabled ?? txtPublicSearchEnabled();
-  const searchResult=await search(article);
-  if(!searchResult?.found) {
+  let searchResult=(await search(article)) || { found:false };
+  const findPrevious=deps.findPrevious || findPreviousArticleProducts;
+  const buildPrevious=deps.buildPrevious || buildPreviousArticleCards;
+  const previousProducts=await findPrevious({article,searchResult});
+  if(searchResult.numberResolution==="PREFIX" && previousProducts.some(product=>
+    Number(product.id)===Number(searchResult.exactProduct?.id))) {
+    // A prefix suggestion that is explicitly a previous number must not be
+    // passed off as the requested new product or auto-selected in Telegram.
+    searchResult={...searchResult,found:false,exactProduct:null,family:[]};
+  }
+  const missingResponse=async (existingPricingContext=null) => {
     if (specialOrderEnabled) {
-      let pricingContext;
-      try { pricingContext=await pricing(userId); }
-      catch { pricingContext=null; }
+      let pricingContext=existingPricingContext;
+      if (!pricingContext) {
+        try { pricingContext=await pricing(userId); }
+        catch { pricingContext=null; }
+      }
       const fallback=pricingContext
         ?await safeSpecialOrderLookup(specialOrder,{
           article,pricingContext,requestedLocale,enabled:true,
@@ -65,7 +77,8 @@ export async function readWebsiteArticleSearch({
       response:{success:false,query:article,normalized:searchResult?.normalized||"",
         message:"Товар не знайдено"},
     };
-  }
+  };
+  if(!searchResult.found && !previousProducts.length) return missingResponse();
   const pricingContext=await pricing(userId);
   const productCard=searchResult.exactProduct
     ?await buildCard(searchResult.exactProduct,pricingContext,availabilityContext):null;
@@ -80,6 +93,7 @@ export async function readWebsiteArticleSearch({
   const replacementSourceCard=replacementSourceProduct&&
     Number(replacementSourceProduct.id)!==Number(searchResult.exactProduct?.id)
     ?await buildCard(replacementSourceProduct,pricingContext,availabilityContext):null;
+  const previousCards=await buildPrevious(previousProducts,pricingContext,availabilityContext);
   const familyCards=searchResult.family?.length>1
     ?await buildFamily({
       family:searchResult.family,exactProductId:searchResult.exactProduct?.id??null,
@@ -88,10 +102,17 @@ export async function readWebsiteArticleSearch({
       pricingContext,availabilityContext,
     }):[];
   const publicResult=await present({requestedLocale,family:familyCards,
-    productCard,replacementSourceCard,includeSourceDetails});
+    productCard,replacementSourceCard,previousNumberCards:previousCards,includeSourceDetails});
+  const previousNumberCards=availablePreviousArticleCards(publicResult.previousNumberCards);
+  if(!searchResult.found && !previousNumberCards.length) return missingResponse(pricingContext);
+  if(!searchResult.found) searchResult={...searchResult,
+    found:true,query:article,normalized:searchResult.normalized||article,
+    searchedArticle:searchResult.normalized||article,rule:"PREVIOUS_NUMBER",
+    exactProduct:null,family:[],replacementPath:[],
+  };
   // Do not hide real stocked/reserved/partner offers or replacements.
   const visibleCards=[publicResult.productCard,publicResult.replacementSourceCard,
-    ...(publicResult.family||[])];
+    ...(publicResult.family||[]),...previousNumberCards];
   const anyExistingOffer=visibleCards.some(card=>
     (card?.offers||[]).length>0 ||
     [...(card?.analogs||[]),...(card?.replacements||[])].some(related=>
@@ -108,6 +129,7 @@ export async function readWebsiteArticleSearch({
       searchedArticle:searchResult.searchedArticle??searchResult.normalized,
       rule:searchResult.rule,parsed:searchResult.parsed??null,
       family:publicResult.family,productCard:publicResult.productCard,
+      previousNumberCards,
       ...(fallback?{specialOrder:fallback}:{}),
       replacement:replacementLink?{
         sourceBrand:replacementLink.sourceBrandName,

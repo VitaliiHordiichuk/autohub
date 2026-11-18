@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readWebsiteArticleSearch } from "./WebsiteArticleSearchService.js";
+import { readWebsiteArticleSearch as readArticleSearch } from "./WebsiteArticleSearchService.js";
+const readWebsiteArticleSearch=(input,deps={})=>readArticleSearch(input,{
+  findPrevious:async()=>[],...deps,
+});
 
 test("site and Telegram share the exact same website article read model",async()=>{
  const calls=[];
@@ -131,4 +134,55 @@ test("existing family offers block TXT fallback even if exact card is empty",asy
   assert.equal(result.found,true);
   assert.equal(Object.hasOwn(result.response,"specialOrder"),false);
   assert.equal(result.response.family[0].offers[0].id,88);
+});
+
+function previousScenario({newExists=true,oldAvailable=true}={}) {
+ const old={id:91,brand_id:1,article:'A1111111111'};
+ const current={id:92,brand_id:1,article:'A2222222222'};
+ const oldOffer={id:901,productId:91,sourceType:'OWN_STOCK',isAvailable:oldAvailable,quantity:oldAvailable?2:0,retailPrice:1000};
+ let txtCalls=0;
+ return {old,current,get txtCalls(){return txtCalls},deps:{
+  search:async()=>newExists?{found:true,query:current.article,normalized:current.article,exactProduct:current,family:[current],replacementPath:[]}:{found:false,normalized:current.article},
+  findPrevious:async()=>[old],pricing:async()=>({priceGroupName:'Guest'}),
+  buildPrevious:async()=>[{product:old,offers:[oldOffer]}],
+  buildCard:async p=>({product:p,offers:[],analogs:[],replacements:[]}),
+  present:async args=>({...args,locale:'uk'}),specialOrderEnabled:true,
+  specialOrder:async()=>{txtCalls++;return {article:current.article,sourceType:'SPECIAL_ORDER'}},
+ }};
+}
+test('new-number search returns old warehouse stock ahead of a TXT price',async()=>{
+ const s=previousScenario();const result=await readWebsiteArticleSearch({article:s.current.article},s.deps);
+ assert.equal(result.response.productCard.product.article,s.current.article);
+ assert.equal(result.response.previousNumberCards[0].product.article,s.old.article);
+ assert.equal(result.response.previousNumberCards[0].offers[0].retailPrice,1000);
+ assert.equal(result.response.previousNumberCards[0].offers[0].productId,s.old.id);
+ assert.equal(result.response.specialOrder,undefined);assert.equal(s.txtCalls,0);
+});
+test('old stock is returned when the requested new number has no catalogue card',async()=>{
+ const s=previousScenario({newExists:false});const result=await readWebsiteArticleSearch({article:s.current.article},s.deps);
+ assert.equal(result.found,true);assert.equal(result.response.productCard,null);
+ assert.equal(result.response.searchedArticle,s.current.article);
+ assert.equal(result.response.rule,'PREVIOUS_NUMBER');assert.equal(s.txtCalls,0);
+ assert.equal(result.response.previousNumberCards[0].product.article,s.old.article);
+});
+test('unavailable old numbers never suppress the requested TXT offer',async()=>{
+ for(const newExists of [true,false]){
+  const s=previousScenario({newExists,oldAvailable:false});const result=await readWebsiteArticleSearch({article:s.current.article},s.deps);
+  assert.equal(s.txtCalls,1);assert.equal(result.response.specialOrder.article,s.current.article);
+  assert.ok(!result.response.previousNumberCards?.length);
+ }
+});
+test('site and Telegram receive identical previous stock for the same buyer',async()=>{
+ const s=previousScenario();const input={article:s.current.article,userId:44,availabilityContext:{userId:44}};
+ assert.deepEqual((await readWebsiteArticleSearch(input,s.deps)).response,(await readWebsiteArticleSearch(input,s.deps)).response);
+});
+
+test('a prefix hit that is a previous number is never passed off as the new product',async()=>{
+ const s=previousScenario();
+ const result=await readWebsiteArticleSearch({article:s.current.article},{...s.deps,
+  search:async()=>({found:true,numberResolution:'PREFIX',query:s.current.article,normalized:s.current.article,exactProduct:s.old,family:[s.old]}),
+ });
+ assert.equal(result.found,true);assert.equal(result.response.productCard,null);
+ assert.equal(result.response.previousNumberCards[0].product.article,s.old.article);
+ assert.equal(result.response.rule,'PREVIOUS_NUMBER');
 });

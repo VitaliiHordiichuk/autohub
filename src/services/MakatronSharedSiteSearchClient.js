@@ -55,7 +55,7 @@ export async function quoteWebsiteOffer({offerId,group,userId},deps={}){
 export function websiteSearchCards(data) {
   if(!data?.success)return [];
   const results=[
-    data.productCard,...(data.family||[]),
+    data.productCard,...(data.previousNumberCards||[]).map(card=>({...card,previousNumber:true})),...(data.family||[]),
     data.replacement?.sourceProductCard,
     ...(data.productCard?.replacements||[]),
     ...(data.productCard?.analogs||[]),

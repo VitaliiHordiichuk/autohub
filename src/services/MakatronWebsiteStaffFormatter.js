@@ -61,6 +61,7 @@ export async function searchMakatronStaffThroughWebsite({
       const own=sorted.find(o=>data.staffPrices[String(o.id)].warehouseId===1);
       const lines=["<b>"+escapeTelegramHtml(card.product.article)+"</b> - "+
         escapeTelegramHtml(String(card.product.name||"Запчастина").slice(0,110))];
+      if(card.previousNumber || (data.previousNumberCards||[]).some(previous=>Number(previous.product?.id)===productId))lines.push("Попередній номер · перевірте VIN");
       const supplierLines=[],buttons=[];
       for(const offer of sorted){
         const p=data.staffPrices[String(offer.id)];

@@ -49,3 +49,12 @@ test("staff quote uses server VIP settings and rejects supplier retail",async()=
   offerId:8,group:"RETAIL",userId:2
  },{db,findOffers}),/Retail quote unavailable for external warehouse/);
 });
+
+test('staff private prices include only the actual offers on previous-number cards',async()=>{
+ const response={productCard:null,previousNumberCards:[{product:{id:21},offers:[{id:211,isAvailable:true,quantity:2}]}]};
+ const result=await websiteStaffPrices(response,{vipContext:async()=>({discountPercent:10,isVip:false}),db:{query:async(sql,params)=>{
+  assert.deepEqual(params,[[211]]);
+  return {rows:[{id:211,warehouse_id:1,retail_price:1000,minimum_sale_price:700,unit_cost:'600',warehouse_name:'Own'}]};
+ }}});
+ assert.equal(result['211'].retail,1000);assert.equal(result['211'].vip,900);assert.equal(result['211'].incoming,'600');
+});

@@ -687,6 +687,7 @@ export const PublicSearchPresenterService = {
     family,
     productCard,
     replacementSourceCard = null,
+    previousNumberCards = [],
     includeSourceDetails = false,
   }) {
     const locale =
@@ -699,12 +700,17 @@ export const PublicSearchPresenterService = {
         [
           ...collectProductIds(family, productCard),
           ...collectProductIds([], replacementSourceCard),
+          ...collectProductIds(previousNumberCards, null),
         ],
         locale
       );
 
     return {
       locale,
+
+      previousNumberCards: localizeRelated(
+        previousNumberCards, names, locale, includeSourceDetails
+      ),
 
       family:
         localizeRelated(

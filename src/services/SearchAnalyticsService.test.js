@@ -198,3 +198,18 @@ test("staff searches are excluded from analytics", () => {
     true
   );
 });
+
+test('search analytics records previous warehouse offers under their actual product and price',async(t)=>{
+ const {SearchAnalyticsService}=await import('./SearchAnalyticsService.js');
+ const {SearchAnalyticsRepository}=await import('../repositories/SearchAnalyticsRepository.js');
+ let event;
+ t.mock.method(SearchAnalyticsRepository,'createSearchEvent',async value=>(event=value,1));
+ await SearchAnalyticsService.recordSearch({
+  req:{auth:{userId:44,role:'CLIENT'},headers:{'x-client-city':'Kyiv','x-client-country':'UA'}},
+  article:'A2222222222',searchResult:{normalized:'A2222222222',found:true},
+  analyticsResult:{previousNumberCards:[{product:{id:11,article:'A1111111111',name:'Old part'},offers:[{id:71,retailPrice:357,quantity:2,sourceType:'OWN_STOCK'}]}]},
+ });
+ assert.equal(event.rawQuery,'A2222222222');assert.equal(event.resultProductsCount,1);
+ assert.equal(event.results[0].article,'A1111111111');assert.equal(event.results[0].retailPrice,357);
+ assert.equal(event.results[0].productOfferId,71);assert.equal(event.results[0].relationType,'REPLACEMENT');
+});

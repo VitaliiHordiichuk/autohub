@@ -534,6 +534,10 @@ function collectResults(
     );
   }
 
+  for (const item of sourceResult?.previousNumberCards || []) {
+    addProduct(item.product, item.offers, "REPLACEMENT");
+  }
+
   return results;
 }
 

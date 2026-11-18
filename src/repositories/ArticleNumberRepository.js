@@ -200,6 +200,50 @@ export const ArticleNumberRepository = {
   },
 
 
+  async findPreviousReplacementProducts({
+    articleCandidates,
+    brandId = null,
+    db = pool,
+  }) {
+    const candidates = [...new Set(articleCandidates || [])].filter(Boolean);
+    if (!candidates.length) return [];
+    // UNION, rather than UNION ALL, visits each number/state once. Cycles and
+    // converging replacement/alias chains cannot expand indefinitely.
+    const result = await db.query(`
+      WITH RECURSIVE previous_numbers AS (
+        SELECT DISTINCT l.target_brand_id AS brand_id,
+          l.target_article_normalized AS article_normalized,
+          l.target_brand_id AS root_brand_id, FALSE AS has_replacement
+        FROM article_number_links l
+        WHERE l.is_active = TRUE
+          AND l.link_type IN ('REPLACEMENT', 'ALIAS')
+          AND l.target_article_normalized = ANY($1::text[])
+          AND ($2::integer IS NULL OR l.target_brand_id = $2)
+        UNION
+        SELECT l.source_brand_id, l.source_article_normalized,
+          n.root_brand_id, n.has_replacement OR l.link_type = 'REPLACEMENT'
+        FROM previous_numbers n
+        JOIN article_number_links l ON l.target_brand_id = n.brand_id
+          AND l.target_article_normalized = n.article_normalized
+        WHERE l.is_active = TRUE
+          AND l.link_type IN ('REPLACEMENT', 'ALIAS')
+      )
+      ${searchProductSql(`
+        EXISTS (SELECT 1 FROM previous_numbers n
+          WHERE n.brand_id = p.brand_id
+            AND n.article_normalized = p.article_normalized
+            AND n.has_replacement)
+        AND NOT (p.article_normalized = ANY($1::text[])
+          AND ($2::integer IS NULL OR p.brand_id = $2))
+        AND ($2::integer IS NOT NULL OR
+          (SELECT COUNT(DISTINCT root_brand_id) FROM previous_numbers) = 1)
+      `)}
+      ORDER BY p.article_normalized, p.id
+      LIMIT 50;
+    `, [candidates, brandId]);
+    return result.rows;
+  },
+
   async findIncomingReplacements({
     brandId = null,
     articleNormalized,

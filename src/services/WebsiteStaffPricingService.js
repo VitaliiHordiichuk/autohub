@@ -19,7 +19,7 @@ async function currentVipPricing(db){
 export async function websiteStaffPrices(searchResponse, deps={}) {
   const db=deps.db||pool;
   const ids=new Set();
-  for(const card of [searchResponse.productCard,...(searchResponse.family||[]),
+  for(const card of [searchResponse.productCard,...(searchResponse.previousNumberCards||[]),...(searchResponse.family||[]),
     searchResponse.replacement?.sourceProductCard,
     ...(searchResponse.staffVariants||[])].filter(Boolean)){
     for(const offer of card.offers||[])

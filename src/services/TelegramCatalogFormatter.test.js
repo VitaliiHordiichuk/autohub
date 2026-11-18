@@ -107,3 +107,10 @@ test("українська — типова мова, англійська — �
   assert.match(formatTelegramHelp({ locale:"ru" }).text, /Привіт/);
   assert.match(formatTelegramInputError("INVALID_ARTICLE", "ru").text, /Надішліть артикул/);
 });
+
+test('stock response labels previous numbers and retains their real price and article',async()=>{
+ const {formatTelegramOwnStockVariants}=await import('./TelegramCatalogFormatter.js');
+ const response=formatTelegramOwnStockVariants({query:'A2222222222',locale:'uk',cards:[{...card,previousNumber:true}]});
+ assert.match(response.text,/A2711800109/);assert.match(response.text,/Попередній номер · перевірте VIN/);
+ assert.match(response.text,/950/);assert.doesNotMatch(response.text,/880/);
+});

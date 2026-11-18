@@ -158,6 +158,7 @@ export function formatTelegramOwnStockVariants({ query, cards, locale = "uk" }) 
 
       groups.get(key).rows.push(
         "🔎 " + articleLink + " — " + name + "\n"
+        + (card.previousNumber ? (lang(locale) === "en" ? "Previous part number · check VIN\n" : "Попередній номер · перевірте VIN\n") : "")
         + "💰 <b>" + price + "</b>  🟢 <b>" + t.inStock + ": "
         + escapeTelegramHtml(count) + " " + t.pcs + "</b>"
       );

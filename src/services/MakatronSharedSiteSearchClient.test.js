@@ -102,3 +102,20 @@ test("site prefix result never guesses compatible variant without explicit click
  assert.deepEqual(item.offers,[]);
  assert.equal(item.alternatives[0].article,"A29668082069051");
 });
+
+test('previous numbers are separate Telegram alternatives with their own offers',()=>{
+ const old=product(21,'A1111111111',[{id:211,isAvailable:true,quantity:2,retailPrice:100}]);
+ const data={success:true,productCard:product(22,'A2222222222'),previousNumberCards:[old,old],family:[]};
+ const cards=websiteSearchCards(data);
+ assert.deepEqual(cards.map(c=>c.product.article),['A2222222222','A1111111111']);
+ assert.equal(cards[1].previousNumber,true);
+ const item=websiteOrderItem(data,'A2222222222',list=>list.filter(o=>o.isAvailable).map(o=>({offerId:o.id,quantity:o.quantity,price:o.retailPrice})));
+ assert.equal(item.article,'A2222222222');assert.deepEqual(item.offers,[]);
+ assert.equal(item.alternatives[0].article,'A1111111111');assert.equal(item.alternatives[0].offers[0].offerId,211);
+});
+test('Telegram can show old stock without inventing a new catalogue product',()=>{
+ const data={success:true,productCard:null,previousNumberCards:[product(21,'A1111111111',[{id:211,isAvailable:true,quantity:1,retailPrice:100}])]};
+ const item=websiteOrderItem(data,'A2222222222',list=>list.map(o=>({offerId:o.id,quantity:o.quantity,price:o.retailPrice})));
+ assert.equal(item.article,'A2222222222');assert.deepEqual(item.offers,[]);
+ assert.equal(item.alternatives[0].article,'A1111111111');
+});

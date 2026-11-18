@@ -104,7 +104,7 @@ async function respondToArticle(
       await SearchAnalyticsService.recordSearch({
         req,article,searchResult,requestedLocale,
         ...(result.found?{publicResult,analyticsResult:{
-          productCard,family:familyCards,
+          productCard,family:familyCards,previousNumberCards:result.response.previousNumberCards,
         }}:{})
       });
     }

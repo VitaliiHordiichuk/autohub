@@ -98,3 +98,14 @@ test("staff shows base Mercedes own warehouse even when public response only con
   assert.ok(result.every(r=>r.reply_markup.inline_keyboard.flat().every(b=>
     !/st:g:(81|82):0/.test(b.callback_data))));
 });
+
+test('staff sees the previous number and its own prices rather than a new-number quote',async()=>{
+ const old={product:{id:21,article:'A1111111111',name:'Old part'},offers:[{id:211,isAvailable:true,quantity:2}]};
+ const response=await searchMakatronStaffThroughWebsite({parsed:{articles:['A2222222222']},staffUserId:2,
+  getContext:async()=>({showAllPrices:true,priceGroups:[]}),
+  searchWebsite:async()=>({success:true,productCard:null,previousNumberCards:[old],staffPrices:{'211':{warehouseId:1,retail:1000,incoming:'600',vip:900}}}),
+ });
+ assert.equal(response.length,1);assert.match(response[0].text,/A1111111111/);
+ assert.match(response[0].text,/Попередній номер · перевірте VIN/);assert.match(response[0].text,/Роздріб: 1.000 грн/);
+ assert.doesNotMatch(response[0].text,/A2222222222|Під замовлення/);
+});
