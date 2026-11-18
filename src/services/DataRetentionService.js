@@ -1,7 +1,8 @@
 import { pool } from '../config/db.js';
+import { SITE_TRAFFIC_RETENTION_PREDICATE } from './SiteTrafficPolicy.js';
 
 export const RETENTION_POLICY = Object.freeze({
-  importsPerProfile: 5, searchDays: 30, funnelDays: 30, priceDays: 90,
+  importsPerProfile: 5, searchDays: 30, funnelDays: 30, siteTrafficDays: 30, priceDays: 90,
   readNotificationDays: 30, unreadNotificationDays: 90,
   loginDays: 30, securityDays: 90, expiredTokenDays: 7, abandonedCartDays: 30,
   recentlyViewedDays: 30,
@@ -61,6 +62,7 @@ const rules = [
   ['client_recently_viewed_products', age('t.viewed_at', RETENTION_POLICY.recentlyViewedDays)],
   ['search_events', searchHistoryPredicate],
   ['funnel_events', age('t.created_at', RETENTION_POLICY.funnelDays)],
+  ['site_page_views', SITE_TRAFFIC_RETENTION_PREDICATE],
   ['price_history', age('t.created_at', RETENTION_POLICY.priceDays)],
   ['user_notifications', `(t.read_at IS NOT NULL AND ${age('t.read_at', RETENTION_POLICY.readNotificationDays)})
     OR (t.read_at IS NULL AND ${age('t.created_at', RETENTION_POLICY.unreadNotificationDays)})`],

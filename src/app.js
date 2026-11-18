@@ -21,6 +21,7 @@ import { adminMercedesTxtOnlyRouter } from "./routes/admin-mercedes-txt-only.rou
 import { adminBrandRouter } from "./routes/admin-brand.routes.js";
 import { adminSearchAnalyticsRouter } from "./routes/admin-search-analytics.routes.js";
 import { funnelAnalyticsRouter } from "./routes/funnel-analytics.routes.js";
+import { siteTrafficRouter } from "./routes/site-traffic.routes.js";
 import { adminArticleNumberRouter } from "./routes/admin-article-number.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import {
@@ -223,6 +224,7 @@ app.use("/api/search", searchRouter);
 app.use("/api/special-orders/inquiries", specialOrderInquiryRouter);
 app.use("/api/manager/special-order-inquiries", specialOrderInquiryManagerRouter);
 app.use("/api/analytics/funnel", funnelAnalyticsRouter);
+app.use("/api/analytics/site-visits", siteTrafficRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/checkout", checkoutRouter);
