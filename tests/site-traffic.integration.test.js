@@ -8,7 +8,7 @@ import { SITE_TRAFFIC_RETENTION_PREDICATE } from '../src/services/SiteTrafficPol
 import { runDataRetention } from '../src/services/DataRetentionService.js';
 
 // Explicit opt-in to a fresh local temporary cluster; never uses application .env.
-test('migration, deduplication, Kyiv day boundaries, permissions and real retention rule',async()=>{
+test('migration, deduplication, Kyiv day boundaries, permissions and real retention rule', { skip: !process.env.SITE_TRAFFIC_TEST_DB }, async()=>{
  assert.equal(process.env.SITE_TRAFFIC_TEST_DB,'maka_site_traffic_test');assert.equal(process.env.SITE_TRAFFIC_TEST_HOST,'/tmp/maka-site-traffic-pg-20261118');
  const db=new pg.Client({host:process.env.SITE_TRAFFIC_TEST_HOST,port:55438,database:process.env.SITE_TRAFFIC_TEST_DB,user:process.env.USER});await db.connect();
  try{
