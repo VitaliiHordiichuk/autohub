@@ -21,6 +21,7 @@ import {
   resolveFulfillmentType,
 } from "../../services/InventoryClassificationService.js";
 import { ReturnPolicyService } from "../../services/ReturnPolicyService.js";
+import { OrderEmailNotificationService } from "../../services/OrderEmailNotificationService.js";
 import { TelegramNotificationService } from "../../services/TelegramNotificationService.js";
 
 function conflict(code, issues, message = "Умови оформлення змінилися") {
@@ -417,6 +418,8 @@ export const CommitOnSubmitOrder = {
 
     if (!result.idempotentReplay) {
       for (const order of result.orders) {
+        void OrderEmailNotificationService.send({ orderId: order.id, type: "created" })
+          .catch(() => console.error("MAKA order-created email dispatch failed", { orderId: Number(order.id) }));
         const deliveryRow = result.deliveries.find(
           (entry) => Number(entry.orderId) === Number(order.id)
         );

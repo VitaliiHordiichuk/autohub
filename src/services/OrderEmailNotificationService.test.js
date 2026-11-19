@@ -206,3 +206,31 @@ test("failed TTN commit does not send email", async t => {
   await assert.rejects(OrderTrackingService.update({ orderId: order.id, trackingNumber: "00000000000000", changedBy: 1 }), /Commit failed/);
   assert.ok(events.includes("ROLLBACK")); assert.ok(!events.includes("tracking"));
 });
+
+test("created template shows saved sale items, a pending confirmation status and a distinct deduplication key", () => {
+  const email = buildOrderEmail({ type: "created", order: { ...order, status: "NEW" }, items });
+  assert.match(email.subject, /900000001 створено/);
+  assert.match(email.html, /Замовлення створено/);
+  assert.match(email.html, /Очікує підтвердження менеджера/);
+  assert.match(email.html, /A0004209602/);
+  assert.match(email.html, /&lt;script&gt;/);
+  assert.doesNotMatch(email.html, /Замовлення підтверджено|987654321|PRIVATE_SUPPLIER|<script>/);
+  assert.equal(email.idempotencyKey, "maka/order-created/900000001");
+  assert.notEqual(email.idempotencyKey, buildOrderEmail({ type: "confirmed", order, items }).idempotencyKey);
+});
+test("creation event uses the order recipient and sale prices, including a fast manager confirmation", async t => {
+  enabled(t);
+  for (const status of ["NEW", "CONFIRMED"]) {
+    const db=database({...order,status});const sent=[];
+    const result=await OrderEmailNotificationService.send({orderId:order.id,type:"created"},db,async input=>{sent.push(input);return {sent:true}});
+    assert.equal(result.sent,true);assert.equal(sent[0].to,order.recipient_email);assert.match(sent[0].html,/Тестові колодки/);
+    assert.doesNotMatch(db.calls[1].sql,/purchase_price|supplier|internal_cost/);
+  }
+});
+test("creation mail skips absent/invalid order email and cancelled orders",async t=>{
+  enabled(t);
+  for(const row of [{...order,status:"NEW",recipient_email:null},{...order,status:"NEW",recipient_email:"bad"},{...order,status:"CANCELLED"}]){
+    const result=await OrderEmailNotificationService.send({orderId:order.id,type:"created"},database(row),()=>assert.fail("Unexpected mail"));
+    assert.equal(result.sent,false);
+  }
+});

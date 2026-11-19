@@ -20,6 +20,7 @@ import {
 import { CustomerPricingService } from "../../services/CustomerPricingService.js";
 import { ReturnPolicyService } from "../../services/ReturnPolicyService.js";
 import { NotificationRepository } from "../../repositories/NotificationRepository.js";
+import { OrderEmailNotificationService } from "../../services/OrderEmailNotificationService.js";
 import { TelegramNotificationService } from "../../services/TelegramNotificationService.js";
 import { CommitOnSubmitOrder } from "./CommitOnSubmitOrder.js";
 
@@ -454,6 +455,9 @@ export const SubmitOrder = {
         remainingItemsCount: allItems.length - items.length,
       };
     });
+
+    void OrderEmailNotificationService.send({ orderId: result.order.id, type: "created" })
+      .catch(() => console.error("MAKA order-created email dispatch failed", { orderId: Number(result.order.id) }));
 
     void TelegramNotificationService.sendNewOrder({
       orderId: result.order.id,

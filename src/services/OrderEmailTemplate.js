@@ -15,9 +15,11 @@ export function buildOrderEmail({ type, order, items = [], trackingNumber }) {
   const id = Number(order.id);
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Invalid order ID");
   let subject, content, text, idempotencyKey;
-  if (type === "confirmed") {
+  if (type === "created" || type === "confirmed") {
+    const created = type === "created";
+    const heading = created ? "Замовлення створено" : "Замовлення підтверджено";
     if (!items.length) throw new Error("Cannot email an empty order");
-    subject = `Замовлення №${id} підтверджено — MAKA`;
+    subject = `Замовлення №${id} ${created ? "створено" : "підтверджено"} — MAKA`;
     const rows = items.map(item => {
       const quantity = Number(item.quantity);
       if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Invalid order quantity");
@@ -32,9 +34,9 @@ export function buildOrderEmail({ type, order, items = [], trackingNumber }) {
       };
     });
     const total = money(order.total_amount);
-    content = `<h1 style="font-size:26px;line-height:1.25;margin:0 0 12px">Замовлення підтверджено</h1><p style="margin:0 0 16px;color:#667078">Замовлення №${id}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0">${rows.map(r => r.html).join("")}</table><p style="font-size:20px;margin:22px 0 0"><strong>Сума: ${escapeHtml(total)}</strong></p>`;
-    text = `Замовлення №${id} підтверджено\n\n${rows.map(r => r.text).join("\n")}\n\nСума: ${total}`;
-    idempotencyKey = `maka/order-confirmed/${id}`;
+    content = `<h1 style="font-size:26px;line-height:1.25;margin:0 0 12px">${heading}</h1><p style="margin:0 0 16px;color:#667078">Замовлення №${id}</p>${created ? '<p style="margin:0 0 16px;color:#667078">Очікує підтвердження менеджера.</p>' : ""}<table role="presentation" width="100%" cellspacing="0" cellpadding="0">${rows.map(r => r.html).join("")}</table><p style="font-size:20px;margin:22px 0 0"><strong>Сума: ${escapeHtml(total)}</strong></p>`;
+    text = `Замовлення №${id} ${created ? "створено\nОчікує підтвердження менеджера." : "підтверджено"}\n\n${rows.map(r => r.text).join("\n")}\n\nСума: ${total}`;
+    idempotencyKey = `maka/order-${created ? "created" : "confirmed"}/${id}`;
   } else if (type === "tracking") {
     const ttn = String(trackingNumber || "");
     if (!/^\d{14}$/.test(ttn)) throw new Error("Invalid tracking number");

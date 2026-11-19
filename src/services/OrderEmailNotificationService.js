@@ -21,12 +21,15 @@ export const OrderEmailNotificationService = {
       if (!to || to.length > 254 || !/^[^\s@<>\r\n]+@[^\s@<>\r\n]+\.[^\s@<>\r\n]+$/.test(to)) {
         return { sent: false, reason: "NO_VALID_ORDER_EMAIL" };
       }
+      // The creation event is dispatched only for a newly committed order. A
+      // manager may already have confirmed it before this background read.
+      if (type === "created" && !["NEW", "CONFIRMED"].includes(order.status)) return { sent: false, reason: "STATUS_CHANGED" };
       if (type === "confirmed" && order.status !== "CONFIRMED") return { sent: false, reason: "STATUS_CHANGED" };
       if (type === "tracking" && (order.tracking_number !== trackingNumber ||
           !["NOVA_POSHTA_POINT", "NOVA_POSHTA_COURIER"].includes(order.delivery_method))) {
         return { sent: false, reason: "TRACKING_CHANGED" };
       }
-      const items = type === "confirmed" ? (await db.query(`
+      const items = ["created", "confirmed"].includes(type) ? (await db.query(`
         SELECT p.article, p.name, oi.quantity, oi.price_at_purchase
         FROM order_items oi JOIN products p ON p.id=oi.product_id
         WHERE oi.order_id=$1 AND oi.status='ACTIVE' ORDER BY oi.id`, [id])).rows : [];
