@@ -178,7 +178,6 @@ export const SubmitOrder = {
     vin = null,
     delivery = null,
     saveDeliveryProfile = false,
-    trustedTelegramCustomerUserId = null,
   }) {
     if (!checkoutId) {
       throw new Error(
@@ -199,13 +198,9 @@ export const SubmitOrder = {
         vin,
         delivery,
         saveDeliveryProfile,
-        trustedTelegramCustomerUserId,
       });
     }
 
-    if (trustedTelegramCustomerUserId !== null) {
-      throw new Error("Telegram customer context requires COMMIT_ON_SUBMIT checkout");
-    }
     const orderComment = buildOrderComment({ comment, vinCheckRequested, vin });
     const normalizedVin = vinCheckRequested
       ? String(vin || "").toUpperCase().replace(/[^A-Z0-9]/g, "")
