@@ -1,3 +1,4 @@
+import { analyzeDisplayFraming, bindDisplayFraming, framingEnabled, originalDisplayFraming } from './ProductImageFraming.js';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { pool } from "../config/db.js";
@@ -327,6 +328,14 @@ export async function processProductImageRecord(imageId, db = pool, dependencies
       );
       const siteUrls = siteVariants.map(item => useStableSiteUrls
         ? stableSiteImageUrl(row.id, item.role) : item.url);
+      let displayFrame = null;
+      if (framingEnabled()) {
+        try {
+          displayFrame = await analyzeDisplayFraming(processed.merchant.variant, {
+            processed:true, cleanSource:true, brandingMode:row.image_branding_mode,
+          });
+        } catch { displayFrame = originalDisplayFraming(1500,1500,'ANALYSIS_FAILED'); }
+      }
       return await transaction(session, async () => {
         const current = await session.query('SELECT processing_request_id FROM product_images WHERE id=$1 FOR UPDATE', [id]);
         if (String(current.rows[0]?.processing_request_id) !== String(row.processing_request_id)) return { superseded: true };
@@ -346,6 +355,10 @@ export async function processProductImageRecord(imageId, db = pool, dependencies
           processed.metadata.qualityStatus, variants[4].url, variants[4].key,
           processed.metadata.processingVersion || PRODUCT_IMAGE_PROCESSING_VERSION,
           processed.metadata.reviewStatus || "APPROVED", processed.metadata.reviewReason || null]);
+        if (displayFrame) {
+          await session.query('UPDATE product_images SET image_display_frame=$2::jsonb WHERE id=$1',
+            [id, JSON.stringify(bindDisplayFraming(displayFrame,{...row,url:siteUrls[0],storage_key:variants[0].key}))]);
+        }
         await publishObjects(session, row, variants);
         if (variants.some(item => !item.reused) || row.display_mode !== 'PROCESSED') {
           await ProductPublicUpdateService.touch(row.product_id, session);
@@ -409,6 +422,7 @@ export const ProductImageService = {
     return {
       smartProcessing,
       manualProcessing: true,
+      ...(framingEnabled() ? {displayFraming:true} : {}),
       preferredMode: smartProcessing ? IMAGE_PROCESSING_MODE.PRODUCT_MAX : IMAGE_PROCESSING_MODE.LEGACY,
       modes: [
         IMAGE_PROCESSING_MODE.PRODUCT_MAX,
@@ -448,7 +462,8 @@ export const ProductImageService = {
       processing_status,display_mode,processing_error,processed_at,
       original_width,original_height,processed_width,processed_height,image_quality_status,
       image_branding_mode,image_processing_mode,image_processing_config,
-      image_review_status,image_review_reason
+      image_review_status,image_review_reason,
+      ${framingEnabled() ? 'image_display_frame' : 'NULL::jsonb AS image_display_frame'}
       FROM product_images WHERE product_id=$1 ORDER BY priority,id`, [positiveId(productId, "productId")]);
     return result.rows;
   },

@@ -1,4 +1,4 @@
-import test, { after, before } from "node:test";
+import test, { after, before, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from 'node:crypto';
 
@@ -21,6 +21,7 @@ const environmentNames = [
   "R2_BUCKET",
   "R2_PUBLIC_BASE_URL",
   "SMART_PRODUCT_IMAGES_ENABLED",
+  "PRODUCT_IMAGE_DISPLAY_FRAMING_ENABLED",
   "AUTH_JWT_SECRET",
 ];
 const originalEnvironment = Object.fromEntries(
@@ -52,7 +53,11 @@ after(() => {
   }
 });
 
+afterEach(()=>{const value=originalEnvironment.PRODUCT_IMAGE_DISPLAY_FRAMING_ENABLED;if(value===undefined)delete process.env.PRODUCT_IMAGE_DISPLAY_FRAMING_ENABLED;else process.env.PRODUCT_IMAGE_DISPLAY_FRAMING_ENABLED=value;});
+
 test("reprocesses the site branch and always writes a separate clean Merchant image", async () => {
+  process.env.PRODUCT_IMAGE_DISPLAY_FRAMING_ENABLED="true";
+  const displayFrames=[];
   const productObject = await sharp({
     create: { width: 800, height: 280, channels: 3, background: "#a62035" },
   }).png().toBuffer();
@@ -108,6 +113,7 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
   const db = {
     async query(sql, parameters) {
       const lifecycle = lifecycleQuery(sql); if (lifecycle) return lifecycle;
+      if (/SET image_display_frame/.test(sql)) {displayFrames.push(JSON.parse(parameters[1]));return {rows:[]};}
       if (/SELECT pi\.\*,p.article/.test(sql)) return { rows: [{ ...row }] };
       if (/processed_url_1600=\$2/.test(sql)) {
         completedUpdates.push({ sql, parameters });
@@ -128,6 +134,7 @@ test("reprocesses the site branch and always writes a separate clean Merchant im
   };
 
   await processProductImageRecord(row.id, db);
+  assert.equal(displayFrames.length,1);assert.equal(displayFrames[0].status,"READY");assert.equal(displayFrames[0].mode,"AUTO");assert.ok(displayFrames[0].crop.width<1);assert.equal(displayFrames[0].sourceRequest,"0");
   const firstRun = puts.slice(0, 5);
   assert.equal(firstRun.length, 5);
   const firstSite = firstRun.find(({ key }) => /\/processed\/.*-site-1500\.webp$/.test(key));

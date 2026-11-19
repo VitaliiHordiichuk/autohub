@@ -1,15 +1,24 @@
+import { ProductImageFramingService } from './ProductImageFramingService.js';
 import { ProductImageService } from "./ProductImageService.js";
 import { collectProductImageGarbage } from './ProductImageGarbageCollector.js';
 
 let timer = null;
 let garbageTimer = null;
 let collecting = false;
+let framing = false;
 
 export function startProductImageProcessingScheduler() {
   if (timer) return;
   const recover = () => ProductImageService.recoverPending().catch((error) => {
     console.error("Product image recovery failed:", error.message);
   });
+  const recoverFraming = async () => {
+    if(framing)return;framing=true;
+    try { await ProductImageFramingService.recover(); }
+    catch(error){ console.error('Product display framing recovery failed:',error.message); }
+    finally { framing=false; }
+  };
+  const framingTimer=setInterval(recoverFraming,60_000);framingTimer.unref?.();
   recover();
   timer = setInterval(recover, 60_000);
   timer.unref?.();

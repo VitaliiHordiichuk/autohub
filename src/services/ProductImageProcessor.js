@@ -1028,3 +1028,11 @@ export const ProductImageProcessor = {
   process: processProductImage,
   processMerchant: processMerchantProductImage,
 };
+
+// Read-only overlay used to verify that an existing clean Merchant image has
+// exactly the same composition as the selected branded photo. No publication.
+export async function productImageBrandingOverlay(mode, size=256) {
+  const canvas=await sharp({create:{width:PROCESSED_IMAGE_SIZE,height:PROCESSED_IMAGE_SIZE,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).png().toBuffer();
+  const branded=await applyBranding(canvas,resolveImageBrandingMode(mode));
+  return sharp(branded.image).resize(size,size).ensureAlpha().raw().toBuffer();
+}

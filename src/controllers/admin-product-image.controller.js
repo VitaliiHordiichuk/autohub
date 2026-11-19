@@ -1,3 +1,4 @@
+import { ProductImageFramingService } from '../services/ProductImageFramingService.js';
 import { ProductImageService } from "../services/ProductImageService.js";
 
 function fail(res, error) { console.error("Ошибка фото товара:", error); return res.status(400).json({ success:false,error:error.message }); }
@@ -13,3 +14,6 @@ export async function downloadProcessedProductImage(req,res) { try { const file=
 export async function deleteProductImage(req,res) { try { await ProductImageService.remove(req.params.productId,req.params.imageId); return res.json({success:true}); } catch(error){ return fail(res,error); } }
 
 export async function replaceProductImage(req,res) { try { const replaced=await ProductImageService.replace(req.params.productId,req.params.imageId,req.body?.replacementImageId);return res.json({success:true,replaced}); } catch(error){ return fail(res,error); } }
+
+export async function getProductImageFraming(req,res) { try { return res.json({success:true,...await ProductImageFramingService.get(req.params.productId,req.params.imageId)}); } catch(error){return res.status(error.status||400).json({success:false,error:error.message});} }
+export async function setProductImageFraming(req,res) { try { return res.json({success:true,...await ProductImageFramingService.save(req.params.productId,req.params.imageId,req.body)}); } catch(error){return res.status(error.status||400).json({success:false,error:error.message});} }

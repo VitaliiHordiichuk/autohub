@@ -1,3 +1,5 @@
+import { framingEnabled, publicDisplayFraming } from './ProductImageFraming.js';
+
 const RESPONSIVE_WIDTHS = [400, 800, 1200, 1500];
 
 function cleanUrl(value) {
@@ -19,6 +21,7 @@ function sql(alias = "pi") {
   const image = safeAlias(alias);
   return `JSON_BUILD_OBJECT(
     'url', ${image}.url,
+    'framing', ${framingEnabled() ? `CASE WHEN ${image}.image_display_frame->>'sourceUrl' = ${image}.url AND ${image}.image_display_frame->>'sourceKey' IS NOT DISTINCT FROM ${image}.storage_key AND ${image}.image_display_frame->>'sourceRequest' = COALESCE(${image}.processing_request_id,0)::text THEN ${image}.image_display_frame - 'sourceUrl' - 'sourceKey' - 'sourceRequest' - 'updatedAt' ELSE NULL END` : 'NULL'},
     'variants', CASE
       WHEN ${image}.display_mode = 'PROCESSED'
         AND ${image}.processed_url_1600 IS NOT NULL
@@ -48,6 +51,7 @@ function normalize(value) {
 
   return {
     url,
+    ...(publicDisplayFraming(value.framing) ? {framing:publicDisplayFraming(value.framing)} : {}),
     variants: [...byWidth.entries()]
       .sort(([first], [second]) => first - second)
       .map(([width, candidateUrl]) => ({ width, url: candidateUrl })),

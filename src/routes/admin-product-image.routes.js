@@ -1,3 +1,4 @@
+import { getProductImageFraming, setProductImageFraming } from '../controllers/admin-product-image.controller.js';
 import { Router } from "express";
 import multer from "multer";
 import { deleteProductImage,downloadProcessedProductImage,getProductImages,makePrimaryProductImage,previewExistingProductImage,previewProductImageUpload,replaceProductImage,reprocessProductImage,searchImageProducts,setProductImageDisplayMode,uploadProductImages } from "../controllers/admin-product-image.controller.js";
@@ -17,3 +18,6 @@ adminProductImageRouter.patch("/:productId/:imageId/display",setProductImageDisp
 adminProductImageRouter.post("/:productId/:imageId/reprocess",reprocessProductImage);
 adminProductImageRouter.post("/:productId/:imageId/replace",replaceProductImage);
 adminProductImageRouter.delete("/:productId/:imageId",deleteProductImage);
+
+adminProductImageRouter.get('/:productId/:imageId/framing',getProductImageFraming);
+adminProductImageRouter.patch('/:productId/:imageId/framing',setProductImageFraming);
