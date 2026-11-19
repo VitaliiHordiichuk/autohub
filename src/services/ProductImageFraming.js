@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 
-export const DISPLAY_FRAMING_VERSION = 1;
+export const DISPLAY_FRAMING_VERSION = 2;
 export const framingEnabled = () => process.env.PRODUCT_IMAGE_DISPLAY_FRAMING_ENABLED === 'true';
 const full = () => ({left:0,top:0,width:1,height:1});
 const reviewed = {
@@ -20,7 +20,7 @@ export function publicDisplayFraming(value) {
   if(!value||value.version!==DISPLAY_FRAMING_VERSION||!['AUTO','MANUAL','ORIGINAL'].includes(value.mode)||!['READY','REVIEW'].includes(value.status))return null;
   const crop=normalizeDisplayCrop(value.crop),width=Number(value.imageWidth),height=Number(value.imageHeight);
   if(!crop||!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0||width>100000||height>100000)return null;
-  return {version:1,mode:value.mode,status:value.status,reason:typeof value.reason==='string'?value.reason.slice(0,64):null,imageWidth:width,imageHeight:height,crop,stamp:normalizeDisplayCrop(value.stamp)};
+  return {version:2,mode:value.mode,status:value.status,reason:typeof value.reason==='string'?value.reason.slice(0,64):null,imageWidth:width,imageHeight:height,crop,stamp:normalizeDisplayCrop(value.stamp)};
 }
 export function bindDisplayFraming(frame,row) {
   return {...frame,sourceUrl:row.url,sourceKey:row.storage_key??null,sourceRequest:String(row.processing_request_id??0),updatedAt:new Date().toISOString()};
@@ -35,7 +35,7 @@ export function brandingStamp(width,height) {
   return {left:962/1500,top:1359/1500,width:500/1500,height:103/1500};
 }
 export function originalDisplayFraming(width=1500,height=1500,reason=null) {
-  return {version:1,mode:'AUTO',status:reason?'REVIEW':'READY',reason,imageWidth:width,imageHeight:height,crop:full(),stamp:null};
+  return {version:2,mode:'AUTO',status:reason?'REVIEW':'READY',reason,imageWidth:width,imageHeight:height,crop:full(),stamp:null};
 }
 
 /** Read-only analysis: never encodes/publishes an image, changes a key or invents detail. */
@@ -49,7 +49,7 @@ export async function analyzeDisplayFraming(input,{brandingMode='CLEAN',processe
   if(metadata.pages>1)return fallback('ANIMATED_IMAGE');
   const stamp=processed&&brandingMode!=='CLEAN'?brandingStamp(width,height):null;
   const known=Object.entries(reviewed).find(([key])=>sourceUrl.includes(key)&&article===reviewedArticles[key]);
-  if(known&&processed){const [x,y,w,h]=known[1];return {version:1,mode:'AUTO',status:'READY',reason:'REVIEWED_SOURCE',imageWidth:width,imageHeight:height,crop:{left:x/400,top:y/400,width:w/400,height:h/400},stamp};}
+  if(known&&processed){const [x,y,w,h]=known[1];return {version:2,mode:'AUTO',status:'READY',reason:'REVIEWED_SOURCE',imageWidth:width,imageHeight:height,crop:{left:x/400,top:y/400,width:w/400,height:h/400},stamp};}
   // A repeating watermark can resemble a separate pale component. Analyse a
   // clean, identically aligned branch for new uploads; preserve older ambiguous
   // full-branded photos until an administrator explicitly chooses the bounds.
@@ -82,14 +82,26 @@ export async function analyzeDisplayFraming(input,{brandingMode='CLEAN',processe
   if(stamp&&!cleanSource&&right>=W*.59&&bottom>=H*.87)return fallback('NEAR_BRANDING');
   const w=right-left+1,h=bottom-top+1;
   if(w<10||h<10||w*h/(W*H)<.006)return fallback('SUBJECT_TOO_SMALL');
+  // A dark label must never be mistaken for an entire white/translucent part.
+  // A substantial faint silhouette outside the confident box makes the crop
+  // uncertain; preserve the full image rather than zooming into the label.
+  const halo=Math.max(6,Math.ceil(Math.max(w,h)*.06));let paleOutside=0;
+  for(let py=0;py<H;py++)for(let px=0;px<W;px++){
+    if(excluded(px,py)||(px>=left-halo&&px<=right+halo&&py>=top-halo&&py<=bottom+halo))continue;
+    const i=(py*W+px)*C,lo=Math.min(data[i],data[i+1],data[i+2]);
+    if(lo>=234&&lo<=249)paleOutside++;
+  }
+  if(paleOutside>Math.max(30,w*h*.025))return fallback('FAINT_OUTER_CONTENT');
   const padding=Math.max(4,Math.ceil(Math.max(w,h)*.025));
   const x=Math.max(0,left-padding),y=Math.max(0,top-padding),r=Math.min(W,right+1+padding),b=Math.min(H,bottom+1+padding);
-  return {version:1,mode:'AUTO',status:'READY',reason:null,imageWidth:width,imageHeight:height,crop:{left:x/W,top:y/H,width:(r-x)/W,height:(b-y)/H},stamp};
+  return {version:2,mode:'AUTO',status:'READY',reason:null,imageWidth:width,imageHeight:height,crop:{left:x/W,top:y/H,width:(r-x)/W,height:(b-y)/H},stamp};
 }
 
 const overlayCache=new Map();
 export async function sameImageComposition(siteInput,cleanInput,brandingMode) {
   const size=256;
+  const [siteMeta,cleanMeta]=await Promise.all([sharp(siteInput).metadata(),sharp(cleanInput).metadata()]);
+  if(!siteMeta.width||!siteMeta.height||!cleanMeta.width||!cleanMeta.height||Math.abs(siteMeta.width/siteMeta.height-cleanMeta.width/cleanMeta.height)>.005)return false;
   if(!overlayCache.has(brandingMode))overlayCache.set(brandingMode,(async()=>{
     const {productImageBrandingOverlay}=await import('./ProductImageProcessor.js');
     return productImageBrandingOverlay(brandingMode,size);

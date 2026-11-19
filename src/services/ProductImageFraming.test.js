@@ -61,3 +61,8 @@ test('existing clean counterpart is used only after pixel-level composition veri
  const shifted=await sharp(output.merchant.variant).extract({left:150,top:0,width:1350,height:1500}).resize(1500,1500).webp().toBuffer();
  assert.equal(await sameImageComposition(output.variants[800],shifted,'FULL_BRANDED'),false);
 });
+
+test('a dark label on a faint white part cannot be cropped as the whole product',async()=>{
+ const input=await image('<rect x="100" y="100" width="300" height="300" fill="#f5f5f5"/><rect x="220" y="230" width="60" height="30" fill="black"/>');
+ const frame=await analyzeDisplayFraming(input);assert.equal(frame.status,'REVIEW');assert.equal(frame.reason,'FAINT_OUTER_CONTENT');assert.equal(frame.crop.width,1);
+});

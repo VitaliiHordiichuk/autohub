@@ -38,7 +38,7 @@ test('public SQL suppresses stale metadata and private keys',async()=>{
  assert.equal(image.framing,null);
  const before=await row();await saveImageFrame(before,originalDisplayFraming(),db);
  image=(await db.query(`SELECT ${PublicProductImageService.sql()} AS image FROM product_images pi WHERE id=1`)).rows[0].image;
- assert.equal(image.url,'https://example.test/unchanged.webp');assert.equal(image.framing.sourceKey,undefined);assert.equal(image.framing.version,1);
+ assert.equal(image.url,'https://example.test/unchanged.webp');assert.equal(image.framing.sourceKey,undefined);assert.equal(image.framing.version,2);
 });
 test('manual edits validate revision and crop before any write',async()=>{
  const before=await row();await assert.rejects(ProductImageFramingService.save(1,1,{revision:'stale',mode:'ORIGINAL'},db),e=>e.status===409);
@@ -60,4 +60,11 @@ test('pool writes keep BEGIN, CAS update, public touch and COMMIT on one acquire
  let released=0;const before=await row();
  const fakePool={connect:async()=>({query:db.query.bind(db),release(){released++;}}),query(){throw new Error('Pool query must not be used inside transaction');}};
  await saveImageFrame(before,originalDisplayFraming(),fakePool);assert.equal(released,1);
+});
+
+test('an algorithm upgrade retains a manual frame without reading or recropping the image',async()=>{
+ const before=await row();const crop={left:.1,top:.2,width:.7,height:.6};const previous=bindDisplayFraming({...originalDisplayFraming(),version:1,mode:'MANUAL',crop},before);
+ await db.query('UPDATE product_images SET image_display_frame=$1::jsonb WHERE id=1',[JSON.stringify(previous)]);
+ let reads=0;const results=await ProductImageFramingService.recover({db,read:async()=>{reads++;throw new Error('Must not read a manually framed image');}});
+ assert.equal(results.length,1);assert.equal(reads,0);assert.equal((await row()).image_display_frame.version,2);assert.equal((await row()).image_display_frame.mode,'MANUAL');assert.deepEqual((await row()).image_display_frame.crop,crop);
 });

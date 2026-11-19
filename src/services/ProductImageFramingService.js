@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { pool } from '../config/db.js';
 import { transaction } from './ProductImageLifecycle.js';
 import { ProductPublicUpdateService } from './ProductPublicUpdateService.js';
-import { analyzeDisplayFraming, bindDisplayFraming, currentDisplayFraming, framingEnabled, normalizeDisplayCrop, originalDisplayFraming, sameImageComposition, brandingStamp } from './ProductImageFraming.js';
+import { analyzeDisplayFraming, bindDisplayFraming, currentDisplayFraming, framingEnabled, normalizeDisplayCrop, originalDisplayFraming, DISPLAY_FRAMING_VERSION, sameImageComposition, brandingStamp } from './ProductImageFraming.js';
 
 const fault = (message,status=400) => Object.assign(new Error(message),{status});
 const id = value => { const n=Number(value); if(!Number.isSafeInteger(n)||n<=0)throw fault('Invalid image identifier'); return n; };
@@ -26,6 +26,14 @@ export async function analyzeImageRow(row,read=readObject) {
     return await analyzeDisplayFraming(displayed,{processed,brandingMode,sourceUrl:row.url,article:row.article});
   }
   catch { return originalDisplayFraming(row.processed_width||1500,row.processed_height||1500,'ANALYSIS_FAILED'); }
+}
+export async function recoverImageFrame(row,read=readObject) {
+  const previous=row.image_display_frame;
+  if(['MANUAL','ORIGINAL'].includes(previous?.mode)) {
+    const retained=currentDisplayFraming({...row,image_display_frame:{...previous,version:DISPLAY_FRAMING_VERSION}});
+    if(retained)return retained;
+  }
+  return analyzeImageRow(row,read);
 }
 export async function saveImageFrame(row,frame,db=pool,{conflictIsError=true}={}) {
   const bound=bindDisplayFraming(frame,row);
@@ -69,13 +77,13 @@ export const ProductImageFramingService={
     if(!framingEnabled())return [];
     const result=await db.query(`SELECT pi.*,p.article FROM product_images pi JOIN products p ON p.id=pi.product_id
       WHERE pi.id>$1 AND pi.processing_status <> 'PROCESSING' AND (
-        pi.image_display_frame IS NULL OR pi.image_display_frame->>'sourceUrl' IS DISTINCT FROM pi.url
+        pi.image_display_frame IS NULL OR pi.image_display_frame->>'version' IS DISTINCT FROM '2' OR pi.image_display_frame->>'sourceUrl' IS DISTINCT FROM pi.url
         OR pi.image_display_frame->>'sourceKey' IS DISTINCT FROM pi.storage_key
         OR pi.image_display_frame->>'sourceRequest' IS DISTINCT FROM COALESCE(pi.processing_request_id,0)::text
       ) ORDER BY pi.id LIMIT $2`,[Math.max(0,Number(cursor)||0),Math.min(100,Math.max(1,Number(limit)||2))]);
     const results=[];
     for(const row of result.rows){
-      const frame=await analyzeImageRow(row,read);
+      const frame=await recoverImageFrame(row,read);
       const saved=dryRun?false:await saveImageFrame(row,frame,db,{conflictIsError:false});
       results.push({id:row.id,article:row.article,status:frame.status,reason:frame.reason,framing:frame,saved});
     }
