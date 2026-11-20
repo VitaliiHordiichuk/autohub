@@ -55,6 +55,47 @@ test("reads only active READY revision and never returns a sellable stock offer"
   assert.match(ACTIVE_TXT_ARTICLE_SQL,/LIMIT 2/);
 });
 
+test("ten digits without A resolve the same canonical TXT price as formatted Latin/Cyrillic A", async () => {
+  const part={...row,article:"A1673201503",article_normalized:"A1673201503"};
+  const inputs=["A1673201503","а 167-320 15 03","1673201503","167 320-15.03"];
+  const results=[];
+  for(const article of inputs) {
+    const calls=[];
+    const offer=await readSpecialOrderPublicOffer({article,pricingContext:price,enabled:true},
+      {db:fakeDb([part],calls)});
+    assert.equal(offer.article,"A1673201503");
+    assert.equal(offer.articleNormalized,"A1673201503");
+    assert.equal(offer.checkoutEnabled,false);
+    assert.equal(offer.quantity,null);
+    assert.deepEqual(calls[0].params,[/^\d/.test(article)
+      ? ["1673201503","A1673201503"] : ["A1673201503"]]);
+    results.push(offer);
+  }
+  for(const offer of results) assert.deepEqual(offer,results[0]);
+});
+
+test("bare numeric aliases never choose a price between conflicting TXT articles", async () => {
+  const prefixed={...row,article:"A1673201503",article_normalized:"A1673201503"};
+  const numeric={...row,article:"1673201503",article_normalized:"1673201503"};
+  for(const rows of [[prefixed,numeric],[prefixed,prefixed]]) {
+    assert.equal(await readSpecialOrderPublicOffer({article:"1673201503",pricingContext:price,enabled:true},
+      {db:fakeDb(rows,[])}),null);
+  }
+  const exact=await readSpecialOrderPublicOffer({article:"1673201503",pricingContext:price,enabled:true},
+    {db:fakeDb([numeric],[])});
+  assert.equal(exact.articleNormalized,"1673201503");
+});
+
+test("alias lookup rejects a mismatched canonical article and never strips an explicit prefix", async () => {
+  const other={...row,article:"A1673201503",article_normalized:"A1673201503"};
+  for(const article of ["B1673201503","N1673201503","1673201503W"]) {
+    assert.equal(await readSpecialOrderPublicOffer({article,pricingContext:price,enabled:true},
+      {db:fakeDb([other],[])}),null);
+  }
+  assert.equal(await readSpecialOrderPublicOffer({article:"1673201503",pricingContext:price,enabled:true},
+    {db:fakeDb([{...other,article:"A9999999999"}],[])}),null);
+});
+
 test("empty or ambiguous active results are suppressed rather than price-selected",async()=>{
   for(const rows of [[],[row,{...row,retail_ex_vat_uah:"87912.8500"}],[row,row]]){
     const offer=await readSpecialOrderPublicOffer({article:row.article,pricingContext:price,enabled:true},
