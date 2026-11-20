@@ -20,3 +20,13 @@ export async function getSiteTraffic(req, res) {
       error: error.statusCode ? error.message : "Не вдалося завантажити відвідуваність" });
   }
 }
+
+export async function getSiteVisitEvents(req, res) {
+  res.set("Cache-Control", "private, no-store");
+  try { return res.json({ success: true, ...await SiteTrafficService.visitEvents(req.params.visitKey, req.query) }); }
+  catch (error) {
+    if (!error.statusCode) console.error("Site visit journal failed:", error.code || "DATABASE_ERROR");
+    return res.status(error.statusCode || 500).json({success:false,
+      error:error.statusCode ? error.message : "Не вдалося завантажити історію відвідування"});
+  }
+}
