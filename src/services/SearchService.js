@@ -507,6 +507,17 @@ export const SearchService = {
         );
 
       for (const article of candidates) {
+        // Restore the Mercedes prefix before following configured links. The
+        // raw query's explicit links and exact products above keep priority.
+        const restoredCandidates = article === normalized ? [] : (await ArticleNumberService
+          .buildExplicitSearchCandidates({ articleNormalized: article }))
+          .filter(candidate => isMercedesBrandName(candidate.path?.[0]?.sourceBrandName));
+
+        for (const candidate of restoredCandidates) {
+          const resolved = await tryCandidate({ rawArticle, normalized, candidate });
+          if (resolved) return resolved;
+        }
+
         const result =
           await tryCandidate({
             rawArticle,
@@ -526,6 +537,13 @@ export const SearchService = {
 
         if (result) {
           return result;
+        }
+
+        // As with an explicit full number, an unresolved replacement must not
+        // silently become a partial-number suggestion.
+        if (restoredCandidates.length > 0) {
+          return { query: rawArticle, normalized, rule: detectedRule,
+            found: false, exactProduct: null, family: [] };
         }
       }
     }
