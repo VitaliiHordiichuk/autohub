@@ -3,13 +3,16 @@ import { ProductPlaceholderService } from "../services/ProductPlaceholderService
 import { normalizeArticle } from "../services/articleEngine/normalize.js";
 import { effectiveProductCategoryQuery } from "../services/EffectiveProductCategoryService.js";
 import { publicProductName } from "../services/ProductNameService.js";
+import { createProductImageStorage } from "../services/ProductImageService.js";
+import { primaryImageAliasEnabled, readPrimaryImageAlias } from "../services/ProductPrimaryImageAliasService.js";
 
-async function findProduct(article) {
+async function findProduct(article, db) {
   const normalized = normalizeArticle(article);
   if (!normalized) return null;
 
-  const result = await pool.query(`
+  const result = await db.query(`
     SELECT
+      p.id,
       p.article,
       p.article_normalized,
       p.name,
@@ -50,33 +53,54 @@ async function findProduct(article) {
   return product;
 }
 
-export async function getProductPlaceholder(req, res) {
-  try {
-    const product = await findProduct(req.params.article);
-    if (!product) {
-      return res.status(404).json({ success: false, error: "Товар не знайдено" });
-    }
+const LEGACY_CACHE_CONTROL = "public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000";
+const ALIAS_CACHE_CONTROL = "public, no-cache, must-revalidate";
 
-    const etag = ProductPlaceholderService.placeholderEtag(product);
-    if (req.headers["if-none-match"] === etag) {
-      res.set({
-        "Cache-Control": "public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000",
-        ETag: etag,
-      });
-      return res.status(304).end();
-    }
-
-    const rendered = await ProductPlaceholderService.generatePlaceholder(product);
-    res.set({
-      "Cache-Control": "public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000",
-      "Content-Type": "image/webp",
-      "Cross-Origin-Resource-Policy": "cross-origin",
-      ETag: etag,
-      "X-Content-Type-Options": "nosniff",
-    });
-    return res.send(rendered.buffer);
-  } catch (error) {
-    console.error("Помилка генерації заглушки товару:", error);
-    return res.status(500).json({ success: false, error: "Не вдалося створити зображення товару" });
-  }
+function matchesEtag(value, etag) {
+  return typeof value === "string" && value.split(",").some(candidate => {
+    const tag = candidate.trim();
+    return tag === "*" || tag === etag || tag === `W/${etag}`;
+  });
 }
+
+export function createProductPlaceholderHandler({ db = pool, storageFactory = createProductImageStorage, logger = console } = {}) {
+  return async function getProductPlaceholder(req, res) {
+    let stableAlias = false;
+    try {
+      const product = await findProduct(req.params.article, db);
+      if (!product) {
+        return res.set("Cache-Control", "no-store").status(404).json({ success: false, error: "Товар не знайдено" });
+      }
+
+      stableAlias = primaryImageAliasEnabled(product);
+      const realImage = stableAlias ? await readPrimaryImageAlias(product, db, storageFactory) : null;
+      const cacheControl = stableAlias ? ALIAS_CACHE_CONTROL : LEGACY_CACHE_CONTROL;
+      const etag = realImage?.etag || ProductPlaceholderService.placeholderEtag(product);
+      if (matchesEtag(req.headers["if-none-match"], etag)) {
+        res.set({
+          "Cache-Control": cacheControl,
+          ETag: etag,
+        });
+        return res.status(304).end();
+      }
+
+      const rendered = realImage || await ProductPlaceholderService.generatePlaceholder(product);
+      res.set({
+        "Cache-Control": cacheControl,
+        "Content-Type": realImage?.contentType || "image/webp",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        ETag: etag,
+        "X-Content-Type-Options": "nosniff",
+      });
+      if (req.method === "HEAD") return res.set("Content-Length", String(rendered.buffer.length)).end();
+      return res.send(rendered.buffer);
+    } catch (error) {
+      logger.error("Помилка генерації заглушки товару:", error);
+      res.set("Cache-Control", "no-store");
+      if (stableAlias) return res.set("Retry-After", "60").status(503).json({ success: false, error: "Зображення тимчасово недоступне" });
+      return res.status(500).json({ success: false, error: "Не вдалося створити зображення товару" });
+    }
+  };
+}
+
+export const getProductPlaceholder = createProductPlaceholderHandler();
