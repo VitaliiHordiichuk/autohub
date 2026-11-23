@@ -63,14 +63,16 @@ function fixture(selectedProduct = product) {
   return { state, db, storage, request, publish };
 }
 
-test('pilot is restricted to the selected article; old real-photo URLs are presented unchanged', () => {
+test('pilot is restricted to the selected articles; old real-photo URLs are presented unchanged', () => {
   assert.equal(primaryImageAliasEnabled(product), true);
+  assert.equal(primaryImageAliasEnabled({ article: 'A2975400441' }), true);
+  assert.equal(primaryImageAliasEnabled({ article: 'А 297 540 04 41' }), true);
   assert.equal(primaryImageAliasEnabled({ article: 'А 451 323 03 40' }), true);
   for (const article of ['A1668307401', 'A1673340300', 'B66959846', '', 'A45132303400']) {
     assert.equal(primaryImageAliasEnabled({ article }), false);
   }
   const urls = ['https://cdn.example.test/old-image.webp', 'https://cdn.example.test/second.jpg'];
-  for (const article of ['A4513230340', 'A1673340300']) {
+  for (const article of ['A4513230340', 'A2975400441', 'A1673340300']) {
     const result = ProductPlaceholderService.getProductImage({ article, imageUrls: urls });
     assert.equal(result.imageUrl, urls[0]);
     assert.deepEqual(result.imageUrls, urls);
@@ -239,4 +241,24 @@ test('non-pilot aliases cannot access DB or R2 even when called directly', async
   assert.equal(await readPrimaryImageAlias({ article: 'A1673340300', id: 1 }, {
     query() { throw new Error('must not query'); },
   }, () => { throw new Error('must not read R2'); }), null);
+});
+
+
+test('A2975400441 keeps its exact placeholder address when its first real photo is uploaded', async () => {
+  const selected = { id: 838, article: 'A2975400441', article_normalized: 'A2975400441', name: 'Блок запобіжників' };
+  const f = fixture(selected);
+  const before = await f.request();
+  assert.equal(before.statusCode, 200);
+  assert.equal(before.headers['cache-control'], 'public, no-cache, must-revalidate');
+  const photo = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#d1d2d3' } }).webp().toBuffer();
+  const storageKey = 'products/838/processed/test-photo.webp';
+  f.publish(photo, storageKey);
+  const after = await f.request({ 'if-none-match': before.headers.etag });
+  assert.equal(after.statusCode, 200);
+  assert.deepEqual(after.body, photo);
+  assert.notEqual(after.headers.etag, before.headers.etag);
+  assert.equal(after.headers.location, undefined);
+  assert.equal(ProductPlaceholderService.productPlaceholderUrl(selected), '/api/products/A2975400441/placeholder');
+  assert.deepEqual(f.state.reads, [storageKey]);
+  assert.equal((await f.request({ 'if-none-match': after.headers.etag })).statusCode, 304);
 });

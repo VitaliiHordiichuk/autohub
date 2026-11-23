@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { normalizeArticle } from './articleEngine/normalize.js';
 
-// Pilot only: this product had no real photos when its placeholder URL was recorded.
+// Pilot only: these products had no real photos when its placeholder URL was recorded.
 // Expanding the pilot must never rewrite product_images URLs or existing R2 objects.
-const PILOT_ARTICLES = new Set(['A4513230340']);
+const PILOT_ARTICLES = new Set(['A4513230340', 'A2975400441']);
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 
 export function primaryImageAliasEnabled(product) {
