@@ -2,7 +2,6 @@ import { VinRequestRepository } from "../repositories/VinRequestRepository.js";
 import { NotificationRepository } from "../repositories/NotificationRepository.js";
 import { VinDecoderService } from "./VinDecoderService.js";
 import { CustomerPricingService } from "./CustomerPricingService.js";
-import { TelegramNotificationService } from "./TelegramNotificationService.js";
 import { transaction } from "../db/transaction.js";
 import { ReturnPolicyService } from "./ReturnPolicyService.js";
 import { canonicalOfferClassification } from "./InventoryClassificationService.js";
@@ -63,12 +62,9 @@ export const VinRequestService={
       if(settings.mode==='CHAT'&&isClient&&!verification?.verified&&Number(stats.day_count)>=1)throw serviceError('Підтвердьте номер телефону перед повторним VIN-запитом',403,'PHONE_VERIFICATION_REQUIRED');
       if(settings.mode==='CHAT'&&(Number(stats.hour_count)>=3||Number(stats.day_count)>=10))throw serviceError('Зробімо невелику паузу 😊 Надто багато VIN-запитів за короткий час.',429,'REQUEST_RATE_LIMIT');
       const row=await VinRequestRepository.create({userId,vehicleBrandId:brandId,vin:cleanVin,requestText:cleanText,contactPhone:verifiedPhone||cleanPhone},db);
-      await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin}},db);
+      await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin,telegramVin:{version:1,event:'NEW_REQUEST',status:'PENDING',attempts:0}}},db);
       return row;
     });
-    void TelegramNotificationService.sendVinActivityToStaff({
-      requestId:created.id,event:'NEW_REQUEST',message:cleanText,
-    }).catch((error)=>console.error('Не вдалося надіслати Telegram-сповіщення про VIN-запит:',error.message));
     return created;
   },
   async createGuest({guestName:name,vehicleBrandId,vin,requestText,contactPhone,website}){
@@ -85,12 +81,9 @@ export const VinRequestService={
       if(settings.mode==='DAILY_REQUEST'&&Number(stats.day_count)>=1)throw serviceError('Один VIN-запит на сьогодні вже прийнято 😊 Наступний можна надіслати через 24 години.',429,'DAILY_REQUEST_LIMIT');
       if(settings.mode==='CHAT'&&(Number(stats.hour_count)>=3||Number(stats.day_count)>=10))throw serviceError('Зробімо невелику паузу 😊 Надто багато VIN-запитів за короткий час.',429,'REQUEST_RATE_LIMIT');
       const row=await VinRequestRepository.createGuest({guestName:cleanName,vehicleBrandId:brandId,vin:cleanVin,requestText:cleanText,contactPhone:cleanPhone},db);
-      await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin,guest:true}},db);
+      await NotificationRepository.createForStaff({eventKey:`vin:${row.id}:new`,type:'VIN_REQUEST_NEW',payload:{vinRequestId:Number(row.id),vin:row.vin,guest:true,telegramVin:{version:1,event:'NEW_REQUEST',status:'PENDING',attempts:0}}},db);
       return row;
     });
-    void TelegramNotificationService.sendVinActivityToStaff({
-      requestId:created.id,event:'NEW_REQUEST',message:cleanText,
-    }).catch((error)=>console.error('Не вдалося надіслати Telegram-сповіщення про гостьовий VIN-запит:',error.message));
     return{id:Number(created.id),status:created.status,createdAt:created.created_at};
   },
   async decode({vehicleBrandId,vin}){
@@ -133,11 +126,8 @@ export const VinRequestService={
       if(Number(stats.hour_count)>=12||Number(stats.day_count)>=40)throw serviceError('Трохи перепочиньмо 😊 Ліміт повідомлень тимчасово вичерпано.',429,'MESSAGE_RATE_LIMIT');
       const added=await VinRequestRepository.addMessage({requestId:numericId,senderUserId:userId,message:cleanMessage},db);
       await VinRequestRepository.touchAfterClientMessage(numericId,db);
-      await NotificationRepository.createForStaff({eventKey:`vin:${numericId}:client-message:${added.id}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:'IN_PROGRESS'}},db);
+      await NotificationRepository.createForStaff({eventKey:`vin:${numericId}:client-message:${added.id}`,type:'VIN_REQUEST_UPDATED',payload:{vinRequestId:numericId,vin:current.vin,status:'IN_PROGRESS',telegramVin:{version:1,event:'CLIENT_MESSAGE',messageId:String(added.id),status:'PENDING',attempts:0}}},db);
     });
-    void TelegramNotificationService.sendVinActivityToStaff({
-      requestId:numericId,event:'CLIENT_MESSAGE',message:cleanMessage,
-    }).catch((error)=>console.error('Не вдалося надіслати Telegram-сповіщення про VIN-повідомлення:',error.message));
     return present(await VinRequestRepository.findForUser(numericId,userId),userId);
   },
   async listForStaff({status,userId}){const normalized=status?String(status).toUpperCase():null;if(normalized&&!statuses.has(normalized))throw new Error('Невідомий статус');return present(await VinRequestRepository.listForStaff({status:normalized}),userId,{includeInternalSources:true});},

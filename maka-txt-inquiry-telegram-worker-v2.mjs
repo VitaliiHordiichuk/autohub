@@ -56,7 +56,15 @@ if (!startSpecialOrderInquiryOutboxScheduler()) {
   throw new Error("OUTBOX_WORKER_NOT_STARTED");
 }
 
-console.log("MAKA TXT Telegram worker started");
+// VIN notifications use the same token-owning process and never poll Telegram.
+const { startVinTelegramDeliveryScheduler } = await import(
+  "./src/services/VinTelegramDeliveryScheduler.js"
+);
+if (!startVinTelegramDeliveryScheduler({ ...process.env, MAKA_VIN_TELEGRAM_ENABLED: "true" })) {
+  throw new Error("VIN_DELIVERY_WORKER_NOT_STARTED");
+}
+
+console.log("MAKA TXT and VIN Telegram worker started");
 
 // Scheduler uses unref() internally.
 // Keep this dedicated worker process alive.
