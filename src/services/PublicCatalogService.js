@@ -5,7 +5,7 @@ import { ProductPlaceholderService } from "./ProductPlaceholderService.js";
 import { PublicProductImageService } from "./PublicProductImageService.js";
 import { publicProductName } from "./ProductNameService.js";
 import { parsePublicPage } from "../utils/publicPagination.js";
-import { CATALOG_DIRECTIONS, catalogDirection } from "./CatalogDirections.js";
+import { CATALOG_DIRECTIONS, catalogDirection, buildCatalogNavigationGroups } from "./CatalogDirections.js";
 
 function localizedName(row, locale) {
   if (locale === "en") return row.name_en || row.name;
@@ -183,6 +183,9 @@ export const PublicCatalogService = {
         // A product has at most one approved primary membership (DB unique index).
         productCount: roots.reduce((count, root) => count + root.productCount, 0),
         subgroups,
+        ...(direction.navigationGroups ? {
+          navigationGroups: buildCatalogNavigationGroups(direction, roots, locale),
+        } : {}),
       };
     });
   },
@@ -301,16 +304,19 @@ export const PublicCatalogService = {
     const direction = isDirection
       ? (await this.getDirections(locale, db)).find((item) => item.slug === directionSlug)
       : null;
+    const navigationGroup = subgroupSlug
+      ? direction?.navigationGroups?.find((item) => item.slug === subgroupSlug)
+      : null;
     const subgroup = subgroupSlug
       ? direction?.subgroups.find((item) => item.slug === subgroupSlug)
       : null;
-    if (isDirection && (!direction || (subgroupSlug && !subgroup))) return null;
+    if (isDirection && (!direction || (subgroupSlug && !subgroup && !navigationGroup))) return null;
     const directionScopeIds = isDirection
-      ? (subgroup ? [subgroup.id] : direction.rootIds)
+      ? (navigationGroup ? navigationGroup.categoryIds : subgroup ? [subgroup.id] : direction.rootIds)
       : null;
     const isVirtualOther = useCustomerTaxonomy && slug === OTHER_CATEGORY.slug;
     const categoryResult = isDirection
-      ? { rows: [{ id: null, parent_id: null, slug: direction.slug, name: direction.name }] }
+      ? { rows: [{ id: null, parent_id: null, slug: direction.slug, name: !subgroup && navigationGroup ? navigationGroup.name : direction.name }] }
       : useCustomerTaxonomy
       ? (isVirtualOther
         ? { rows: [{
@@ -825,7 +831,7 @@ export const PublicCatalogService = {
         name: categoryName,
         ...(useCustomerTaxonomy ? { isVirtual: isVirtualOther } : {}),
         ...(isDirection ? { isDirection: true, rootSlugs: direction.rootSlugs,
-          selectedSubgroup: subgroup?.slug || null } : {}),
+          selectedSubgroup: navigationGroup?.slug || subgroup?.slug || null } : {}),
         parent: row.parent_id ? {
           slug: row.parent_slug,
           name: parentName,
