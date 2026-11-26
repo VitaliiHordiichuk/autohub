@@ -1,3 +1,4 @@
+import { readTxtAdminWorkflow } from "../services/SpecialOrderTxtAdminWorkflowService.js";
 import { pool } from "../config/db.js";
 import { SupplierService } from "../services/SupplierService.js";
 import {
@@ -13,6 +14,7 @@ export function createMercedesTxtAdminHandlers({
   connect = () => pool.connect(),
   listRevisions = listMercedesTxtRevisions,
   activateRevision = activateMercedesTxtRevision,
+  readWorkflow = readTxtAdminWorkflow,
 } = {}) {
   async function checkSupplier(id) {
     if (String(id) !== String(SUPPLIER_ID)) return false;
@@ -122,10 +124,20 @@ export function createMercedesTxtAdminHandlers({
     }
   }
 
-  return { list, activate };
+  async function workflow(req, res) {
+    try {
+      if (!await checkSupplier(req.params.supplierId)) return res.status(404).json({success:false,error:"TXT_SUPPLIER_NOT_FOUND"});
+      if (req.query?.fileId !== undefined && (typeof req.query.fileId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.query.fileId))) return res.status(400).json({success:false,error:"INVALID_FILE_ID"});
+      res.set("Cache-Control", "no-store");
+      return res.json({ success: true, sourceKey: SOURCE_KEY, ...await readWorkflow(req.query?.fileId) });
+    } catch { return res.status(503).json({success:false,error:"TXT_WORKFLOW_UNAVAILABLE"}); }
+  }
+
+  return { list, activate, workflow };
 }
 
 export const {
+  workflow: getMercedesTxtAdminWorkflow,
   list: listMercedesTxtAdminRevisions,
   activate: activateMercedesTxtAdminRevision,
 } = createMercedesTxtAdminHandlers();

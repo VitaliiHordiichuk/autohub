@@ -1,3 +1,4 @@
+import { txtActivationEnabled, cleanupReplacedTxt } from "./SpecialOrderTxtAdminWorkflowService.js";
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { TXT_PRODUCTION_UPLOAD_ROOT } from "./SpecialOrderTxtProductionStorageGuard.js";
@@ -105,7 +106,7 @@ export async function listMercedesTxtRevisions(db) {
   requireDb(db);
   const result = await db.query(`
     SELECT r.id, r.status, r.total_lines, r.eligible_lines,
-      r.rejected_lines, r.started_at, r.finished_at,
+      r.rejected_lines, r.started_at, r.finished_at, r.upload_file_id,
       COALESCE(s.active_import_id = r.id, FALSE) AS is_active
     FROM special_order_import_runs r
     LEFT JOIN special_order_sources s
@@ -125,10 +126,11 @@ export async function activateMercedesTxtRevision({
   readClaim = verifyProductionClaim,
   // Test-only dependency. Production always hashes the original TXT file.
   readSourceIntegrity = assertProductionTxtSourceIntegrity,
+  cleanup = cleanupReplacedTxt,
 }) {
   // Import permission is independent from publication permission.
   // Never access DB or files when activation is disabled.
-  if (process.env.MAKA_TXT_ACTIVATION_ENABLED !== "true") {
+  if (!txtActivationEnabled()) {
     throw new Error("TXT_ACTIVATION_DISABLED");
   }
   requireDb(db);
@@ -194,6 +196,9 @@ export async function activateMercedesTxtRevision({
       throw new Error("TXT revision row count mismatch");
     }
 
+    const previous = await db.query("SELECT active_import_id FROM special_order_sources WHERE source_key = $1", [SOURCE_KEY]);
+    const previousId = previous.rows[0]?.active_import_id == null ? null : validId(previous.rows[0].active_import_id);
+
     const updated = await db.query(`
       INSERT INTO special_order_sources (source_key, active_import_id)
       VALUES ($1, $2)
@@ -206,7 +211,12 @@ export async function activateMercedesTxtRevision({
     }
     await db.query("COMMIT");
     transactionStarted = false;
+    // Activation is committed. A cleanup failure must never report the price list as failed.
+    let cleanupResult;
+    try { cleanupResult = await cleanup({ db, activeId: id, previousId }); }
+    catch { cleanupResult = { status: "PENDING", deletedBytes: 0 }; }
     return {
+      cleanup: cleanupResult,
       sourceKey: SOURCE_KEY,
       activeImportId: id,
       eligibleLines: aligned.eligible,

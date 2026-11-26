@@ -1,3 +1,4 @@
+import { txtAdminWorkflowEnabled } from "./SpecialOrderTxtAdminWorkflowService.js";
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +29,7 @@ const BACK_ROOT = fileURLToPath(
 function guardedProductionEnvironment(env = process.env) {
   return {
     ...env,
+    ...(txtAdminWorkflowEnabled(env) ? { MAKA_TXT_STAGE_MODE: "PRODUCTION_READY_ONLY", MAKA_TXT_ACTIVATION_ENABLED: "false" } : {}),
     DB_HOST:
       env.DB_HOST === "localhost"
         ? "127.0.0.1"
@@ -43,8 +45,8 @@ export function assertProductionTxtLaunchEnabled(
   );
 
   if (
-    env.MAKA_TXT_PRODUCTION_IMPORT_ENABLED !== "true" ||
-    env.MAKA_TXT_ACTIVATION_ENABLED !== "false" ||
+    (!txtAdminWorkflowEnabled(env) && (env.MAKA_TXT_PRODUCTION_IMPORT_ENABLED !== "true" ||
+      env.MAKA_TXT_ACTIVATION_ENABLED !== "false")) ||
     typeof env.DB_PASSWORD !== "string" ||
     env.DB_PASSWORD.length === 0
   ) {
@@ -54,7 +56,7 @@ export function assertProductionTxtLaunchEnabled(
   return true;
 }
 
-function workerEnvironment(env = process.env) {
+export function workerEnvironment(env = process.env) {
   assertProductionTxtLaunchEnabled(env);
 
   const childEnv = {

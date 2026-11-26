@@ -10,6 +10,7 @@ import {
 } from "../middleware/auth.middleware.js";
 
 import {
+  getMercedesTxtAdminWorkflow,
   listMercedesTxtAdminRevisions,
   activateMercedesTxtAdminRevision,
 } from "../controllers/admin-mercedes-txt.controller.js";
@@ -83,3 +84,5 @@ router.post(
   requireMercedesTxtActivationEnabled,
   activateMercedesTxtAdminRevision
 );
+
+router.get("/:supplierId/mercedes-txt/workflow", requireAuth, requireRole("ADMIN"), getMercedesTxtAdminWorkflow);

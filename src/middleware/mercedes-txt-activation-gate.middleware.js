@@ -1,3 +1,4 @@
+import { txtActivationEnabled } from "../services/SpecialOrderTxtAdminWorkflowService.js";
 /*
  * Mercedes TXT activation is disabled by default.
  *
@@ -13,7 +14,7 @@ export function requireMercedesTxtActivationEnabled(
   next
 ) {
   if (
-    process.env.MAKA_TXT_ACTIVATION_ENABLED !== "true"
+    !txtActivationEnabled()
   ) {
     return res.status(423).json({
       success: false,

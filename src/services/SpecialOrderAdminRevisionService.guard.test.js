@@ -28,6 +28,7 @@ function fakeDb({entries = 1543399, unique = 1543392, locked = true} = {}) {
     if (sql.includes("pg_try_advisory_xact_lock")) return {rows:[{locked}]};
     if (sql.includes("FROM special_order_import_runs")) return {rows:[row]};
     if (sql.includes("FROM special_order_entries")) return {rows:[{entries,unique_articles:unique}]};
+    if (sql.includes("SELECT active_import_id FROM special_order_sources")) return {rows:[]};
     if (sql.includes("INSERT INTO special_order_sources")) return {rows:[{active_import_id:1}]};
     throw new Error("Unexpected SQL in test: " + sql);
   }};
